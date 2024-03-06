@@ -1,0 +1,43 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "natsio"
+description = "NATS client for Python"
+requires-python = ">=3.9"
+license = "MIT"
+authors = [{ name = "Corrupt Mane", email = "corruptmane@gmail.com" }]
+maintainers = [{ name = "Corrupt Mane", email = "corruptmane@gmail.com" }]
+keywords = [
+    "nats",
+    "nats.io",
+    "nats-python",
+    "nats-client",
+    "asyncio",
+    "client",
+]
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Development Status :: 1 - Planning",
+    "Environment :: Console",
+    "Framework :: AsyncIO",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Information Technology",
+    "Intended Audience :: System Administrators",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Typing :: Typed",
+]
+dynamic = ["version"]
+
+[project.urls]
+Homepage = "https://github.com/corruptmane/natsio"
+Repository = "https://github.com/corruptmane/natsio"
+
+[tool.hatch.version]
+path = "natsio/__init__.py"
