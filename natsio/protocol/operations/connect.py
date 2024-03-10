@@ -32,5 +32,6 @@ class Connect(BaseProtocolClientMessage):
 
 
 __all__ = (
-    "CONNECT_OP", "Connect",
+    "CONNECT_OP",
+    "Connect",
 )

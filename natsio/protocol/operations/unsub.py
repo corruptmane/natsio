@@ -21,5 +21,6 @@ class Unsub(BaseProtocolClientMessage):
 
 
 __all__ = (
-    "UNSUB_OP", "Unsub",
+    "UNSUB_OP",
+    "Unsub",
 )

@@ -4,7 +4,6 @@ from typing import Optional
 from uuid import uuid4
 
 from natsio.connection.conn import NATSConnection
-from natsio.const import CRLF
 from natsio.protocol.operations.base import BaseProtocolServerMessage
 from natsio.protocol.operations.sub import Sub
 from natsio.protocol.operations.unsub import Unsub
@@ -19,7 +18,7 @@ class NATSCore:
         self._updates_queue: Optional[asyncio.Queue[BaseProtocolServerMessage]] = None
 
     async def _listen(self) -> None:
-        print('listening')
+        print("listening")
         if self._updates_queue is None:
             raise ValueError("Updates queue is not set")
         while True:
@@ -32,7 +31,7 @@ class NATSCore:
         self._conn = NATSConnection(host=host, port=port)
         self._updates_queue = await self._conn.connect()
         self._listener_task = asyncio.create_task(self._listen())
-        print('connected')
+        print("connected")
 
     async def subscribe(self, subject: str, queue: Optional[str] = None) -> str:
         if self._conn is None:

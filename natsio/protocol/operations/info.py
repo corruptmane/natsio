@@ -34,10 +34,11 @@ class Info(BaseProtocolServerMessage):
     domain: Optional[str] = None
 
     @classmethod
-    def from_bytes(cls, data: bytes) -> 'Info':
+    def from_bytes(cls, data: bytes) -> "Info":
         return cls()
 
 
 __all__ = (
-    "INFO_OP", "Info",
+    "INFO_OP",
+    "Info",
 )

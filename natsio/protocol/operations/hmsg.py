@@ -17,10 +17,11 @@ class HMsg(BaseProtocolServerMessage):
     payload: Optional[bytes] = None
 
     @classmethod
-    def from_bytes(cls, data: bytes) -> 'HMsg':
+    def from_bytes(cls, data: bytes) -> "HMsg":
         return cls()
 
 
 __all__ = (
-    "HMSG_OP", "HMsg",
+    "HMSG_OP",
+    "HMsg",
 )

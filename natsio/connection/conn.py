@@ -1,6 +1,5 @@
 import asyncio
 from typing import Optional
-from uuid import uuid4
 
 from natsio.protocol.connection.tcp import NATSTCPProtocol
 from natsio.protocol.operations.base import BaseProtocolClientMessage
@@ -19,8 +18,11 @@ class NATSConnection:
         protocol = NATSTCPProtocol(on_con_made=connection_done)
         self.transport, self.protocol = await asyncio.wait_for(
             loop.create_connection(
-                lambda: protocol, host=self.host, port=self.port,
-            ), timeout=timeout,
+                lambda: protocol,
+                host=self.host,
+                port=self.port,
+            ),
+            timeout=timeout,
         )
         await connection_done
         return protocol.updates_queue

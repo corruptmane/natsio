@@ -13,11 +13,11 @@ class BaseProtocolClientMessage(ABC):
 class BaseProtocolServerMessage(ABC):
     @classmethod
     @abstractmethod
-    def from_bytes(cls, data: bytes) -> 'BaseProtocolServerMessage':
+    def from_bytes(cls, data: bytes) -> "BaseProtocolServerMessage":
         pass
 
 
 __all__ = (
-    'BaseProtocolClientMessage',
-    'BaseProtocolServerMessage',
+    "BaseProtocolClientMessage",
+    "BaseProtocolServerMessage",
 )

@@ -21,5 +21,6 @@ class Sub(BaseProtocolClientMessage):
 
 
 __all__ = (
-    "SUB_OP", "Sub",
+    "SUB_OP",
+    "Sub",
 )

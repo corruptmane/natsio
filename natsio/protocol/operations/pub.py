@@ -14,10 +14,11 @@ class Pub(BaseProtocolClientMessage):
     payload: Optional[bytes] = None
 
     def build(self) -> bytes:
-        msg = f"PUB {{}}\r\n"
+        msg = "PUB {}\r\n"
         return msg.encode()
 
 
 __all__ = (
-    "PUB_OP", "Pub",
+    "PUB_OP",
+    "Pub",
 )

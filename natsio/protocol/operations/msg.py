@@ -15,10 +15,11 @@ class Msg(BaseProtocolServerMessage):
     payload: Optional[bytes] = None
 
     @classmethod
-    def from_bytes(cls, data: bytes) -> 'Msg':
+    def from_bytes(cls, data: bytes) -> "Msg":
         return cls()
 
 
 __all__ = (
-    "MSG_OP", "Msg",
+    "MSG_OP",
+    "Msg",
 )

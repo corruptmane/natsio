@@ -16,10 +16,11 @@ class HPub(BaseProtocolClientMessage):
     payload: Optional[bytes] = None
 
     def build(self) -> bytes:
-        msg = f"HPUB {{}}\r\n"
+        msg = "HPUB {}\r\n"
         return msg.encode()
 
 
 __all__ = (
-    "HPUB_OP", "HPub",
+    "HPUB_OP",
+    "HPub",
 )
