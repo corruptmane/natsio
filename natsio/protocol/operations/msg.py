@@ -1,24 +1,24 @@
 from dataclasses import dataclass
-from typing import Optional
+from typing import Final, Optional
 
 from .base import BaseProtocolServerMessage
 
+MSG_OP: Final[bytes] = b"MSG"
 
-@dataclass(slots=True)
-class HMsg(BaseProtocolServerMessage):
+
+@dataclass
+class Msg(BaseProtocolServerMessage):
     subject: str
     sid: str
-    headers_size: int
-    total_size: int
+    payload_size: int
     reply_to: Optional[str] = None
-    headers: Optional[bytes] = None
     payload: Optional[bytes] = None
 
     @classmethod
-    def from_bytes(cls, data: bytes) -> 'HMsg':
+    def from_bytes(cls, data: bytes) -> 'Msg':
         return cls()
 
 
 __all__ = (
-    "HMsg",
+    "MSG_OP", "Msg",
 )

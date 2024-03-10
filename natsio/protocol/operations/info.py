@@ -1,10 +1,12 @@
 from dataclasses import dataclass
-from typing import Optional
+from typing import Final, Optional
 
 from .base import BaseProtocolServerMessage
 
+INFO_OP: Final[bytes] = b"INFO"
 
-@dataclass(slots=True)
+
+@dataclass
 class Info(BaseProtocolServerMessage):
     server_id: str
     server_name: str
@@ -37,5 +39,5 @@ class Info(BaseProtocolServerMessage):
 
 
 __all__ = (
-    "Info",
+    "INFO_OP", "Info",
 )

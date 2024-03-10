@@ -1,10 +1,12 @@
 from dataclasses import dataclass
-from typing import Optional
+from typing import Final, Optional
 
 from .base import BaseProtocolClientMessage
 
+CONNECT_OP: Final[bytes] = b"CONNECT"
 
-@dataclass(slots=True)
+
+@dataclass
 class Connect(BaseProtocolClientMessage):
     verbose: bool
     pedantic: bool
@@ -24,10 +26,11 @@ class Connect(BaseProtocolClientMessage):
     nkey: Optional[str] = None
 
     def build(self) -> bytes:
-        msg = f"CONNECT {{}}\r\n"
-        return msg.encode()
+        # TODO
+        msg = b"CONNECT {}\r\n"
+        return msg
 
 
 __all__ = (
-    "Connect",
+    "CONNECT_OP", "Connect",
 )

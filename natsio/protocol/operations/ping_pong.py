@@ -1,8 +1,12 @@
 from dataclasses import dataclass
+from typing import Final
 from .base import BaseProtocolClientMessage, BaseProtocolServerMessage
 
+PING_OP: Final[bytes] = b"PING"
+PONG_OP: Final[bytes] = b"PONG"
 
-@dataclass(slots=True)
+
+@dataclass
 class Ping(BaseProtocolClientMessage, BaseProtocolServerMessage):
     @classmethod
     def from_bytes(cls, data: bytes) -> 'Ping':
@@ -12,7 +16,7 @@ class Ping(BaseProtocolClientMessage, BaseProtocolServerMessage):
         return 'PING\r\n'.encode()
 
 
-@dataclass(slots=True)
+@dataclass
 class Pong(BaseProtocolClientMessage, BaseProtocolServerMessage):
     @classmethod
     def from_bytes(cls, data: bytes) -> 'Pong':
@@ -23,5 +27,6 @@ class Pong(BaseProtocolClientMessage, BaseProtocolServerMessage):
 
 
 __all__ = (
-    "Ping", "Pong",
+    "PING_OP", "Ping",
+    "PONG_OP", "Pong",
 )

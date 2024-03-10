@@ -1,10 +1,12 @@
 from dataclasses import dataclass
-from typing import Optional
+from typing import Final, Optional
 
 from .base import BaseProtocolClientMessage
 
+PUB_OP: Final[bytes] = b"PUB"
 
-@dataclass(slots=True)
+
+@dataclass
 class Pub(BaseProtocolClientMessage):
     subject: str
     # payload_size: int
@@ -17,5 +19,5 @@ class Pub(BaseProtocolClientMessage):
 
 
 __all__ = (
-    "Pub",
+    "PUB_OP", "Pub",
 )

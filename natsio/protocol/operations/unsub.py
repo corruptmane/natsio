@@ -1,10 +1,14 @@
 from dataclasses import dataclass
-from typing import Optional
+from typing import Final, Optional
+
+from natsio.const import CRLF
 
 from .base import BaseProtocolClientMessage
 
+UNSUB_OP: Final[bytes] = b"UNSUB"
 
-@dataclass(slots=True)
+
+@dataclass
 class Unsub(BaseProtocolClientMessage):
     sid: str
     max_msgs: Optional[int] = None
@@ -13,10 +17,9 @@ class Unsub(BaseProtocolClientMessage):
         msg = f"SUB {self.sid}"
         if self.max_msgs:
             msg += f" {self.max_msgs}"
-        msg += f"\r\n"
-        return msg.encode()
+        return msg.encode() + CRLF
 
 
 __all__ = (
-    "Unsub",
+    "UNSUB_OP", "Unsub",
 )

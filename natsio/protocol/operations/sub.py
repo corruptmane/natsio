@@ -1,10 +1,12 @@
 from dataclasses import dataclass
-from typing import Optional
+from typing import Final, Optional
 
 from .base import BaseProtocolClientMessage
 
+SUB_OP: Final[bytes] = b"SUB"
 
-@dataclass(slots=True)
+
+@dataclass
 class Sub(BaseProtocolClientMessage):
     subject: str
     sid: str
@@ -19,5 +21,5 @@ class Sub(BaseProtocolClientMessage):
 
 
 __all__ = (
-    "Sub",
+    "SUB_OP", "Sub",
 )

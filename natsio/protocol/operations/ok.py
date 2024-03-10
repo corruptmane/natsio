@@ -1,15 +1,18 @@
 from dataclasses import dataclass
+from typing import Final
 
 from .base import BaseProtocolServerMessage
 
+OK_OP: Final[bytes] = b"+OK"
 
-@dataclass(slots=True)
-class Ok(BaseProtocolServerMessage)
+
+@dataclass
+class Ok(BaseProtocolServerMessage):
     @classmethod
     def from_bytes(cls, data: bytes) -> 'Ok':
         return cls()
 
 
 __all__ = (
-    "Ok",
+    "OK_OP", "Ok",
 )
