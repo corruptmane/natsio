@@ -1,0 +1,2 @@
+class NATSError(Exception):
+    pass
