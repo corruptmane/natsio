@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Final, Optional
+from typing import Final, Mapping, Optional
 
 from .base import BaseProtocolServerMessage
 
@@ -13,12 +13,8 @@ class HMsg(BaseProtocolServerMessage):
     headers_size: int
     total_size: int
     reply_to: Optional[str] = None
-    headers: Optional[bytes] = None
+    headers: Optional[Mapping[str, str]] = None
     payload: Optional[bytes] = None
-
-    @classmethod
-    def from_bytes(cls, data: bytes) -> "HMsg":
-        return cls()
 
 
 __all__ = (

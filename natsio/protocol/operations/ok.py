@@ -8,9 +8,7 @@ OK_OP: Final[bytes] = b"+OK"
 
 @dataclass
 class Ok(BaseProtocolServerMessage):
-    @classmethod
-    def from_bytes(cls, data: bytes) -> "Ok":
-        return cls()
+    pass
 
 
 __all__ = (

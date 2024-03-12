@@ -5,7 +5,7 @@ from .hpub import HPUB_OP, HPub
 from .info import INFO_OP, Info
 from .msg import MSG_OP, Msg
 from .ok import OK_OP, Ok
-from .ping_pong import PING_OP, PONG_OP, Ping, Pong
+from .ping_pong import PING, PING_OP, PONG, PONG_OP, Ping, Pong
 from .pub import PUB_OP, Pub
 from .sub import SUB_OP, Sub
 from .unsub import UNSUB_OP, Unsub
@@ -35,4 +35,6 @@ __all__ = (
     "Pub",
     "Sub",
     "Unsub",
+    "PING",
+    "PONG",
 )

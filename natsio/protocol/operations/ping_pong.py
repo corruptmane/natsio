@@ -11,22 +11,18 @@ PONG_OP: Final[bytes] = b"PONG"
 
 @dataclass
 class Ping(BaseProtocolClientMessage, BaseProtocolServerMessage):
-    @classmethod
-    def from_bytes(cls, data: bytes) -> "Ping":
-        return cls()
-
     def build(self) -> bytes:
         return PING_OP + CRLF
 
 
 @dataclass
 class Pong(BaseProtocolClientMessage, BaseProtocolServerMessage):
-    @classmethod
-    def from_bytes(cls, data: bytes) -> "Pong":
-        return cls()
-
     def build(self) -> bytes:
         return PONG_OP + CRLF
+
+
+PING = Ping().build()
+PONG = Pong().build()
 
 
 __all__ = (
@@ -34,4 +30,6 @@ __all__ = (
     "PONG_OP",
     "Ping",
     "Pong",
+    "PING",
+    "PONG",
 )

@@ -14,10 +14,6 @@ class Msg(BaseProtocolServerMessage):
     reply_to: Optional[str] = None
     payload: Optional[bytes] = None
 
-    @classmethod
-    def from_bytes(cls, data: bytes) -> "Msg":
-        return cls()
-
 
 __all__ = (
     "MSG_OP",

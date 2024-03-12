@@ -33,10 +33,6 @@ class Info(BaseProtocolServerMessage):
     cluster: Optional[str] = None
     domain: Optional[str] = None
 
-    @classmethod
-    def from_bytes(cls, data: bytes) -> "Info":
-        return cls()
-
 
 __all__ = (
     "INFO_OP",
