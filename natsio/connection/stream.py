@@ -1,11 +1,12 @@
 import asyncio
 
+from natsio.abc.connection import StreamProto
 from natsio.exceptions.stream import EndOfStream
 
 from .protocol import StreamProtocol
 
 
-class Stream:
+class Stream(StreamProto):
     def __init__(self, transport: asyncio.Transport, protocol: StreamProtocol) -> None:
         self._transport = transport
         self._protocol = protocol
