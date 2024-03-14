@@ -1,13 +1,13 @@
 from dataclasses import dataclass
 from typing import Final
 
-from .base import BaseProtocolServerMessage
+from natsio.abc.protocol import ServerMessageProto
 
 ERR_OP: Final[bytes] = b"-ERR"
 
 
 @dataclass
-class Err(BaseProtocolServerMessage):
+class Err(ServerMessageProto):
     message: str
 
 

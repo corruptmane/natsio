@@ -1,13 +1,13 @@
 from dataclasses import dataclass
 from typing import Final, Mapping, Optional
 
-from .base import BaseProtocolServerMessage
+from natsio.abc.protocol import ServerMessageProto
 
 HMSG_OP: Final[bytes] = b"HMSG"
 
 
 @dataclass
-class HMsg(BaseProtocolServerMessage):
+class HMsg(ServerMessageProto):
     subject: str
     sid: str
     headers_size: int

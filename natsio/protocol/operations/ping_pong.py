@@ -1,22 +1,21 @@
 from dataclasses import dataclass
 from typing import Final
 
+from natsio.abc.protocol import ClientMessageProto, ServerMessageProto
 from natsio.const import CRLF
-
-from .base import BaseProtocolClientMessage, BaseProtocolServerMessage
 
 PING_OP: Final[bytes] = b"PING"
 PONG_OP: Final[bytes] = b"PONG"
 
 
 @dataclass
-class Ping(BaseProtocolClientMessage, BaseProtocolServerMessage):
+class Ping(ClientMessageProto, ServerMessageProto):
     def build(self) -> bytes:
         return PING_OP + CRLF
 
 
 @dataclass
-class Pong(BaseProtocolClientMessage, BaseProtocolServerMessage):
+class Pong(ClientMessageProto, ServerMessageProto):
     def build(self) -> bytes:
         return PONG_OP + CRLF
 

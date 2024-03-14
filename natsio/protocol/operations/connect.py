@@ -1,16 +1,15 @@
 from dataclasses import dataclass
 from typing import Final, Optional, Union
 
+from natsio.abc.protocol import ClientMessageProto
 from natsio.const import CRLF
 from natsio.utils.json import json_dumps
-
-from .base import BaseProtocolClientMessage
 
 CONNECT_OP: Final[bytes] = b"CONNECT"
 
 
 @dataclass
-class Connect(BaseProtocolClientMessage):
+class Connect(ClientMessageProto):
     verbose: bool
     pedantic: bool
     tls_required: bool

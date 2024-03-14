@@ -1,15 +1,14 @@
 from dataclasses import dataclass
 from typing import Final, Optional
 
+from natsio.abc.protocol import ClientMessageProto
 from natsio.const import CRLF
-
-from .base import BaseProtocolClientMessage
 
 UNSUB_OP: Final[bytes] = b"UNSUB"
 
 
 @dataclass
-class Unsub(BaseProtocolClientMessage):
+class Unsub(ClientMessageProto):
     sid: str
     max_msgs: Optional[int] = None
 

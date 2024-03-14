@@ -1,13 +1,13 @@
 from dataclasses import dataclass
 from typing import Final, Optional
 
-from .base import BaseProtocolServerMessage
+from natsio.abc.protocol import ServerMessageProto
 
 MSG_OP: Final[bytes] = b"MSG"
 
 
 @dataclass
-class Msg(BaseProtocolServerMessage):
+class Msg(ServerMessageProto):
     subject: str
     sid: str
     payload_size: int

@@ -1,15 +1,14 @@
 from dataclasses import dataclass
 from typing import Final, Optional
 
+from natsio.abc.protocol import ClientMessageProto
 from natsio.const import CRLF
-
-from .base import BaseProtocolClientMessage
 
 PUB_OP: Final[bytes] = b"PUB"
 
 
 @dataclass
-class Pub(BaseProtocolClientMessage):
+class Pub(ClientMessageProto):
     subject: str
     payload_size: int
     reply_to: Optional[str] = None

@@ -1,13 +1,13 @@
 from dataclasses import dataclass
 from typing import Final, Optional
 
-from .base import BaseProtocolServerMessage
+from natsio.abc.protocol import ServerMessageProto
 
 INFO_OP: Final[bytes] = b"INFO"
 
 
 @dataclass
-class Info(BaseProtocolServerMessage):
+class Info(ServerMessageProto):
     server_id: str
     server_name: str
     version: str

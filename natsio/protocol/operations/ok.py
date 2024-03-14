@@ -1,13 +1,13 @@
 from dataclasses import dataclass
 from typing import Final
 
-from .base import BaseProtocolServerMessage
+from natsio.abc.protocol import ServerMessageProto
 
 OK_OP: Final[bytes] = b"+OK"
 
 
 @dataclass
-class Ok(BaseProtocolServerMessage):
+class Ok(ServerMessageProto):
     pass
 
 

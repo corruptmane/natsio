@@ -1,15 +1,14 @@
 from dataclasses import dataclass
 from typing import Final, Optional
 
+from natsio.abc.protocol import ClientMessageProto
 from natsio.const import CRLF
-
-from .base import BaseProtocolClientMessage
 
 SUB_OP: Final[bytes] = b"SUB"
 
 
 @dataclass
-class Sub(BaseProtocolClientMessage):
+class Sub(ClientMessageProto):
     subject: str
     sid: str
     queue: Optional[str] = None

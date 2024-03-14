@@ -1,15 +1,14 @@
 from dataclasses import dataclass
 from typing import Final, Optional
 
+from natsio.abc.protocol import ClientMessageProto
 from natsio.const import CRLF
-
-from .base import BaseProtocolClientMessage
 
 HPUB_OP: Final[bytes] = b"HPUB"
 
 
 @dataclass
-class HPub(BaseProtocolClientMessage):
+class HPub(ClientMessageProto):
     subject: str
     total_size: int
     headers_size: int
