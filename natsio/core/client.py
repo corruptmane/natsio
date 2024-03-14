@@ -2,69 +2,44 @@ import asyncio
 from typing import Optional, Tuple, cast
 from uuid import uuid4
 
-from natsio.connection.listener import NATSListener
+from natsio.abc.connection import ConnectionProto, StreamProto
+from natsio.abc.protocol import ClientMessageProto
 from natsio.connection.protocol import StreamProtocol
 from natsio.connection.stream import Stream
+from natsio.connection.tcp import TCPConnection
 from natsio.protocol.operations.ping_pong import PING
 from natsio.protocol.operations.sub import Sub
+from natsio.protocol.operations.unsub import Unsub
 from natsio.protocol.parser import ProtocolParser
 
 
 class NATSCore:
-    def __init__(self, host: str, port: int, timeout: float = 5) -> None:
-        self.timeout = timeout
+    def __init__(self, host: str = "localhost", port: int = 4222, connection_timeout: float = 5) -> None:
+        self.connection_timeout = connection_timeout
         self._host = host
         self._port = port
-        self._listener: Optional[NATSListener] = None
-        self._listener_task: Optional[asyncio.Task[None]] = None
-        self._ping_task: Optional[asyncio.Task[None]] = None
-        self._current_stream: Optional[Stream] = None
-
-    async def _ping_loop(self) -> None:
-        while True:
-            if (
-                self._current_stream is not None
-                and not self._current_stream.is_closed
-                and self._listener is not None
-            ):
-                await self._current_stream.write(PING)
-                self._listener.outstanding_pings += 1
-            await asyncio.sleep(10)
+        self._connection: Optional[ConnectionProto] = None
 
     async def _connect(self) -> None:
-        loop = asyncio.get_running_loop()
-        transport, protocol = cast(
-            Tuple[asyncio.Transport, StreamProtocol],
-            await asyncio.wait_for(
-                loop.create_connection(
-                    StreamProtocol,
-                    self._host,
-                    self._port,
-                ),
-                timeout=self.timeout,
-            ),
-        )
-        transport.pause_reading()
-        self._current_stream = Stream(transport, protocol)
-        on_con_made = loop.create_future()
-        self._listener = NATSListener(
-            self._current_stream, ProtocolParser(), on_con_made
-        )
-        self._listener_task = loop.create_task(self._listener.listen())
-        await on_con_made
-        self._ping_task = loop.create_task(self._ping_loop())
+        self._connection = await TCPConnection.connect(self._host, self._port, self.connection_timeout)
 
     async def connect(self) -> None:
         await self._connect()
 
     async def close(self) -> None:
-        if self._listener_task is not None and not self._listener_task.cancelled():
-            self._listener_task.cancel()
-        if self._current_stream is not None and not self._current_stream.is_closed:
-            await self._current_stream.close()
+        if self._connection is not None and not self._connection.is_closed:
+            await self._connection.close()
 
-    async def subscribe(self, subject: str) -> None:
-        if self._current_stream is None:
-            raise ValueError("Connection is not established")  # TODO
+    async def flush(self) -> None:
+        if self._connection is None:
+            raise ValueError("Connection is not established")
+        await self._connection.flush()
+
+    async def _send_command(self, cmd: ClientMessageProto) -> None:
+        if self._connection is None:
+            raise ValueError("Connection is not established")
+        await self._connection.send_command(cmd)
+
+    async def subscribe(self, subject: str, queue: Optional[str] = None) -> None:
         sid = str(uuid4())
-        await self._current_stream.write(Sub(sid=sid, subject=subject).build())
+        await self._send_command(Sub(sid=sid, subject=subject, queue=queue))
