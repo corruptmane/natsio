@@ -1,27 +1,25 @@
-import asyncio
-from typing import Optional, Tuple, cast
+from typing import Optional
 from uuid import uuid4
 
-from natsio.abc.connection import ConnectionProto, StreamProto
+from natsio.abc.connection import ConnectionProto
 from natsio.abc.protocol import ClientMessageProto
-from natsio.connection.protocol import StreamProtocol
-from natsio.connection.stream import Stream
 from natsio.connection.tcp import TCPConnection
-from natsio.protocol.operations.ping_pong import PING
 from natsio.protocol.operations.sub import Sub
-from natsio.protocol.operations.unsub import Unsub
-from natsio.protocol.parser import ProtocolParser
 
 
 class NATSCore:
-    def __init__(self, host: str = "localhost", port: int = 4222, connection_timeout: float = 5) -> None:
+    def __init__(
+        self, host: str = "localhost", port: int = 4222, connection_timeout: float = 5
+    ) -> None:
         self.connection_timeout = connection_timeout
         self._host = host
         self._port = port
         self._connection: Optional[ConnectionProto] = None
 
     async def _connect(self) -> None:
-        self._connection = await TCPConnection.connect(self._host, self._port, self.connection_timeout)
+        self._connection = await TCPConnection.connect(
+            self._host, self._port, self.connection_timeout
+        )
 
     async def connect(self) -> None:
         await self._connect()

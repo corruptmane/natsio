@@ -152,8 +152,10 @@ class TCPConnection(ConnectionProto):
         except asyncio.CancelledError:
             pass
 
-    async def send_command(self, cmd: ClientMessageProto, force_flush: bool = False) -> None:
-        fut = asyncio.Future()
+    async def send_command(
+        self, cmd: ClientMessageProto, force_flush: bool = False
+    ) -> None:
+        fut: asyncio.Future[None] = asyncio.Future()
         self._pending.append(cmd.build())
         await self._flush_queue.put(fut)
         if force_flush:

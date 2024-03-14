@@ -37,10 +37,14 @@ class ConnectionProto(Protocol):
         raise NotImplementedError
 
     @classmethod
-    async def connect(cls, host: str, port: int, timeout: float = 5) -> "ConnectionProto":
+    async def connect(
+        cls, host: str, port: int, timeout: float = 5
+    ) -> "ConnectionProto":
         raise NotImplementedError
 
-    async def send_command(self, cmd: ClientMessageProto, force_flush: bool = False) -> None:
+    async def send_command(
+        self, cmd: ClientMessageProto, force_flush: bool = False
+    ) -> None:
         raise NotImplementedError
 
     async def flush(self) -> None:
