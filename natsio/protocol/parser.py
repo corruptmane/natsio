@@ -1,14 +1,14 @@
 import re
 from typing import Mapping, Optional
 
-from natsio.connection.stream import Stream
+from natsio.abc.connection import StreamProto
 from natsio.const import CRLF, CRLF_SIZE
 from natsio.protocol.operations.hmsg import HMsg
 from natsio.protocol.operations.msg import Msg
 
 
 class ProtocolParser:
-    async def parse_msg(self, data: bytes, stream: Stream) -> Msg:
+    async def parse_msg(self, data: bytes, stream: StreamProto) -> Msg:
         fields = re.split(b"\s+", data, maxsplit=3)
 
         if len(fields) == 4:
@@ -42,7 +42,7 @@ class ProtocolParser:
             headers[key.decode()] = value.strip().decode()
         return headers
 
-    async def parse_hmsg(self, data: bytes, stream: Stream) -> HMsg:
+    async def parse_hmsg(self, data: bytes, stream: StreamProto) -> HMsg:
         fields = re.split(b"\s+", data, maxsplit=4)
 
         if len(fields) == 5:
