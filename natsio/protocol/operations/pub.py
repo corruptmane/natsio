@@ -10,16 +10,19 @@ PUB_OP: Final[bytes] = b"PUB"
 @dataclass
 class Pub(ClientMessageProto):
     subject: str
-    payload_size: int
     reply_to: Optional[str] = None
     payload: Optional[bytes] = None
 
     def _build_payload(self) -> bytes:
-        # TODO
-        return b""
+        payload = self.subject.encode()
+        if self.reply_to:
+            payload += b" " + self.reply_to.encode()
+        payload_size = 0 if not self.payload else len(self.payload)
+        payload += b" " + str(payload_size).encode() + CRLF
+        payload += self.payload if self.payload else b""
+        return payload
 
     def build(self) -> bytes:
-        # TODO
         return PUB_OP + b" " + self._build_payload() + CRLF
 
 
