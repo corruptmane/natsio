@@ -1,0 +1,10 @@
+from enum import Enum
+
+
+class ConnectionStatus(Enum):
+    DISCONNECTED = "DISCONNECTED"
+    CONNECTED = "CONNECTED"
+    CLOSED = "CLOSED"
+    RECONNECTING = "RECONNECTING"
+    CONNECTING = "CONNECTING"
+    DRAINING = "DRAINING"
