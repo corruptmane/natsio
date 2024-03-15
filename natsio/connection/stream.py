@@ -88,7 +88,7 @@ class Stream(StreamProto):
 
     async def write(self, data: bytes) -> None:
         async with self._write_lock:
-            log.debug("Writing %d bytes", len(data))
+            log.debug("Writing %d bytes: %a", len(data), data)
             if self.is_closed:
                 raise ConnectionError("Connection is closed")
             if self._protocol.exception:
@@ -115,6 +115,7 @@ class Stream(StreamProto):
             return
 
         self._is_closed = True
+        log.debug("Sending EOF to NATS")
         await self.send_eof()
 
         self._transport.close()

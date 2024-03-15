@@ -29,7 +29,7 @@ class StreamProtocol(asyncio.Protocol):
         self.write_event.set()
 
     def data_received(self, data: bytes) -> None:
-        log.debug("Received %d bytes", len(data))
+        log.debug("Received %d bytes: %a", len(data), data)
         self.read_queue.append(data)
         self.read_event.set()
 
