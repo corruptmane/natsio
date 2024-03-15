@@ -1,14 +1,13 @@
 import asyncio
-import logging
 from typing import Optional, Tuple, cast
 
 from natsio.abc.connection import ConnectionProto, StreamProto
 from natsio.abc.dispatcher import DispatcherProto
 from natsio.abc.protocol import ClientMessageProto
 from natsio.const import CRLF
+from natsio.exceptions.connection import TimeoutError
 from natsio.exceptions.protocol import UnknownProtocol
 from natsio.exceptions.stream import EndOfStream
-from natsio.exceptions.connection import TimeoutError
 from natsio.protocol.operations.connect import Connect
 from natsio.protocol.operations.err import ERR_OP
 from natsio.protocol.operations.hmsg import HMSG_OP
@@ -20,8 +19,8 @@ from natsio.protocol.parser import ProtocolParser
 from natsio.utils.logger import connection_logger as log
 
 from .protocol import StreamProtocol
-from .stream import Stream
 from .status import ConnectionStatus
+from .stream import Stream
 
 
 class TCPConnection(ConnectionProto):
@@ -76,7 +75,9 @@ class TCPConnection(ConnectionProto):
         return self.status == ConnectionStatus.DRAINING
 
     @classmethod
-    async def connect(cls, host: str, port: int, dispatcher: DispatcherProto, timeout: float = 5) -> "TCPConnection":
+    async def connect(
+        cls, host: str, port: int, dispatcher: DispatcherProto, timeout: float = 5
+    ) -> "TCPConnection":
         loop = asyncio.get_running_loop()
         transport, protocol = cast(
             Tuple[asyncio.Transport, StreamProtocol],
@@ -90,7 +91,11 @@ class TCPConnection(ConnectionProto):
             ),
         )
         transport.pause_reading()
-        self = cls(stream=Stream(transport, protocol), dispatcher=dispatcher, status=ConnectionStatus.CONNECTING)
+        self = cls(
+            stream=Stream(transport, protocol),
+            dispatcher=dispatcher,
+            status=ConnectionStatus.CONNECTING,
+        )
         await self._setup_loops(loop)
         return self
 
@@ -152,7 +157,11 @@ class TCPConnection(ConnectionProto):
 
     async def _flusher_loop(self, is_last_run: bool = False) -> None:
         while True:
-            if is_last_run and self._flush_queue is not None and self._flush_queue.empty():
+            if (
+                is_last_run
+                and self._flush_queue is not None
+                and self._flush_queue.empty()
+            ):
                 break
 
             if not (self.is_connected or self.is_draining) or self.is_connecting:

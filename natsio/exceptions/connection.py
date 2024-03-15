@@ -1,4 +1,5 @@
 import asyncio
+
 from .base import NATSError
 
 

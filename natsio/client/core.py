@@ -1,6 +1,5 @@
 import asyncio
-from typing import Mapping, MutableMapping, Optional
-from uuid import uuid4
+from typing import Mapping, Optional
 
 from natsio.abc.connection import ConnectionProto
 from natsio.abc.protocol import ClientMessageProto
@@ -12,9 +11,14 @@ from natsio.protocol.operations.hpub import HPub
 from natsio.protocol.operations.pub import Pub
 from natsio.protocol.operations.sub import Sub
 from natsio.protocol.operations.unsub import Unsub
-from natsio.subscriptions.core import DEFAULT_SUB_PENDING_BYTES_LIMIT, DEFAULT_SUB_PENDING_MSGS_LIMIT, CoreCallback, Subscription
-from natsio.utils.uuid import get_uuid
+from natsio.subscriptions.core import (
+    DEFAULT_SUB_PENDING_BYTES_LIMIT,
+    DEFAULT_SUB_PENDING_MSGS_LIMIT,
+    CoreCallback,
+    Subscription,
+)
 from natsio.utils.logger import client_logger as log
+from natsio.utils.uuid import get_uuid
 
 
 class NATSCore:
@@ -73,9 +77,13 @@ class NATSCore:
         headers: Optional[Mapping[str, str]] = None,
     ) -> None:
         if not headers:
-            await self._send_command(Pub(subject=subject, payload=data, reply_to=reply_to))
+            await self._send_command(
+                Pub(subject=subject, payload=data, reply_to=reply_to)
+            )
         else:
-            await self._send_command(HPub(subject=subject, payload=data, reply_to=reply_to, headers=headers))
+            await self._send_command(
+                HPub(subject=subject, payload=data, reply_to=reply_to, headers=headers)
+            )
 
     async def subscribe(
         self,

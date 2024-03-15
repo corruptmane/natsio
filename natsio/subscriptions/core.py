@@ -1,9 +1,9 @@
 import asyncio
-import logging
 from typing import TYPE_CHECKING, Awaitable, Callable, Optional
+
 from natsio.messages.core import CoreMsg
-from natsio.utils.uuid import get_uuid
 from natsio.utils.logger import subscription_logger as log
+from natsio.utils.uuid import get_uuid
 
 if TYPE_CHECKING:
     from natsio.client.core import NATSCore
@@ -32,7 +32,9 @@ class Subscription:
         self.sid = sid
 
         self._client = client
-        self._msg_queue: asyncio.Queue[CoreMsg] = asyncio.Queue(maxsize=pending_msgs_limit)
+        self._msg_queue: asyncio.Queue[CoreMsg] = asyncio.Queue(
+            maxsize=pending_msgs_limit
+        )
         self._callback = callback
         self._pending_msgs_limit = pending_msgs_limit
         self._pending_bytes_limit = pending_bytes_limit
