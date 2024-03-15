@@ -62,9 +62,9 @@ class MessageDispatcher(DispatcherProto):
         await sub.add_msg(core_msg)
 
     async def close(self) -> None:
-        for sub in self._subscriptions.values():
+        for sub in dict(self._subscriptions).values():
             await sub.unsubscribe()
-        for fut in self._inboxes.values():
+        for fut in dict(self._inboxes).values():
             if not fut.done() or not fut.cancelled():
                 fut.cancel()
         self._subscriptions.clear()
