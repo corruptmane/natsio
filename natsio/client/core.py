@@ -18,7 +18,6 @@ from natsio.subscriptions.core import (
     CoreCallback,
     Subscription,
 )
-from natsio.utils.logger import client_logger as log
 from natsio.utils.uuid import get_uuid
 
 

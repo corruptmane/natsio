@@ -1,8 +1,15 @@
 import asyncio
-from typing import TYPE_CHECKING, AsyncIterator, Awaitable, Callable, MutableMapping, Optional
+from typing import (
+    TYPE_CHECKING,
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    MutableMapping,
+    Optional,
+)
 
-from natsio.messages.core import CoreMsg
 from natsio.exceptions.connection import TimeoutError
+from natsio.messages.core import CoreMsg
 from natsio.utils.logger import subscription_logger as log
 from natsio.utils.uuid import get_uuid
 
@@ -55,9 +62,7 @@ class Subscription:
 
         task_id = get_uuid()
         try:
-            fut = asyncio.create_task(
-                asyncio.wait_for(self._msg_queue.get(), timeout)
-            )
+            fut = asyncio.create_task(asyncio.wait_for(self._msg_queue.get(), timeout))
             self._pending_next_msg_calls[task_id] = fut
             msg = await fut
         except asyncio.TimeoutError:
