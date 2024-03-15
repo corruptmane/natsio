@@ -1,5 +1,6 @@
 import asyncio
-from typing import Mapping, Optional
+from types import TracebackType
+from typing import Mapping, Optional, Type
 
 from natsio.abc.connection import ConnectionProto
 from natsio.abc.protocol import ClientMessageProto
@@ -41,6 +42,30 @@ class NATSCore:
     def is_closed(self) -> bool:
         return self.status == ConnectionStatus.CLOSED
 
+    @property
+    def is_connected(self) -> bool:
+        return self.status == ConnectionStatus.CONNECTED
+
+    @property
+    def is_connecting(self) -> bool:
+        return self.status == ConnectionStatus.CONNECTING
+
+    @property
+    def is_reconnecting(self) -> bool:
+        return self.status == ConnectionStatus.RECONNECTING
+
+    @property
+    def is_disconnected(self) -> bool:
+        return self.status == ConnectionStatus.DISCONNECTED
+
+    @property
+    def is_draining(self) -> bool:
+        return self.status == ConnectionStatus.DRAINING
+
+    def _raise_if_closed(self) -> None:
+        if self.is_closed:
+            raise ValueError("Connection is closed")
+
     async def _connect(self) -> None:
         self._connection = await TCPConnection.connect(
             self._host, self._port, self._dispatcher, self.connection_timeout
@@ -51,12 +76,6 @@ class NATSCore:
 
     async def close(self, timeout: float = 5) -> None:
         if self._connection is not None and not self._connection.is_closed:
-            log.info("Flushing the connection")
-            try:
-                await self._connection.flush()
-            except asyncio.TimeoutError:
-                log.warning("Flush timed out")
-            log.info("Closing the connection")
             await self._connection.close()
 
     async def flush(self) -> None:
@@ -76,6 +95,7 @@ class NATSCore:
         reply_to: Optional[str] = None,
         headers: Optional[Mapping[str, str]] = None,
     ) -> None:
+        self._raise_if_closed()
         if not headers:
             await self._send_command(
                 Pub(subject=subject, payload=data, reply_to=reply_to)
@@ -93,6 +113,7 @@ class NATSCore:
         pending_msgs_limit: int = DEFAULT_SUB_PENDING_MSGS_LIMIT,
         pending_bytes_limit: int = DEFAULT_SUB_PENDING_BYTES_LIMIT,
     ) -> Subscription:
+        self._raise_if_closed()
         sub = Subscription(self, subject, queue, callback=callback)
         await self._send_command(Sub(sid=sub.sid, subject=subject, queue=queue))
         self._dispatcher.add_subscription(sub)
@@ -110,6 +131,7 @@ class NATSCore:
         headers: Optional[Mapping[str, str]] = None,
         timeout: float = 1,
     ) -> CoreMsg:
+        self._raise_if_closed()
         sid = get_uuid()
         inbox_id = get_uuid()
         reply_to = f"_REQ_INBOX.{inbox_id}"
@@ -127,3 +149,15 @@ class NATSCore:
         finally:
             await self._send_command(Unsub(sid=sid))
             self._dispatcher.remove_request_inbox(inbox_id)
+
+    async def __aenter__(self) -> "NATSCore":
+        await self.connect()
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: Optional[Type[BaseException]],
+        exc_val: Optional[BaseException],
+        exc_tb: Optional[TracebackType],
+    ) -> None:
+        await self.close()
