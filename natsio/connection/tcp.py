@@ -176,6 +176,8 @@ class TCPConnection(ConnectionProto):
                 if len(self._pending) > 0:
                     await self._stream.write(b"".join(self._pending[:]))
                     self._pending = []
+            except asyncio.CancelledError:
+                break
             except Exception as exc:
                 # TODO: handle errors
                 log.exception(exc)
@@ -187,7 +189,7 @@ class TCPConnection(ConnectionProto):
         try:
             await self._flusher_loop(is_last_run)
         except asyncio.CancelledError:
-            await self._flusher_loop(True)
+            pass
 
     async def _ping_loop(self) -> None:
         while True:
@@ -228,6 +230,7 @@ class TCPConnection(ConnectionProto):
             self._pinger_task.cancel()
         if self._flusher_task is not None and not self._flusher_task.cancelled():
             self._flusher_task.cancel()
+        await self._flusher_loop(is_last_run=True)
         if self._stream is not None and not self._stream.is_closed:
             await self._stream.close()
         self._status = ConnectionStatus.CLOSED
