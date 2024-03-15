@@ -1,5 +1,8 @@
 from typing import Protocol
 
+from natsio.connection.status import ConnectionStatus
+
+from .dispatcher import DispatcherProto
 from .protocol import ClientMessageProto
 
 
@@ -33,12 +36,36 @@ class ConnectionProto(Protocol):
         raise NotImplementedError
 
     @property
+    def is_disconnected(self) -> bool:
+        raise NotImplementedError
+
+    @property
+    def is_connecting(self) -> bool:
+        raise NotImplementedError
+
+    @property
+    def is_connected(self) -> bool:
+        raise NotImplementedError
+
+    @property
+    def is_reconnecting(self) -> bool:
+        raise NotImplementedError
+
+    @property
+    def is_draining(self) -> bool:
+        raise NotImplementedError
+
+    @property
+    def status(self) -> ConnectionStatus:
+        raise NotImplementedError
+
+    @property
     def outstanding_pings(self) -> int:
         raise NotImplementedError
 
     @classmethod
     async def connect(
-        cls, host: str, port: int, timeout: float = 5
+        cls, host: str, port: int, dispatcher: DispatcherProto, timeout: float = 5
     ) -> "ConnectionProto":
         raise NotImplementedError
 
