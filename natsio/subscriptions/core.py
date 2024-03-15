@@ -1,7 +1,8 @@
 import asyncio
-from typing import TYPE_CHECKING, Awaitable, Callable, Optional
+from typing import TYPE_CHECKING, AsyncIterator, Awaitable, Callable, MutableMapping, Optional
 
 from natsio.messages.core import CoreMsg
+from natsio.exceptions.connection import TimeoutError
 from natsio.utils.logger import subscription_logger as log
 from natsio.utils.uuid import get_uuid
 
@@ -36,10 +37,13 @@ class Subscription:
             maxsize=pending_msgs_limit
         )
         self._callback = callback
+        self._pending_next_msg_calls: MutableMapping[str, asyncio.Future[CoreMsg]] = {}
         self._pending_msgs_limit = pending_msgs_limit
         self._pending_bytes_limit = pending_bytes_limit
         self._pending_size = 0
         self._reader_task: Optional[asyncio.Task[None]] = None
+        self._message_iterator: Optional[SubscriptionMessageIterator] = None
+        self._is_closed = True
 
     async def add_msg(self, msg: CoreMsg) -> None:
         await self._msg_queue.put(msg)
@@ -49,23 +53,34 @@ class Subscription:
         if self._callback is not None:
             raise ValueError("this method can not be used in async subscriptions")
 
+        task_id = get_uuid()
         try:
-            msg = await asyncio.wait_for(self._msg_queue.get(), timeout)
+            fut = asyncio.create_task(
+                asyncio.wait_for(self._msg_queue.get(), timeout)
+            )
+            self._pending_next_msg_calls[task_id] = fut
+            msg = await fut
         except asyncio.TimeoutError:
             if self._client.is_closed:
                 raise ValueError("client is closed")
-            raise asyncio.TimeoutError("timeout waiting for message")
+            raise TimeoutError("timeout waiting for message")
+        except asyncio.CancelledError:
+            raise
         else:
             self._pending_size -= len(msg.payload)
             self._msg_queue.task_done()
             return msg
+        finally:
+            self._pending_next_msg_calls.pop(task_id, None)
 
     async def start(self) -> None:
-        if self._callback is None:
-            raise ValueError("callback is not set")
-        if self._reader_task is not None:
-            raise ValueError("reader task is already running")
-        self._reader_task = asyncio.create_task(self._reader())
+        if self._callback is not None:
+            if self._reader_task is not None:
+                raise ValueError("reader task is already running")
+            self._reader_task = asyncio.create_task(self._reader())
+        else:
+            self._message_iterator = SubscriptionMessageIterator(self)
+        self._is_closed = False
 
     async def _reader_loop(self) -> None:
         if self._callback is None:
@@ -91,8 +106,41 @@ class Subscription:
             pass
 
     async def unsubscribe(self) -> None:
+        if self._is_closed:
+            return
         if self._reader_task is not None and not self._reader_task.done():
             self._reader_task.cancel()
             self._reader_task = None
 
+        if self._message_iterator is not None:
+            self._message_iterator.cancel()
+            for fut in self._pending_next_msg_calls.values():
+                if not fut.done() or not fut.cancelled():
+                    fut.cancel()
+
         await self._client.unsubscribe(self)
+        self._is_closed = True
+
+    @property
+    def messages(self) -> AsyncIterator[CoreMsg]:
+        if self._message_iterator is None:
+            raise ValueError("subscription is not started")
+        return self._message_iterator
+
+
+class SubscriptionMessageIterator:
+    def __init__(self, subscription: Subscription) -> None:
+        self._subscription = subscription
+        self._stop_iteration_future: asyncio.Future[bool] = asyncio.Future()
+
+    def cancel(self) -> None:
+        if not self._stop_iteration_future.done():
+            self._stop_iteration_future.set_result(True)
+
+    def __aiter__(self) -> "SubscriptionMessageIterator":
+        return self
+
+    async def __anext__(self) -> CoreMsg:
+        if self._stop_iteration_future.done():
+            raise StopAsyncIteration
+        return await self._subscription.next_msg(timeout=None)
