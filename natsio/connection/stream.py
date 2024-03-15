@@ -2,6 +2,7 @@ import asyncio
 
 from natsio.abc.connection import StreamProto
 from natsio.exceptions.stream import EndOfStream
+from natsio.utils.logger import connection_logger as log
 
 from .protocol import StreamProtocol
 
@@ -87,7 +88,7 @@ class Stream(StreamProto):
 
     async def write(self, data: bytes) -> None:
         async with self._write_lock:
-            print("Writing:", data)
+            log.debug("Writing %d bytes", len(data))
             if self.is_closed:
                 raise ConnectionError("Connection is closed")
             if self._protocol.exception:

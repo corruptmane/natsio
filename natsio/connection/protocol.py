@@ -1,9 +1,8 @@
 import asyncio
-import logging
 from collections import deque
 from typing import Deque, Optional, cast
 
-log = logging.getLogger(__name__)
+from natsio.utils.logger import connection_logger as log
 
 
 class StreamProtocol(asyncio.Protocol):
@@ -17,11 +16,11 @@ class StreamProtocol(asyncio.Protocol):
         self.read_event = asyncio.Event()
         self.write_event = asyncio.Event()
         self.write_event.set()
-        print("Connection established")
+        log.info("Connection established")
         cast(asyncio.Transport, transport).set_write_buffer_limits(0)
 
     def connection_lost(self, exc: Optional[Exception]) -> None:
-        print("Connection lost")
+        log.warning("Connection lost")
         if exc:
             log.exception(exc)
             self.exception = exc
@@ -30,12 +29,12 @@ class StreamProtocol(asyncio.Protocol):
         self.write_event.set()
 
     def data_received(self, data: bytes) -> None:
-        print(b"Received:", data)
+        log.debug("Received %d bytes", len(data))
         self.read_queue.append(data)
         self.read_event.set()
 
     def eof_received(self) -> None:
-        print("EOF received")
+        log.warning("EOF received")
         self.read_event.set()
 
     def pause_writing(self) -> None:
