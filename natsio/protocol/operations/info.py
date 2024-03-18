@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Final, Optional
+from typing import Final, List, Optional
 
 from natsio.abc.protocol import ServerMessageProto
 
@@ -22,8 +22,8 @@ class Info(ServerMessageProto):
     tls_required: Optional[bool] = None
     tls_verify: Optional[bool] = None
     tls_available: Optional[bool] = None
-    connect_urls: Optional[list[str]] = None
-    ws_connect_urls: Optional[list[str]] = None
+    connect_urls: Optional[List[str]] = None
+    ws_connect_urls: Optional[List[str]] = None
     ldm: Optional[bool] = None
     git_commit: Optional[str] = None
     jetstream: Optional[bool] = None
