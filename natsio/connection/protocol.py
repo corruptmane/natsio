@@ -11,13 +11,16 @@ class StreamProtocol(asyncio.Protocol):
     write_event: asyncio.Event
     exception: Optional[Exception] = None
 
+    def patch_transport(self, transport: asyncio.Transport) -> None:
+        transport.set_write_buffer_limits(0)
+
     def connection_made(self, transport: asyncio.BaseTransport) -> None:
         self.read_queue = deque()
         self.read_event = asyncio.Event()
         self.write_event = asyncio.Event()
         self.write_event.set()
         log.info("Connection established")
-        cast(asyncio.Transport, transport).set_write_buffer_limits(0)
+        self.patch_transport(cast(asyncio.Transport, transport))
 
     def connection_lost(self, exc: Optional[Exception]) -> None:
         log.warning("Connection lost")
