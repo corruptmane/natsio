@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from functools import lru_cache
+from functools import cached_property, lru_cache
 from typing import Final, Optional
 
 from natsio.abc.protocol import ServerMessageProto
@@ -7,7 +7,7 @@ from natsio.abc.protocol import ServerMessageProto
 MSG_OP: Final[bytes] = b"MSG"
 
 
-@dataclass(eq=False)
+@dataclass
 class Msg(ServerMessageProto):
     subject: str
     sid: str
@@ -15,13 +15,11 @@ class Msg(ServerMessageProto):
     reply_to: Optional[str] = None
     payload: Optional[bytes] = None
 
-    @property
-    @lru_cache
+    @cached_property
     def is_request_inbox(self) -> bool:
         return self.subject.startswith("_REQ_INBOX.")
 
-    @property
-    @lru_cache
+    @cached_property
     def inbox_id(self) -> str:
         return self.subject.split(".", maxsplit=1)[1]
 
