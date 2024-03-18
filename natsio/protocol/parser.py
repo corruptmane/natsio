@@ -1,15 +1,19 @@
 import re
-from typing import Mapping, Optional
+from typing import Mapping, NoReturn, Optional
 
 from natsio.abc.connection import StreamProto
 from natsio.const import CRLF, CRLF_SIZE
 from natsio.protocol.operations.hmsg import HMsg
 from natsio.protocol.operations.msg import Msg
+from natsio.exceptions.protocol import PublishPermissionsViolation, SubscriptionPermissionsViolation, UnknownProtocol, name_to_error
+
+WHITESPACE_RE = re.compile(b"\s+")
+ERR_NAME_RE = re.compile(r"'(.*?)'")
 
 
 class ProtocolParser:
     async def parse_msg(self, data: bytes, stream: StreamProto) -> Msg:
-        fields = re.split(b"\s+", data, maxsplit=3)
+        fields = WHITESPACE_RE.split(data, maxsplit=3)
 
         if len(fields) == 4:
             subject, sid, reply_to, payload_size = fields
@@ -43,7 +47,7 @@ class ProtocolParser:
         return headers
 
     async def parse_hmsg(self, data: bytes, stream: StreamProto) -> HMsg:
-        fields = re.split(b"\s+", data, maxsplit=4)
+        fields = WHITESPACE_RE.split(data, maxsplit=4)
 
         if len(fields) == 5:
             subject, sid, reply_to, headers_size, total_size = fields
@@ -70,3 +74,17 @@ class ProtocolParser:
             headers,
             payload,
         )
+
+    def parse_and_raise_error(self, data: bytes) -> NoReturn:
+        err_name: str = ERR_NAME_RE.findall(data.decode())[0]
+
+        try:
+            error_class = name_to_error[err_name]
+        except KeyError:
+            if err_name.startswith("Permissions Violation for Subscription to "):
+                raise SubscriptionPermissionsViolation(name=err_name)
+            if err_name.startswith("Permissions Violation for Publish to "):
+                raise PublishPermissionsViolation(name=err_name)
+            raise UnknownProtocol(extra=err_name)
+        else:
+            raise error_class()
