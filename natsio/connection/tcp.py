@@ -1,12 +1,13 @@
 import asyncio
-from typing import Optional, Tuple, cast
+from ssl import SSLContext
+from typing import List, Optional, Tuple, cast
 
 from natsio.abc.connection import ConnectionProto, StreamProto
 from natsio.abc.dispatcher import DispatcherProto
 from natsio.abc.protocol import ClientMessageProto
 from natsio.const import CRLF
 from natsio.exceptions.connection import TimeoutError
-from natsio.exceptions.protocol import UnknownProtocol
+from natsio.exceptions.protocol import ProtocolError, UnknownProtocol
 from natsio.exceptions.stream import EndOfStream
 from natsio.protocol.operations.connect import Connect
 from natsio.protocol.operations.err import ERR_OP
@@ -28,16 +29,17 @@ class TCPConnection(ConnectionProto):
         self,
         stream: StreamProto,
         dispatcher: DispatcherProto,
+        do_reconnection_future: asyncio.Future[bool],
         status: ConnectionStatus = ConnectionStatus.DISCONNECTED,
     ) -> None:
         self._stream = stream
         self._parser = ProtocolParser()
-        self._on_con_made: asyncio.Future[None] = asyncio.Future()
+        self._do_reconnection_future = do_reconnection_future
         self._listener_task: Optional[asyncio.Task[None]] = None
         self._pinger_task: Optional[asyncio.Task[None]] = None
         self._flusher_task: Optional[asyncio.Task[None]] = None
         self._flush_queue: asyncio.Queue[asyncio.Future[None]] = asyncio.Queue()
-        self._pending: list[bytes] = []
+        self._pending: List[bytes] = []
         self._outstanding_pings = 0
         self._status = status
         self._dispatcher = dispatcher
@@ -74,9 +76,58 @@ class TCPConnection(ConnectionProto):
     def is_draining(self) -> bool:
         return self.status == ConnectionStatus.DRAINING
 
+    @staticmethod
+    async def _upgrade_tls(
+        loop: asyncio.AbstractEventLoop,
+        transport: asyncio.Transport,
+        protocol: StreamProtocol,
+        ssl: Optional[SSLContext],
+        hostname: Optional[str],
+    ) -> asyncio.Transport:
+        if ssl is None:
+            raise ValueError("SSLContext is required for TLS upgrade")
+        new_transport = await loop.start_tls(transport, protocol, ssl, server_hostname=hostname)
+        if new_transport is not None:
+            print(type(new_transport))
+            protocol.patch_transport(new_transport)
+            return new_transport
+        return transport
+
+    async def _confirm_connection(
+        self,
+        loop: asyncio.AbstractEventLoop,
+        transport: asyncio.Transport,
+        protocol: StreamProtocol,
+        ssl: Optional[SSLContext],
+        ssl_hostname: Optional[str],
+        handshake_first: Optional[bool],
+    ) -> None:
+        if handshake_first is True:
+            transport = await self._upgrade_tls(loop, transport, protocol, ssl, ssl_hostname)
+            self._stream.upgraded_to_tls(transport)
+        while True:
+            operation, payload = await self._get_operation_and_payload()
+            if operation != INFO_OP:
+                continue
+            if handshake_first is False:
+                transport = await self._upgrade_tls(loop, transport, protocol, ssl, ssl_hostname)
+                self._stream.upgraded_to_tls(transport)
+            await self.process_info(payload)
+            break
+        self._status = ConnectionStatus.CONNECTED
+
     @classmethod
     async def connect(
-        cls, host: str, port: int, dispatcher: DispatcherProto, timeout: float = 5
+        cls,
+        host: str,
+        port: int,
+        dispatcher: DispatcherProto,
+        do_reconnection_future: asyncio.Future[bool],
+        ssl: Optional[SSLContext] = None,
+        ssl_hostname: Optional[str] = None,
+        handshake_first: Optional[bool] = None,
+        status: ConnectionStatus = ConnectionStatus.CONNECTING,
+        timeout: float = 5,
     ) -> "TCPConnection":
         loop = asyncio.get_running_loop()
         transport, protocol = cast(
@@ -90,24 +141,24 @@ class TCPConnection(ConnectionProto):
                 timeout=timeout,
             ),
         )
-        transport.pause_reading()
         self = cls(
             stream=Stream(transport, protocol),
             dispatcher=dispatcher,
+            do_reconnection_future=do_reconnection_future,
             status=ConnectionStatus.CONNECTING,
         )
-        await self._setup_loops(loop)
+        await self._confirm_connection(loop, transport, protocol, ssl, ssl_hostname, handshake_first)
+        await self._setup_loops(loop, transport, protocol, ssl, ssl_hostname, handshake_first)
         return self
 
     async def _process_operation(self, operation: bytes, payload: bytes) -> None:
         operation = operation.upper()
+
         try:
             if operation == MSG_OP:
                 return await self.process_msg(payload)
             if operation == HMSG_OP:
                 return await self.process_hmsg(payload)
-            if operation == INFO_OP:
-                return await self.process_info(payload)
             if operation == PING_OP:
                 return await self.process_ping()
             if operation == PONG_OP:
@@ -116,9 +167,26 @@ class TCPConnection(ConnectionProto):
                 return
             if operation == ERR_OP:
                 return await self.process_error(payload)
+            raise UnknownProtocol(is_disconnected=False)
+        except ProtocolError as exc:
+            # TODO
+            if exc.is_disconnected:
+                await self.close()
+                self._do_reconnection_future.set_result(True)
         except Exception as exc:
             log.exception(exc)
-        raise UnknownProtocol()
+
+    async def _get_operation_and_payload(self) -> Tuple[bytes, bytes]:
+        data = await self._stream.read_until(CRLF)
+        data = data.strip()
+
+        try:
+            operation, payload = data.split(maxsplit=1)
+        except ValueError:
+            operation = data
+            payload = b""
+
+        return operation, payload
 
     async def _listen(self) -> None:
         while True:
@@ -126,22 +194,15 @@ class TCPConnection(ConnectionProto):
                 break
 
             try:
-                data = await self._stream.read_until(CRLF)
+                operation, payload = await self._get_operation_and_payload()
             except EndOfStream:
+                log.exception("End of stream")
                 # TODO: handle EndOfStream
                 continue
             except Exception as exc:
                 # TODO: add error handling
                 log.exception(exc)
                 continue
-            else:
-                data = data.strip()
-
-            try:
-                operation, payload = data.split(maxsplit=1)
-            except ValueError:
-                operation = data
-                payload = b""
 
             try:
                 await self._process_operation(operation, payload)
@@ -221,7 +282,8 @@ class TCPConnection(ConnectionProto):
         except asyncio.TimeoutError:
             raise TimeoutError("Flush timeout")
 
-    async def close(self) -> None:
+    async def close(self, flush: bool = True) -> None:
+        # TODO: can not write EOF when using SSL Transport
         self._status = ConnectionStatus.DRAINING
         await self._dispatcher.close()
         if self._listener_task is not None and not self._listener_task.cancelled():
@@ -230,7 +292,8 @@ class TCPConnection(ConnectionProto):
             self._pinger_task.cancel()
         if self._flusher_task is not None and not self._flusher_task.cancelled():
             self._flusher_task.cancel()
-        await self._flusher_loop(is_last_run=True)
+        if flush:
+            await self._flusher_loop(is_last_run=True)
         if self._stream is not None and not self._stream.is_closed:
             await self._stream.close()
         self._status = ConnectionStatus.CLOSED
@@ -240,13 +303,12 @@ class TCPConnection(ConnectionProto):
             Connect(
                 verbose=False,
                 pedantic=True,
-                tls_required=False,
+                tls_required=True,
                 lang="python/natsio",
                 version="0.1.0",
                 headers=True,
             ).build(),
         )
-        self._on_con_made.set_result(None)
 
     async def process_ping(self) -> None:
         await self.send_command(Pong())
@@ -263,11 +325,18 @@ class TCPConnection(ConnectionProto):
         await self._dispatcher.dispatch_hmsg(parsed)
 
     async def process_error(self, payload: bytes) -> None:
-        log.warning("Received error from server: %s", payload.decode())
+        self._parser.parse_and_raise_error(payload)
+        # log.warning("Received error from server: %s", payload.decode())
 
-    async def _setup_loops(self, loop: asyncio.AbstractEventLoop) -> None:
+    async def _setup_loops(
+        self,
+        loop: asyncio.AbstractEventLoop,
+        transport: asyncio.Transport,
+        protocol: StreamProtocol,
+        ssl: Optional[SSLContext],
+        hostname: Optional[str],
+        handshake_first: Optional[bool],
+    ) -> None:
         self._listener_task = loop.create_task(self._listener())
-        await self._on_con_made
-        self._status = ConnectionStatus.CONNECTED
         self._ping_task = loop.create_task(self._pinger())
         self._flush_task = loop.create_task(self._flusher())

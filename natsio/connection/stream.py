@@ -9,7 +9,8 @@ from .protocol import StreamProtocol
 
 class Stream(StreamProto):
     def __init__(self, transport: asyncio.Transport, protocol: StreamProtocol) -> None:
-        self._transport = transport
+        # _old_transport is used to keep a reference to the original transport (before TLS upgrade)
+        self._old_transport = self._transport = transport
         self._protocol = protocol
         self._read_lock = asyncio.Lock()
         self._write_lock = asyncio.Lock()
@@ -18,6 +19,10 @@ class Stream(StreamProto):
     @property
     def is_closed(self) -> bool:
         return self._is_closed
+
+    def upgraded_to_tls(self, transport: asyncio.Transport) -> None:
+        self._transport = transport
+        self._protocol.patch_transport(transport)
 
     async def _read_buffer(self) -> None:
         if not self._protocol.read_event.is_set() and not self._transport.is_closing():
@@ -104,19 +109,11 @@ class Stream(StreamProto):
 
             await self._protocol.write_event.wait()
 
-    async def send_eof(self) -> None:
-        try:
-            self._transport.write_eof()
-        except OSError:
-            pass
-
     async def close(self) -> None:
         if self._transport.is_closing():
             return
 
         self._is_closed = True
-        log.debug("Sending EOF to NATS")
-        await self.send_eof()
 
         self._transport.close()
         await asyncio.sleep(0)
