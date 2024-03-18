@@ -6,6 +6,7 @@ from natsio.abc.connection import ConnectionProto
 from natsio.abc.protocol import ClientMessageProto
 from natsio.connection.status import ConnectionStatus
 from natsio.connection.tcp import TCPConnection
+from natsio.exceptions.client import NoServersAvailable
 from natsio.messages.core import CoreMsg
 from natsio.messages.dispatcher import MessageDispatcher
 from natsio.protocol.operations.hpub import HPub
@@ -20,16 +21,31 @@ from natsio.subscriptions.core import (
 )
 from natsio.utils.uuid import get_uuid
 
+from .config import ClientConfig, Server
+
 
 class NATSCore:
     def __init__(
-        self, host: str = "localhost", port: int = 4222, connection_timeout: float = 5
+        self, config: ClientConfig,
     ) -> None:
-        self.connection_timeout = connection_timeout
-        self._host = host
-        self._port = port
+        self._config = config
+        self._current_server_index = -1
         self._connection: Optional[ConnectionProto] = None
         self._dispatcher = MessageDispatcher(self)
+        self._do_reconnection_future: asyncio.Future[bool] = asyncio.Future()  # TODO
+        self._reconnection_task: Optional[asyncio.Task[None]] = None
+
+    @property
+    def _current_server(self) -> Server:
+        try:
+            return self._config.server_pool.servers[self._current_server_index]
+        except IndexError:
+            raise NoServersAvailable()
+
+    @property
+    def _next_server(self) -> Server:
+        self._current_server_index += 1
+        return self._current_server
 
     @property
     def status(self) -> ConnectionStatus:
@@ -65,13 +81,46 @@ class NATSCore:
         if self.is_closed:
             raise ValueError("Connection is closed")
 
-    async def _connect(self) -> None:
+    async def _connect(self, server: Server) -> None:
+        if server.uri.hostname is None:
+            raise ValueError("Invalid server hostname")
+        if server.uri.port is None:
+            raise ValueError("Invalid server port")
+
+        ssl_context = None
+        ssl_hostname = None
+        handshake_first = None
+        if self._config.tls is not None:
+            ssl_context = self._config.tls.ssl
+            ssl_hostname = self._config.tls.hostname
+            handshake_first = self._config.tls.handshake_first
+
         self._connection = await TCPConnection.connect(
-            self._host, self._port, self._dispatcher, self.connection_timeout
+            host=server.uri.hostname,
+            port=server.uri.port,
+            dispatcher=self._dispatcher,
+            do_reconnection_future=self._do_reconnection_future,
+            ssl=ssl_context,
+            ssl_hostname=ssl_hostname,
+            handshake_first=handshake_first,
+            timeout=self._config.connection_timeout,
         )
 
+    async def _do_reconnect(self) -> None:
+        self._do_reconnection_future = asyncio.Future()
+
+    async def _reconnect(self) -> None:
+        try:
+            await self._do_reconnection_future
+        except asyncio.CancelledError:
+            print("Cancelled reconnection")
+        else:
+            await self._do_reconnect()
+
     async def connect(self) -> None:
-        await self._connect()
+        server = self._next_server
+        await self._connect(server)
+        # self._reconnection_task = asyncio.create_task(self._reconnect())
 
     async def close(self, timeout: float = 5) -> None:
         if self._connection is not None and not self._connection.is_closed:
