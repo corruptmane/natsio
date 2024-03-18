@@ -1,4 +1,6 @@
-from typing import Protocol
+import asyncio
+from ssl import SSLContext
+from typing import Optional, Protocol
 
 from natsio.connection.status import ConnectionStatus
 
@@ -11,6 +13,9 @@ class StreamProto(Protocol):
     def is_closed(self) -> bool:
         raise NotImplementedError
 
+    def upgraded_to_tls(self, transport: asyncio.Transport) -> None:
+        raise NotImplementedError
+
     async def read(self, max_bytes: int) -> bytes:
         raise NotImplementedError
 
@@ -21,9 +26,6 @@ class StreamProto(Protocol):
         raise NotImplementedError
 
     async def write(self, data: bytes) -> None:
-        raise NotImplementedError
-
-    async def send_eof(self) -> None:
         raise NotImplementedError
 
     async def close(self) -> None:
@@ -65,7 +67,16 @@ class ConnectionProto(Protocol):
 
     @classmethod
     async def connect(
-        cls, host: str, port: int, dispatcher: DispatcherProto, timeout: float = 5
+        cls,
+        host: str,
+        port: int,
+        dispatcher: DispatcherProto,
+        do_reconnection_future: asyncio.Future[bool],
+        ssl: Optional[SSLContext],
+        ssl_hostname: Optional[str],
+        handshake_first: Optional[bool],
+        status: ConnectionStatus,
+        timeout: float,
     ) -> "ConnectionProto":
         raise NotImplementedError
 
