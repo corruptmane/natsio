@@ -10,6 +10,10 @@ class StreamProtocol(asyncio.Protocol):
     read_event: asyncio.Event
     write_event: asyncio.Event
     exception: Optional[Exception] = None
+    disconnect_event: asyncio.Event
+
+    def __init__(self, disconnect_event: asyncio.Event) -> None:
+        self.disconnect_event = disconnect_event
 
     def patch_transport(self, transport: asyncio.Transport) -> None:
         transport.set_write_buffer_limits(0)
@@ -19,6 +23,7 @@ class StreamProtocol(asyncio.Protocol):
         self.read_event = asyncio.Event()
         self.write_event = asyncio.Event()
         self.write_event.set()
+        self.disconnect_event.clear()
         log.info("Connection established")
         self.patch_transport(cast(asyncio.Transport, transport))
 
@@ -30,6 +35,7 @@ class StreamProtocol(asyncio.Protocol):
 
         self.read_event.set()
         self.write_event.set()
+        self.disconnect_event.set()
 
     def data_received(self, data: bytes) -> None:
         log.debug("Received %d bytes: %a", len(data), data)
