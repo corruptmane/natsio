@@ -4,8 +4,10 @@ from typing import Mapping, NoReturn, Optional
 from natsio.abc.connection import StreamProto
 from natsio.const import CRLF, CRLF_SIZE
 from natsio.protocol.operations.hmsg import HMsg
+from natsio.protocol.operations.info import Info
 from natsio.protocol.operations.msg import Msg
 from natsio.exceptions.protocol import PublishPermissionsViolation, SubscriptionPermissionsViolation, UnknownProtocol, name_to_error
+from natsio.utils.json import json_loads
 
 WHITESPACE_RE = re.compile(b"\s+")
 ERR_NAME_RE = re.compile(r"'(.*?)'")
@@ -88,3 +90,32 @@ class ProtocolParser:
             raise UnknownProtocol(extra=err_name)
         else:
             raise error_class()
+
+    def parse_info(self, data: bytes) -> Info:
+        fields = json_loads(data)
+        return Info(
+            server_id=fields["server_id"],
+            server_name=fields["server_name"],
+            version=fields["version"],
+            go=fields["go"],
+            host=fields["host"],
+            port=fields["port"],
+            headers=fields["headers"],
+            max_payload=fields["max_payload"],
+            proto=fields["proto"],
+            client_id=fields.get("client_id"),
+            auth_required=fields.get("auth_required"),
+            tls_required=fields.get("tls_required"),
+            tls_verify=fields.get("tls_verify"),
+            tls_available=fields.get("tls_available"),
+            connect_urls=fields.get("connect_urls"),
+            ws_connect_urls=fields.get("ws_connect_urls"),
+            ldm=fields.get("ldm"),
+            git_commit=fields.get("git_commit"),
+            jetstream=fields.get("jetstream"),
+            ip=fields.get("ip"),
+            client_ip=fields.get("client_ip"),
+            nonce=fields.get("nonce"),
+            cluster=fields.get("cluster"),
+            domain=fields.get("domain"),
+        )
