@@ -1,4 +1,5 @@
 import asyncio
+from enum import Enum
 from typing import (
     TYPE_CHECKING,
     AsyncIterator,
@@ -20,6 +21,13 @@ CoreCallback = Callable[[CoreMsg], Awaitable[None]]
 
 DEFAULT_SUB_PENDING_MSGS_LIMIT = 512 * 1024
 DEFAULT_SUB_PENDING_BYTES_LIMIT = 128 * 1024 * 1024
+
+
+class SubscriptionStatus(Enum):
+    INITIALISING = "INITIALISING"
+    OPERATING = "OPERATING"
+    DRAINING = "DRAINING"
+    CLOSED = "CLOSED"
 
 
 class Subscription:
@@ -50,15 +58,26 @@ class Subscription:
         self._pending_size = 0
         self._reader_task: Optional[asyncio.Task[None]] = None
         self._message_iterator: Optional[SubscriptionMessageIterator] = None
-        self._is_closed = True
+        self._status = SubscriptionStatus.INITIALISING
+        self._received = 0
+        self._max_msgs = 0
+        self._close_after_task: Optional[asyncio.Task[None]] = None
+
+    def _raise_if_client_closed(self) -> None:
+        if self._client.is_closed:
+            raise ValueError("Client is closed")
 
     async def add_msg(self, msg: CoreMsg) -> None:
         await self._msg_queue.put(msg)
         self._pending_size += len(msg.payload)
+        if self._max_msgs > 0:
+            self._received += 1
 
     async def next_msg(self, timeout: Optional[float] = 1) -> CoreMsg:
         if self._callback is not None:
             raise ValueError("this method can not be used in async subscriptions")
+        if self._status is SubscriptionStatus.CLOSED:
+            raise ValueError("Subscription is closed")
 
         task_id = get_uuid()
         try:
@@ -66,11 +85,8 @@ class Subscription:
             self._pending_next_msg_calls[task_id] = fut
             msg = await fut
         except asyncio.TimeoutError:
-            if self._client.is_closed:
-                raise ValueError("client is closed")
+            self._raise_if_client_closed()
             raise TimeoutError("timeout waiting for message")
-        except asyncio.CancelledError:
-            raise
         else:
             self._pending_size -= len(msg.payload)
             self._msg_queue.task_done()
@@ -85,7 +101,7 @@ class Subscription:
             self._reader_task = asyncio.create_task(self._reader())
         else:
             self._message_iterator = SubscriptionMessageIterator(self)
-        self._is_closed = False
+        self._status = SubscriptionStatus.OPERATING
 
     async def _reader_loop(self) -> None:
         if self._callback is None:
@@ -110,9 +126,7 @@ class Subscription:
         except asyncio.CancelledError:
             pass
 
-    async def unsubscribe(self) -> None:
-        if self._is_closed:
-            return
+    def _stop_processing(self) -> None:
         if self._reader_task is not None and not self._reader_task.done():
             self._reader_task.cancel()
             self._reader_task = None
@@ -120,16 +134,39 @@ class Subscription:
         if self._message_iterator is not None:
             self._message_iterator.cancel()
             for fut in self._pending_next_msg_calls.values():
-                if not fut.done() or not fut.cancelled():
+                if not fut.done():
                     fut.cancel()
 
-        await self._client.unsubscribe(self)
-        self._is_closed = True
+    @property
+    def is_ready_to_close(self) -> bool:
+        if self._max_msgs > 0 and self._received >= self._max_msgs and self._msg_queue.empty():
+            return True
+        return False
+
+    async def _close_after(self) -> None:
+        while True:
+            await asyncio.sleep(0)
+            if self.is_ready_to_close:
+                self._stop_processing()
+                self._status = SubscriptionStatus.CLOSED
+                break
+
+    async def unsubscribe(self, max_msgs: int = 0) -> None:
+        if self._status is SubscriptionStatus.CLOSED or self._status is SubscriptionStatus.DRAINING:
+            return
+        self._status = SubscriptionStatus.DRAINING
+        await self._client.unsubscribe(self, max_msgs)
+        if max_msgs <= 0:
+            self._stop_processing()
+            self._status = SubscriptionStatus.CLOSED
+        else:
+            self._max_msgs = max_msgs
+            self._close_after_task = asyncio.create_task(self._close_after())
 
     @property
     def messages(self) -> AsyncIterator[CoreMsg]:
-        if self._message_iterator is None:
-            raise ValueError("subscription is not started")
+        if self._status is not SubscriptionStatus.OPERATING or self._message_iterator is None:
+            raise ValueError("Subscription is not started")
         return self._message_iterator
 
 
