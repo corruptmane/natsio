@@ -1,6 +1,6 @@
 import asyncio
 from ssl import SSLContext
-from typing import List, Optional, Tuple, cast
+from typing import TYPE_CHECKING, List, Optional, Tuple, cast
 
 from natsio.abc.connection import ConnectionProto, StreamProto
 from natsio.abc.dispatcher import DispatcherProto
@@ -12,7 +12,7 @@ from natsio.exceptions.stream import EndOfStream
 from natsio.protocol.operations.connect import Connect
 from natsio.protocol.operations.err import ERR_OP
 from natsio.protocol.operations.hmsg import HMSG_OP
-from natsio.protocol.operations.info import INFO_OP
+from natsio.protocol.operations.info import INFO_OP, Info
 from natsio.protocol.operations.msg import MSG_OP
 from natsio.protocol.operations.ok import OK_OP
 from natsio.protocol.operations.ping_pong import PING_OP, PONG_OP, Ping, Pong
@@ -23,26 +23,29 @@ from .protocol import StreamProtocol
 from .status import ConnectionStatus
 from .stream import Stream
 
+if TYPE_CHECKING:
+    from natsio.client.config import ServerInfo
+
 
 class TCPConnection(ConnectionProto):
     def __init__(
         self,
         stream: StreamProto,
         dispatcher: DispatcherProto,
-        do_reconnection_future: asyncio.Future[bool],
-        status: ConnectionStatus = ConnectionStatus.DISCONNECTED,
+        disconnect_event: asyncio.Event,
     ) -> None:
         self._stream = stream
         self._parser = ProtocolParser()
-        self._do_reconnection_future = do_reconnection_future
         self._listener_task: Optional[asyncio.Task[None]] = None
         self._pinger_task: Optional[asyncio.Task[None]] = None
         self._flusher_task: Optional[asyncio.Task[None]] = None
         self._flush_queue: asyncio.Queue[asyncio.Future[None]] = asyncio.Queue()
         self._pending: List[bytes] = []
         self._outstanding_pings = 0
-        self._status = status
+        self._status = ConnectionStatus.CONNECTING
         self._dispatcher = dispatcher
+        self._disconnect_event = disconnect_event
+        self._server_info: Optional["Info"] = None
 
     @property
     def outstanding_pings(self) -> int:
@@ -69,12 +72,14 @@ class TCPConnection(ConnectionProto):
         return self.status == ConnectionStatus.CONNECTED
 
     @property
-    def is_reconnecting(self) -> bool:
-        return self.status == ConnectionStatus.RECONNECTING
-
-    @property
     def is_draining(self) -> bool:
         return self.status == ConnectionStatus.DRAINING
+
+    @property
+    def server_info(self) -> "ServerInfo":
+        if self._server_info is None:
+            raise ValueError("Server info is not available")
+        return self._server_info.server_info
 
     @staticmethod
     async def _upgrade_tls(
@@ -122,33 +127,34 @@ class TCPConnection(ConnectionProto):
         host: str,
         port: int,
         dispatcher: DispatcherProto,
-        do_reconnection_future: asyncio.Future[bool],
+        disconnect_event: asyncio.Event,
         ssl: Optional[SSLContext] = None,
         ssl_hostname: Optional[str] = None,
         handshake_first: Optional[bool] = None,
-        status: ConnectionStatus = ConnectionStatus.CONNECTING,
         timeout: float = 5,
     ) -> "TCPConnection":
         loop = asyncio.get_running_loop()
-        transport, protocol = cast(
-            Tuple[asyncio.Transport, StreamProtocol],
-            await asyncio.wait_for(
-                loop.create_connection(
-                    StreamProtocol,
-                    host,
-                    port,
+        try:
+            transport, protocol = cast(
+                Tuple[asyncio.Transport, StreamProtocol],
+                await asyncio.wait_for(
+                    loop.create_connection(
+                        lambda: StreamProtocol(disconnect_event=disconnect_event),
+                        host,
+                        port,
+                    ),
+                    timeout=timeout,
                 ),
-                timeout=timeout,
-            ),
-        )
+            )
+        except OSError as exc:
+            raise TimeoutError("Connection timeout") from None
         self = cls(
             stream=Stream(transport, protocol),
             dispatcher=dispatcher,
-            do_reconnection_future=do_reconnection_future,
-            status=ConnectionStatus.CONNECTING,
+            disconnect_event=disconnect_event,
         )
         await self._confirm_connection(loop, transport, protocol, ssl, ssl_hostname, handshake_first)
-        await self._setup_loops(loop, transport, protocol, ssl, ssl_hostname, handshake_first)
+        await self._setup_loops(loop)
         return self
 
     async def _process_operation(self, operation: bytes, payload: bytes) -> None:
@@ -169,10 +175,11 @@ class TCPConnection(ConnectionProto):
                 return await self.process_error(payload)
             raise UnknownProtocol(is_disconnected=False)
         except ProtocolError as exc:
+            log.exception(exc)
             # TODO
             if exc.is_disconnected:
-                await self.close()
-                self._do_reconnection_future.set_result(True)
+                # TODO
+                await self.close(flush=False)
         except Exception as exc:
             log.exception(exc)
 
@@ -190,14 +197,20 @@ class TCPConnection(ConnectionProto):
 
     async def _listen(self) -> None:
         while True:
-            if self.is_closed or self.is_reconnecting:
+            log.debug("Listener loop start")
+            if self.is_closed:
+                break
+
+            if self._disconnect_event.is_set():
+                if self._status != ConnectionStatus.DISCONNECTED:
+                    self._status = ConnectionStatus.DISCONNECTED
                 break
 
             try:
                 operation, payload = await self._get_operation_and_payload()
             except EndOfStream:
-                log.exception("End of stream")
                 # TODO: handle EndOfStream
+                log.error("End of stream")
                 continue
             except Exception as exc:
                 # TODO: add error handling
@@ -218,6 +231,11 @@ class TCPConnection(ConnectionProto):
 
     async def _flusher_loop(self, is_last_run: bool = False) -> None:
         while True:
+            log.debug("Flusher loop start")
+            if self._disconnect_event.is_set():
+                if self._status != ConnectionStatus.DISCONNECTED:
+                    self._status = ConnectionStatus.DISCONNECTED
+                break
             if (
                 is_last_run
                 and self._flush_queue is not None
@@ -254,8 +272,15 @@ class TCPConnection(ConnectionProto):
 
     async def _ping_loop(self) -> None:
         while True:
+            await asyncio.sleep(0)  # TODO: resolve the issue of never stopping pinger
+            if self.is_closed:
+                break
             if not self.is_connected:
                 continue
+            if self._disconnect_event.is_set():
+                if self._status != ConnectionStatus.DISCONNECTED:
+                    self._status = ConnectionStatus.DISCONNECTED
+                break
 
             await self.send_command(Ping())
             self._outstanding_pings += 1
@@ -282,10 +307,10 @@ class TCPConnection(ConnectionProto):
         except asyncio.TimeoutError:
             raise TimeoutError("Flush timeout")
 
-    async def close(self, flush: bool = True) -> None:
-        # TODO: can not write EOF when using SSL Transport
+    async def close(self, flush: bool = True, close_dispatcher: bool = True) -> None:
         self._status = ConnectionStatus.DRAINING
-        await self._dispatcher.close()
+        if close_dispatcher:
+            await self._dispatcher.close()
         if self._listener_task is not None and not self._listener_task.cancelled():
             self._listener_task.cancel()
         if self._pinger_task is not None and not self._pinger_task.cancelled():
@@ -299,6 +324,7 @@ class TCPConnection(ConnectionProto):
         self._status = ConnectionStatus.CLOSED
 
     async def process_info(self, payload: bytes) -> None:
+        self._server_info = self._parser.parse_info(payload)
         await self._stream.write(
             Connect(
                 verbose=False,
@@ -328,15 +354,7 @@ class TCPConnection(ConnectionProto):
         self._parser.parse_and_raise_error(payload)
         # log.warning("Received error from server: %s", payload.decode())
 
-    async def _setup_loops(
-        self,
-        loop: asyncio.AbstractEventLoop,
-        transport: asyncio.Transport,
-        protocol: StreamProtocol,
-        ssl: Optional[SSLContext],
-        hostname: Optional[str],
-        handshake_first: Optional[bool],
-    ) -> None:
+    async def _setup_loops(self, loop: asyncio.AbstractEventLoop) -> None:
         self._listener_task = loop.create_task(self._listener())
         self._ping_task = loop.create_task(self._pinger())
         self._flush_task = loop.create_task(self._flusher())
