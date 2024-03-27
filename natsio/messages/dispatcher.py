@@ -1,5 +1,5 @@
 import asyncio
-from typing import TYPE_CHECKING, MutableMapping, Union
+from typing import TYPE_CHECKING, MutableMapping, Sequence, Set, Union
 
 from natsio.abc.dispatcher import DispatcherProto
 from natsio.protocol.operations.hmsg import HMsg
@@ -17,12 +17,31 @@ class MessageDispatcher(DispatcherProto):
         self._client = client
         self._subscriptions: MutableMapping[str, Subscription] = {}
         self._inboxes: MutableMapping[str, asyncio.Future[CoreMsg]] = {}
+        self._to_remove_sub_tasks: Set[asyncio.Task[None]] = set()
+
+    def all_subscriptions(self) -> Sequence[Subscription]:
+        return list(self._subscriptions.values())
 
     def add_subscription(self, sub: Subscription) -> None:
         self._subscriptions[sub.sid] = sub
 
     def remove_subscription(self, sid: str) -> None:
         self._subscriptions.pop(sid, None)
+
+    async def _remove_subscription_when_ready(self, sid: str) -> None:
+        while True:
+            await asyncio.sleep(0)
+            sub = self._subscriptions.get(sid)
+            if sub is None:
+                break
+            if sub.is_ready_to_close:
+                self.remove_subscription(sid)
+                break
+
+    def remove_subscription_when_ready(self, sid: str) -> None:
+        task = asyncio.create_task(self._remove_subscription_when_ready(sid))
+        self._to_remove_sub_tasks.add(task)
+        task.add_done_callback(self._to_remove_sub_tasks.discard)
 
     def add_request_inbox(self, sid: str, future: asyncio.Future[CoreMsg]) -> None:
         self._inboxes[sid] = future
