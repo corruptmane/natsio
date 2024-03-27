@@ -6,7 +6,7 @@ from urllib.parse import ParseResult, urlparse
 from random import shuffle
 
 DEFAULT_CONNECT_TIMEOUT: Final[float] = 5
-DEFAULT_RECONNECT_TIMEOUT: Final[float] = 2
+DEFAULT_RECONNECT_TIME_WAIT: Final[float] = 2
 DEFAULT_MAX_RECONNECT_ATTEMPTS: Final[int] = 60
 DEFAULT_PING_INTERVAL: Final[int] = 120
 DEFAULT_MAX_OUTSTANDING_PINGS: Final[int] = 2
@@ -23,19 +23,43 @@ class TLSConfig:
 
 
 @dataclass
+class ServerInfo:
+    server_id: str
+    server_name: str
+    version: str
+    go: str
+    host: str
+    port: int
+    headers: bool
+    max_payload: int
+    proto: int
+    client_id: Optional[int] = None
+    auth_required: Optional[bool] = None
+    tls_required: Optional[bool] = None
+    tls_verify: Optional[bool] = None
+    tls_available: Optional[bool] = None
+    connect_urls: Optional[List[str]] = None
+    ws_connect_urls: Optional[List[str]] = None
+    ldm: Optional[bool] = None
+    git_commit: Optional[str] = None
+    jetstream: Optional[bool] = None
+    ip: Optional[str] = None
+    client_ip: Optional[str] = None
+    nonce: Optional[str] = None
+    cluster: Optional[str] = None
+    domain: Optional[str] = None
+
+
+@dataclass
 class Server:
     uri: ParseResult
     reconnects: int = 0
     last_attempt: int = 0
-    did_connect: bool = False
-    discovered: bool = False
-    version: Optional[str] = None
+    info: Optional[ServerInfo] = None
 
-
-@dataclass
-class ServerPool:
-    servers: Tuple[Server, ...]
-    tls: Optional[TLSConfig] = None
+    @property
+    def is_discovered(self) -> bool:
+        return bool(self.info)
 
 
 @dataclass
@@ -46,7 +70,7 @@ class ClientConfig:
     verbose: bool = False
     allow_reconnect: bool = True
     connection_timeout: float = DEFAULT_CONNECT_TIMEOUT
-    reconnection_timeout: float = DEFAULT_RECONNECT_TIMEOUT
+    reconnect_time_wait: float = DEFAULT_RECONNECT_TIME_WAIT
     max_reconnect_attempts: int = DEFAULT_MAX_RECONNECT_ATTEMPTS
     ping_interval: int = DEFAULT_PING_INTERVAL
     max_outstanding_pings: int = DEFAULT_MAX_OUTSTANDING_PINGS
@@ -82,7 +106,9 @@ class ClientConfig:
         return Server(uri=uri)
 
     @cached_property
-    def server_pool(self) -> ServerPool:
+    def server_pool(self) -> Tuple[Server, ...]:
+        if not self.servers:
+            raise ValueError("No servers provided")
         parsed_servers: List[Server] = []
         try:
             for server in self.servers:
@@ -91,4 +117,4 @@ class ClientConfig:
             print(e)
         if self.randomize_servers:
             shuffle(parsed_servers)
-        return ServerPool(servers=tuple(parsed_servers), tls=self.tls)
+        return tuple(parsed_servers)
