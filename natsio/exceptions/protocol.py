@@ -1,4 +1,5 @@
 from typing import Mapping, Optional, Type
+
 from .base import NATSError
 
 
@@ -7,7 +8,12 @@ class ProtocolError(NATSError):
     description: str
     is_disconnected: bool = True
 
-    def __init__(self, name: Optional[str] = None, description: Optional[str] = None, is_disconnected: bool = True) -> None:
+    def __init__(
+        self,
+        name: Optional[str] = None,
+        description: Optional[str] = None,
+        is_disconnected: bool = True,
+    ) -> None:
         if name is not None:
             self.name = name
         if description is not None:
@@ -23,19 +29,23 @@ class UnknownProtocol(ProtocolError):
     description = "Unknown protocol error"
     extra: Optional[str] = None
 
-    def __init__(self, extra: Optional[str] = None, is_disconnected: bool = True) -> None:
+    def __init__(
+        self, extra: Optional[str] = None, is_disconnected: bool = True
+    ) -> None:
         self.extra = extra
         self.is_disconnected = is_disconnected
 
 
 class RoutePortConnectAttempt(ProtocolError):
     name = "Attempted To Connect To Route Port"
-    description = "Client attempted to connect to a route port instead of the client port"
+    description = (
+        "Client attempted to connect to a route port instead of the client port"
+    )
 
 
 class AuthorizationViolation(ProtocolError):
     name = "Authorization Violation"
-    description = "Client failed to authenticate to the server with credentials specified in the \"CONNECT\" message"
+    description = 'Client failed to authenticate to the server with credentials specified in the "CONNECT" message'
 
 
 class AuthorizationTimeout(ProtocolError):
@@ -45,12 +55,14 @@ class AuthorizationTimeout(ProtocolError):
 
 class InvalidClientProtocol(ProtocolError):
     name = "Invalid Client Protocol"
-    description = "Client specified an invalid protocol version in the \"CONNECT\" message"
+    description = (
+        'Client specified an invalid protocol version in the "CONNECT" message'
+    )
 
 
 class MaxControlLineExceeded(ProtocolError):
     name = "Maximum Control Line Exceeded"
-    description = "Message destination subject and reply subject length exceeded the maximum control line value specified by the \"max_control_line\" server option. The default is 1024 bytes"
+    description = 'Message destination subject and reply subject length exceeded the maximum control line value specified by the "max_control_line" server option. The default is 1024 bytes'
 
 
 class ParserError(ProtocolError):
@@ -65,7 +77,7 @@ class TLSRequired(ProtocolError):
 
 class StaleConnection(ProtocolError):
     name = "Stale Connection"
-    description = "The server hasn't received a message from the client, including a \"PONG\" in too long"
+    description = 'The server hasn\'t received a message from the client, including a "PONG" in too long'
 
 
 class MaxConnectionsExceeded(ProtocolError):
@@ -80,7 +92,7 @@ class SlowConsumer(ProtocolError):
 
 class MaxPayloadExceeded(ProtocolError):
     name = "Maximum Payload Violation"
-    description = "Client attempted to publish a message with a payload size that exceeds the \"max_payload\" size configured on the server. This value is supplied to the client upon connection in the initial \"INFO\" message. The client is expected to do proper accounting of byte size to be sent to the server in order to handle this error synchronously"
+    description = 'Client attempted to publish a message with a payload size that exceeds the "max_payload" size configured on the server. This value is supplied to the client upon connection in the initial "INFO" message. The client is expected to do proper accounting of byte size to be sent to the server in order to handle this error synchronously'
 
 
 class InvalidSubject(ProtocolError):
@@ -91,7 +103,7 @@ class InvalidSubject(ProtocolError):
 
 class PermissionsViolation(ProtocolError):
     name = "Permissions Violation"
-    description = "The user specified in the \"CONNECT\" message does not have permission to subscribe or publish to the subject"
+    description = 'The user specified in the "CONNECT" message does not have permission to subscribe or publish to the subject'
     is_disconnected = False
 
     def __init__(self, name: str) -> None:
@@ -99,11 +111,11 @@ class PermissionsViolation(ProtocolError):
 
 
 class SubscriptionPermissionsViolation(PermissionsViolation):
-    description = "The user specified in the \"CONNECT\" message does not have permission to subscribe to the subject"
+    description = 'The user specified in the "CONNECT" message does not have permission to subscribe to the subject'
 
 
 class PublishPermissionsViolation(PermissionsViolation):
-    description = "The user specified in the \"CONNECT\" message does not have permission to publish to the subject"
+    description = 'The user specified in the "CONNECT" message does not have permission to publish to the subject'
 
 
 name_to_error: Mapping[str, Type[ProtocolError]] = {

@@ -91,7 +91,9 @@ class TCPConnection(ConnectionProto):
     ) -> asyncio.Transport:
         if ssl is None:
             raise ValueError("SSLContext is required for TLS upgrade")
-        new_transport = await loop.start_tls(transport, protocol, ssl, server_hostname=hostname)
+        new_transport = await loop.start_tls(
+            transport, protocol, ssl, server_hostname=hostname
+        )
         if new_transport is not None:
             print(type(new_transport))
             protocol.patch_transport(new_transport)
@@ -108,14 +110,18 @@ class TCPConnection(ConnectionProto):
         handshake_first: Optional[bool],
     ) -> None:
         if handshake_first is True:
-            transport = await self._upgrade_tls(loop, transport, protocol, ssl, ssl_hostname)
+            transport = await self._upgrade_tls(
+                loop, transport, protocol, ssl, ssl_hostname
+            )
             self._stream.upgraded_to_tls(transport)
         while True:
             operation, payload = await self._get_operation_and_payload()
             if operation != INFO_OP:
                 continue
             if handshake_first is False:
-                transport = await self._upgrade_tls(loop, transport, protocol, ssl, ssl_hostname)
+                transport = await self._upgrade_tls(
+                    loop, transport, protocol, ssl, ssl_hostname
+                )
                 self._stream.upgraded_to_tls(transport)
             await self.process_info(payload)
             break
@@ -146,14 +152,16 @@ class TCPConnection(ConnectionProto):
                     timeout=timeout,
                 ),
             )
-        except OSError as exc:
+        except OSError:
             raise TimeoutError("Connection timeout") from None
         self = cls(
             stream=Stream(transport, protocol),
             dispatcher=dispatcher,
             disconnect_event=disconnect_event,
         )
-        await self._confirm_connection(loop, transport, protocol, ssl, ssl_hostname, handshake_first)
+        await self._confirm_connection(
+            loop, transport, protocol, ssl, ssl_hostname, handshake_first
+        )
         await self._setup_loops(loop)
         return self
 

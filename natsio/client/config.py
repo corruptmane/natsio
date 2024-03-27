@@ -1,9 +1,9 @@
 from dataclasses import dataclass, field
 from functools import cached_property
-from ssl import OP_ALL, SSLContext
+from random import shuffle
+from ssl import SSLContext
 from typing import Final, List, Optional, Tuple
 from urllib.parse import ParseResult, urlparse
-from random import shuffle
 
 DEFAULT_CONNECT_TIMEOUT: Final[float] = 5
 DEFAULT_RECONNECT_TIME_WAIT: Final[float] = 2

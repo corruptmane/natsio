@@ -1,9 +1,8 @@
 import asyncio
-from functools import cached_property
-from itertools import cycle
 import time
+from itertools import cycle
 from types import TracebackType
-from typing import Iterator, List, Mapping, MutableSequence, Optional, Tuple, Type
+from typing import Iterator, Mapping, MutableSequence, Optional, Tuple, Type
 
 from natsio.abc.connection import ConnectionProto
 from natsio.abc.dispatcher import DispatcherProto
@@ -28,7 +27,7 @@ from natsio.subscriptions.core import (
 from natsio.utils.logger import client_logger as log
 from natsio.utils.uuid import get_uuid
 
-from .config import ClientConfig, Server, TLSConfig
+from .config import ClientConfig, Server
 from .status import ClientStatus
 
 
@@ -37,7 +36,12 @@ def get_now() -> int:
 
 
 class ServerPoolIterator:
-    def __init__(self, pool: Tuple[Server, ...], max_reconnect_attempts: int, reconnect_time_wait: float):
+    def __init__(
+        self,
+        pool: Tuple[Server, ...],
+        max_reconnect_attempts: int,
+        reconnect_time_wait: float,
+    ):
         self._pool = pool
         self._pool_iter: Iterator[Server] = cycle(self._pool)
         self._current_server: Server = next(self._pool_iter)
@@ -58,14 +62,20 @@ class ServerPoolIterator:
         if self._max_reconnect_attempts <= 0:
             return self._next_server
         while True:
-            if all(server.reconnects >= self._max_reconnect_attempts for server in self._pool):
+            if all(
+                server.reconnects >= self._max_reconnect_attempts
+                for server in self._pool
+            ):
                 raise NoServersAvailable()
             server = self._next_server
             if server.reconnects >= self._max_reconnect_attempts:
                 continue
 
             now = get_now()
-            if server.last_attempt != 0 and now < server.last_attempt + self._reconnect_time_wait_in_ns:
+            if (
+                server.last_attempt != 0
+                and now < server.last_attempt + self._reconnect_time_wait_in_ns
+            ):
                 await asyncio.sleep(self._reconnect_time_wait)
 
             return server
@@ -84,7 +94,8 @@ class NATSCore:
     )
 
     def __init__(
-        self, config: ClientConfig,
+        self,
+        config: ClientConfig,
     ) -> None:
         self._config: ClientConfig = config
         self._server_pool_iterator = ServerPoolIterator(
@@ -172,7 +183,10 @@ class NATSCore:
     async def close(self, flush: bool = True, timeout: float = 5) -> None:
         if self.is_closed:
             return
-        if self._on_disconnect_waiter is not None and not self._on_disconnect_waiter.done():
+        if (
+            self._on_disconnect_waiter is not None
+            and not self._on_disconnect_waiter.done()
+        ):
             self._on_disconnect_waiter.cancel()
             self._on_disconnect_waiter = None
         if self._connection is not None and not self._connection.is_closed:
@@ -194,13 +208,14 @@ class NATSCore:
         for sub in to_remove:
             self._dispatcher.remove_subscription(sub.sid)
         for sub in to_replay:
-            await self._send_command(Sub(sid=sub.sid, subject=sub.subject, queue=sub.queue))
+            await self._send_command(
+                Sub(sid=sub.sid, subject=sub.subject, queue=sub.queue)
+            )
 
     async def _reconnect(self) -> None:
         while True:
             log.debug("Reconnecting to NATS server")
             server = await self._server_pool_iterator.next_server()
-            now = get_now()
 
             try:
                 await self._connect(server)
@@ -212,7 +227,11 @@ class NATSCore:
                 continue
             except Exception as exc:
                 server.reconnects += 1
-                log.exception("Failed to reconnect to server %s: %s", server.uri.netloc, exc.__class__.__name__)
+                log.exception(
+                    "Failed to reconnect to server %s: %s",
+                    server.uri.netloc,
+                    exc.__class__.__name__,
+                )
                 continue
             else:
                 log.info("Reconnected to NATS server %s", server.uri.netloc)
@@ -236,7 +255,7 @@ class NATSCore:
             except NoServersAvailable:
                 await self.close(flush=False)
                 break
-            except Exception as exc:
+            except Exception:
                 log.exception("Failed to reconnect")
             else:
                 self._disconnect_event.clear()

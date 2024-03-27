@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from functools import cached_property, lru_cache
+from functools import cached_property
 from typing import Final, Mapping, Optional
 
 from natsio.abc.protocol import ServerMessageProto

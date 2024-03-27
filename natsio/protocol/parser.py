@@ -3,10 +3,15 @@ from typing import Mapping, NoReturn, Optional
 
 from natsio.abc.connection import StreamProto
 from natsio.const import CRLF, CRLF_SIZE
+from natsio.exceptions.protocol import (
+    PublishPermissionsViolation,
+    SubscriptionPermissionsViolation,
+    UnknownProtocol,
+    name_to_error,
+)
 from natsio.protocol.operations.hmsg import HMsg
 from natsio.protocol.operations.info import Info
 from natsio.protocol.operations.msg import Msg
-from natsio.exceptions.protocol import PublishPermissionsViolation, SubscriptionPermissionsViolation, UnknownProtocol, name_to_error
 from natsio.utils.json import json_loads
 
 WHITESPACE_RE = re.compile(b"\s+")

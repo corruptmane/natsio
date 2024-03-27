@@ -139,7 +139,11 @@ class Subscription:
 
     @property
     def is_ready_to_close(self) -> bool:
-        if self._max_msgs > 0 and self._received >= self._max_msgs and self._msg_queue.empty():
+        if (
+            self._max_msgs > 0
+            and self._received >= self._max_msgs
+            and self._msg_queue.empty()
+        ):
             return True
         return False
 
@@ -152,7 +156,10 @@ class Subscription:
                 break
 
     async def unsubscribe(self, max_msgs: int = 0) -> None:
-        if self._status is SubscriptionStatus.CLOSED or self._status is SubscriptionStatus.DRAINING:
+        if (
+            self._status is SubscriptionStatus.CLOSED
+            or self._status is SubscriptionStatus.DRAINING
+        ):
             return
         self._status = SubscriptionStatus.DRAINING
         await self._client.unsubscribe(self, max_msgs)
@@ -165,7 +172,10 @@ class Subscription:
 
     @property
     def messages(self) -> AsyncIterator[CoreMsg]:
-        if self._status is not SubscriptionStatus.OPERATING or self._message_iterator is None:
+        if (
+            self._status is not SubscriptionStatus.OPERATING
+            or self._message_iterator is None
+        ):
             raise ValueError("Subscription is not started")
         return self._message_iterator
 
