@@ -1,11 +1,14 @@
 import asyncio
 from ssl import SSLContext
-from typing import Optional, Protocol
+from typing import TYPE_CHECKING, Optional, Protocol
 
 from natsio.connection.status import ConnectionStatus
 
 from .dispatcher import DispatcherProto
 from .protocol import ClientMessageProto
+
+if TYPE_CHECKING:
+    from natsio.client.config import ServerInfo
 
 
 class StreamProto(Protocol):
@@ -34,10 +37,6 @@ class StreamProto(Protocol):
 
 class ConnectionProto(Protocol):
     @property
-    def is_closed(self) -> bool:
-        raise NotImplementedError
-
-    @property
     def is_disconnected(self) -> bool:
         raise NotImplementedError
 
@@ -50,11 +49,11 @@ class ConnectionProto(Protocol):
         raise NotImplementedError
 
     @property
-    def is_reconnecting(self) -> bool:
+    def is_draining(self) -> bool:
         raise NotImplementedError
 
     @property
-    def is_draining(self) -> bool:
+    def is_closed(self) -> bool:
         raise NotImplementedError
 
     @property
@@ -65,17 +64,20 @@ class ConnectionProto(Protocol):
     def outstanding_pings(self) -> int:
         raise NotImplementedError
 
+    @property
+    def server_info(self) -> "ServerInfo":
+        raise NotImplementedError
+
     @classmethod
     async def connect(
         cls,
         host: str,
         port: int,
         dispatcher: DispatcherProto,
-        do_reconnection_future: asyncio.Future[bool],
+        disconnect_event: asyncio.Event,
         ssl: Optional[SSLContext],
         ssl_hostname: Optional[str],
         handshake_first: Optional[bool],
-        status: ConnectionStatus,
         timeout: float,
     ) -> "ConnectionProto":
         raise NotImplementedError
@@ -88,7 +90,7 @@ class ConnectionProto(Protocol):
     async def flush(self) -> None:
         raise NotImplementedError
 
-    async def close(self) -> None:
+    async def close(self, flush: bool = True, close_dispatcher: bool = True) -> None:
         raise NotImplementedError
 
     async def process_info(self, payload: bytes) -> None:
