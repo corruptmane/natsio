@@ -1,5 +1,5 @@
 import asyncio
-from typing import Protocol
+from typing import Protocol, Sequence
 
 from natsio.messages.core import CoreMsg
 from natsio.protocol.operations.hmsg import HMsg
@@ -11,7 +11,13 @@ class DispatcherProto(Protocol):
     def add_subscription(self, sub: Subscription) -> None:
         raise NotImplementedError
 
+    def all_subscriptions(self) -> Sequence[Subscription]:
+        raise NotImplementedError
+
     def remove_subscription(self, sid: str) -> None:
+        raise NotImplementedError
+
+    def remove_subscription_when_ready(self, sid: str) -> None:
         raise NotImplementedError
 
     def add_request_inbox(self, sid: str, future: asyncio.Future[CoreMsg]) -> None:
