@@ -1,0 +1,6 @@
+- [x] Reconnect (replay subscriptions)
+- [x] Switch servers upon disconnect
+- [x] Unsubscribe and process _max_msgs_ messages
+- [x] TLS
+- [ ] Auth (JWT, User/Pass, NKey)
+- [ ] JetStream (Pub, Pull/Push subscription, Ack, etc.)
