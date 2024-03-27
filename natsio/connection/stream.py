@@ -31,7 +31,7 @@ class Stream(StreamProto):
             self._transport.pause_reading()
 
     async def _read(self) -> bytes:
-        # WARNING: use this only within lock
+        # WARNING: use this only within reading lock
         await asyncio.sleep(0)
         try:
             return self._protocol.read_queue.popleft()
