@@ -1,6 +1,7 @@
 import asyncio
 
 from natsio.abc.connection import StreamProto
+from natsio.exceptions.connection import ConnectionClosedError
 from natsio.exceptions.stream import EndOfStream
 from natsio.utils.logger import connection_logger as log
 
@@ -37,7 +38,7 @@ class Stream(StreamProto):
             return self._protocol.read_queue.popleft()
         except IndexError:
             if self.is_closed:
-                raise ConnectionError("Connection is closed") from None
+                raise ConnectionClosedError() from None
             if self._protocol.exception:
                 raise self._protocol.exception from None
             raise EndOfStream() from None
@@ -95,7 +96,7 @@ class Stream(StreamProto):
         async with self._write_lock:
             log.debug("Writing %d bytes: %a", len(data), data)
             if self.is_closed:
-                raise ConnectionError("Connection is closed")
+                raise ConnectionClosedError()
             if self._protocol.exception:
                 raise self._protocol.exception
 
@@ -103,7 +104,7 @@ class Stream(StreamProto):
                 self._transport.write(data)
             except RuntimeError as exc:
                 if self._transport.is_closing():
-                    raise ConnectionError("Connection is closed") from None
+                    raise ConnectionClosedError() from None
                 else:
                     raise exc
 

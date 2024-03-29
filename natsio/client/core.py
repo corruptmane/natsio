@@ -2,15 +2,24 @@ import asyncio
 import time
 from itertools import cycle
 from types import TracebackType
-from typing import Iterator, Mapping, MutableSequence, Optional, Tuple, Type
+from typing import Final, Iterator, Mapping, MutableSequence, Optional, Tuple, Type
 
 from natsio.abc.connection import ConnectionProto
 from natsio.abc.dispatcher import DispatcherProto
 from natsio.abc.protocol import ClientMessageProto
 from natsio.connection.status import ConnectionStatus
 from natsio.connection.tcp import TCPConnection
-from natsio.exceptions.client import NoServersAvailable
-from natsio.exceptions.connection import TimeoutError
+from natsio.exceptions.client import (
+    ClientClosedError,
+    MaxPayloadError,
+    NoServersAvailable,
+)
+from natsio.exceptions.connection import (
+    BadHostnameError,
+    BadPortError,
+    NoConnectionError,
+    TimeoutError,
+)
 from natsio.exceptions.stream import EndOfStream
 from natsio.messages.core import CoreMsg
 from natsio.messages.dispatcher import MessageDispatcher
@@ -29,6 +38,8 @@ from natsio.utils.uuid import get_uuid
 
 from .config import ClientConfig, Server
 from .status import ClientStatus
+
+DEFAULT_MAX_PAYLOAD_SIZE: Final[int] = 1_048_576
 
 
 def get_now() -> int:
@@ -85,7 +96,6 @@ class NATSCore:
     __slots__ = (
         "_config",
         "_server_pool_iterator",
-        "_current_server_index",
         "_connection",
         "_dispatcher",
         "_disconnect_event",
@@ -110,9 +120,20 @@ class NATSCore:
         self._status: ClientStatus = ClientStatus.DISCONNECTED
 
     @property
+    def inbox_prefix(self) -> str:
+        return self._config.inbox_prefix
+
+    @property
+    def _max_payload(self) -> int:
+        server = self._server_pool_iterator.current_server
+        if server.info is not None:
+            return server.info.max_payload
+        return DEFAULT_MAX_PAYLOAD_SIZE
+
+    @property
     def connection_status(self) -> ConnectionStatus:
         if self._connection is None:
-            raise ValueError("Connection is not established")
+            raise NoConnectionError()
         return self._connection.status
 
     @property
@@ -145,13 +166,13 @@ class NATSCore:
 
     def _raise_if_closed(self) -> None:
         if self.is_closed:
-            raise ValueError("Connection is closed")
+            raise ClientClosedError()
 
     async def _connect(self, server: Server) -> None:
         if server.uri.hostname is None:
-            raise ValueError("Invalid server hostname")
+            raise BadHostnameError(server.uri.hostname)
         if server.uri.port is None:
-            raise ValueError("Invalid server port")
+            raise BadPortError(server.uri.port)
 
         ssl_context = None
         ssl_hostname = None
@@ -167,6 +188,7 @@ class NATSCore:
             port=server.uri.port,
             dispatcher=self._dispatcher,
             disconnect_event=self._disconnect_event,
+            connect_operation=self._config.build_connect_operation(),
             ssl=ssl_context,
             ssl_hostname=ssl_hostname,
             handshake_first=handshake_first,
@@ -194,7 +216,7 @@ class NATSCore:
 
     async def flush(self) -> None:
         if self._connection is None:
-            raise ValueError("Connection is not established")
+            raise NoConnectionError()
         await self._connection.flush()
 
     async def _replay_subscriptions(self) -> None:
@@ -275,7 +297,7 @@ class NATSCore:
 
     async def _send_command(self, cmd: ClientMessageProto) -> None:
         if self._connection is None:
-            raise ValueError("Connection is not established")
+            raise NoConnectionError()
         await self._connection.send_command(cmd)
 
     async def publish(
@@ -286,6 +308,8 @@ class NATSCore:
         headers: Optional[Mapping[str, str]] = None,
     ) -> None:
         self._raise_if_closed()
+        if len(data) > self._max_payload:
+            raise MaxPayloadError()
         if not headers:
             await self._send_command(
                 Pub(subject=subject, payload=data, reply_to=reply_to)
@@ -294,6 +318,8 @@ class NATSCore:
             await self._send_command(
                 HPub(subject=subject, payload=data, reply_to=reply_to, headers=headers)
             )
+
+    pub = publish
 
     async def subscribe(
         self,
@@ -309,6 +335,8 @@ class NATSCore:
         self._dispatcher.add_subscription(sub)
         await sub.start()
         return sub
+
+    sub = subscribe
 
     async def unsubscribe(self, sub: Subscription, max_msgs: int = 0) -> None:
         await self._send_command(Unsub(sid=sub.sid, max_msgs=max_msgs))
@@ -327,14 +355,13 @@ class NATSCore:
         self._raise_if_closed()
         sid = get_uuid()
         inbox_id = get_uuid()
-        reply_to = f"_REQ_INBOX.{inbox_id}"
+        reply_to = f"{self.inbox_prefix}.{inbox_id}"
         future: asyncio.Future[CoreMsg] = asyncio.Future()
         await self._send_command(Sub(subject=reply_to, sid=sid))
         self._dispatcher.add_request_inbox(inbox_id, future)
 
-        await self.publish(subject, data, reply_to=reply_to, headers=headers)
-
         try:
+            await self.publish(subject, data, reply_to=reply_to, headers=headers)
             return await asyncio.wait_for(future, timeout)
         except asyncio.TimeoutError:
             future.cancel()
@@ -342,3 +369,5 @@ class NATSCore:
         finally:
             await self._send_command(Unsub(sid=sid))
             self._dispatcher.remove_request_inbox(inbox_id)
+
+    req = request

@@ -6,7 +6,12 @@ from natsio.abc.connection import ConnectionProto, StreamProto
 from natsio.abc.dispatcher import DispatcherProto
 from natsio.abc.protocol import ClientMessageProto
 from natsio.const import CRLF
-from natsio.exceptions.connection import TimeoutError
+from natsio.exceptions.connection import (
+    ConnectionTimeoutError,
+    FlushTimeoutError,
+    NoConnectionError,
+    TLSError,
+)
 from natsio.exceptions.protocol import ProtocolError, UnknownProtocol
 from natsio.exceptions.stream import EndOfStream
 from natsio.protocol.operations.connect import Connect
@@ -33,8 +38,10 @@ class TCPConnection(ConnectionProto):
         stream: StreamProto,
         dispatcher: DispatcherProto,
         disconnect_event: asyncio.Event,
+        connect_operation: Connect,
     ) -> None:
         self._stream = stream
+        self._connect_operation = connect_operation
         self._parser = ProtocolParser()
         self._listener_task: Optional[asyncio.Task[None]] = None
         self._pinger_task: Optional[asyncio.Task[None]] = None
@@ -78,7 +85,7 @@ class TCPConnection(ConnectionProto):
     @property
     def server_info(self) -> "ServerInfo":
         if self._server_info is None:
-            raise ValueError("Server info is not available")
+            raise NoConnectionError()
         return self._server_info.server_info
 
     @staticmethod
@@ -90,12 +97,11 @@ class TCPConnection(ConnectionProto):
         hostname: Optional[str],
     ) -> asyncio.Transport:
         if ssl is None:
-            raise ValueError("SSLContext is required for TLS upgrade")
+            raise TLSError("SSLContext is required for TLS upgrade")
         new_transport = await loop.start_tls(
             transport, protocol, ssl, server_hostname=hostname
         )
         if new_transport is not None:
-            print(type(new_transport))
             protocol.patch_transport(new_transport)
             return new_transport
         return transport
@@ -134,6 +140,7 @@ class TCPConnection(ConnectionProto):
         port: int,
         dispatcher: DispatcherProto,
         disconnect_event: asyncio.Event,
+        connect_operation: Connect,
         ssl: Optional[SSLContext] = None,
         ssl_hostname: Optional[str] = None,
         handshake_first: Optional[bool] = None,
@@ -153,11 +160,12 @@ class TCPConnection(ConnectionProto):
                 ),
             )
         except OSError:
-            raise TimeoutError("Connection timeout") from None
+            raise ConnectionTimeoutError() from None
         self = cls(
             stream=Stream(transport, protocol),
             dispatcher=dispatcher,
             disconnect_event=disconnect_event,
+            connect_operation=connect_operation,
         )
         await self._confirm_connection(
             loop, transport, protocol, ssl, ssl_hostname, handshake_first
@@ -313,7 +321,7 @@ class TCPConnection(ConnectionProto):
         try:
             await asyncio.wait_for(self.send_command(Ping(), force_flush=True), timeout)
         except asyncio.TimeoutError:
-            raise TimeoutError("Flush timeout")
+            raise FlushTimeoutError() from None
 
     async def close(self, flush: bool = True, close_dispatcher: bool = True) -> None:
         self._status = ConnectionStatus.DRAINING
@@ -333,16 +341,13 @@ class TCPConnection(ConnectionProto):
 
     async def process_info(self, payload: bytes) -> None:
         self._server_info = self._parser.parse_info(payload)
-        await self._stream.write(
-            Connect(
-                verbose=False,
-                pedantic=True,
-                tls_required=True,
-                lang="python/natsio",
-                version="0.1.0",
-                headers=True,
-            ).build(),
-        )
+        if self._server_info.headers:
+            self._connect_operation.headers = True
+            self._connect_operation.no_responders = (
+                False  # TODO: support no_responders headers parsing
+            )
+        # TODO: sig/jwt/nkey support
+        await self._stream.write(self._connect_operation.build())
 
     async def process_ping(self) -> None:
         await self.send_command(Pong())

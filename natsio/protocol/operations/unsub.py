@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Final, Optional
+from typing import Final, MutableSequence, Optional
 
 from natsio.abc.protocol import ClientMessageProto
 from natsio.const import CRLF
@@ -13,15 +13,12 @@ class Unsub(ClientMessageProto):
     max_msgs: Optional[int] = None
 
     def _build_payload(self) -> bytes:
-        payload = f"{self.sid}"
+        parts: MutableSequence[bytes] = [self.sid.encode()]
         if self.max_msgs is not None:
-            payload += f" {self.max_msgs}"
-        return payload.encode()
+            parts.append(str(self.max_msgs).encode())
+        return b" ".join(parts)
 
     def build(self) -> bytes:
-        msg = f"SUB {self.sid}"
-        if self.max_msgs:
-            msg += f" {self.max_msgs}"
         return UNSUB_OP + b" " + self._build_payload() + CRLF
 
 

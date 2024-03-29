@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from functools import cached_property
 from typing import Final, Mapping, Optional
 
 from natsio.abc.protocol import ServerMessageProto
@@ -17,13 +16,11 @@ class HMsg(ServerMessageProto):
     headers: Optional[Mapping[str, str]] = None
     payload: Optional[bytes] = None
 
-    @cached_property
-    def is_request_inbox(self) -> bool:
-        return self.subject.startswith("_REQ_INBOX.")
+    def is_request_inbox(self, inbox_prefix: str) -> bool:
+        return self.subject.startswith(inbox_prefix)
 
-    @cached_property
-    def inbox_id(self) -> str:
-        return self.subject.split(".", maxsplit=1)[1]
+    def inbox_id(self, inbox_prefix: str) -> str:
+        return self.subject.rstrip(inbox_prefix + ".")
 
 
 __all__ = (

@@ -2,4 +2,4 @@ from .base import NATSError
 
 
 class EndOfStream(NATSError):
-    pass
+    description = "End of stream"

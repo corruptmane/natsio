@@ -5,6 +5,15 @@ from ssl import SSLContext
 from typing import Final, List, Optional, Tuple
 from urllib.parse import ParseResult, urlparse
 
+from natsio import __version__ as natsio_version
+from natsio.exceptions.client import (
+    ConfigError,
+    NoServersProvided,
+    TLSNotConfigured,
+    WebSocketError,
+)
+from natsio.protocol.operations.connect import Connect
+
 DEFAULT_CONNECT_TIMEOUT: Final[float] = 5
 DEFAULT_RECONNECT_TIME_WAIT: Final[float] = 2
 DEFAULT_MAX_RECONNECT_ATTEMPTS: Final[int] = 60
@@ -78,6 +87,7 @@ class ClientConfig:
     flusher_queue_size: int = DEFAULT_MAX_FLUSHER_QUEUE_SIZE
     echo: bool = True
     tls: Optional[TLSConfig] = None
+    tls_required: bool = False
     user: Optional[str] = None
     password: Optional[str] = None
     token: Optional[str] = None
@@ -90,31 +100,43 @@ class ClientConfig:
         if server_url.startswith("nats://"):
             uri = urlparse(server_url)
         elif server_url.startswith("ws://") or server_url.startswith("wss://"):
-            raise ValueError("WebSocket is not supported yet")
+            raise WebSocketError()
         elif server_url.startswith("tls://"):
             if not self.tls:
-                raise ValueError("TLS is not configured")
+                raise TLSNotConfigured()
             uri = urlparse(server_url)
         elif ":" in server_url:
             uri = urlparse(f"nats://{server_url}")
         else:
-            raise ValueError(f"Invalid server URL: {server_url}")
+            raise ConfigError(f"Invalid server URL: {server_url}")
         if uri.hostname is None or uri.hostname == "none":
-            raise ValueError(f"Invalid server URL (hostname): {server_url}")
+            raise ConfigError(f"Invalid server hostname: {server_url}")
         if uri.port is None:
-            uri = urlparse(f"nats://{uri.hostname}:422")
+            uri = urlparse(f"nats://{uri.hostname}:4222")
         return Server(uri=uri)
 
     @cached_property
     def server_pool(self) -> Tuple[Server, ...]:
         if not self.servers:
-            raise ValueError("No servers provided")
+            raise NoServersProvided()
         parsed_servers: List[Server] = []
-        try:
-            for server in self.servers:
-                parsed_servers.append(self._build_single_server(server))
-        except Exception as e:
-            print(e)
+        for server in self.servers:
+            parsed_servers.append(self._build_single_server(server))
         if self.randomize_servers:
             shuffle(parsed_servers)
         return tuple(parsed_servers)
+
+    def build_connect_operation(self) -> Connect:
+        return Connect(
+            verbose=self.verbose,
+            pedantic=self.pedantic,
+            tls_required=self.tls_required,
+            lang="python/natsio",
+            version=natsio_version,
+            auth_token=self.token,
+            user=self.user,
+            password=self.password,
+            name=self.name,
+            protocol=1,
+            echo=self.echo,
+        )

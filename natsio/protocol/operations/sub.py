@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Final, Optional
+from typing import Final, MutableSequence, Optional
 
 from natsio.abc.protocol import ClientMessageProto
 from natsio.const import CRLF
@@ -14,11 +14,11 @@ class Sub(ClientMessageProto):
     queue: Optional[str] = None
 
     def _build_payload(self) -> bytes:
-        payload = f"{self.subject}"
+        parts: MutableSequence[bytes] = [self.subject.encode()]
         if self.queue is not None:
-            payload += f" {self.queue}"
-        payload += f" {self.sid}"
-        return payload.encode()
+            parts.append(self.queue.encode())
+        parts.append(self.sid.encode())
+        return b" ".join(parts)
 
     def build(self) -> bytes:
         return SUB_OP + b" " + self._build_payload() + CRLF

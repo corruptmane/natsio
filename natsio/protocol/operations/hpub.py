@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Final, Mapping, Optional
+from typing import Final, Mapping, MutableSequence, Optional
 
 from natsio.abc.protocol import ClientMessageProto
 from natsio.const import CRLF
@@ -21,9 +21,10 @@ class HPub(ClientMessageProto):
         return headers
 
     def _build_payload(self) -> bytes:
-        parts = [self.subject.encode()]
+        parts: MutableSequence[bytes] = [self.subject.encode()]
         if self.reply_to:
             parts.append(self.reply_to.encode())
+
         headers = self._build_headers()
         headers_size = len(headers)
         parts.append(str(headers_size).encode())

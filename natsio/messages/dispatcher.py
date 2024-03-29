@@ -64,8 +64,10 @@ class MessageDispatcher(DispatcherProto):
 
     async def dispatch_msg(self, msg: Msg) -> None:
         core_msg = self._build_core_msg(msg)
-        if msg.is_request_inbox:
-            return await self._dispatch_to_inbox(core_msg, msg.inbox_id)
+        if msg.is_request_inbox(self._client.inbox_prefix):
+            return await self._dispatch_to_inbox(
+                core_msg, msg.inbox_id(self._client.inbox_prefix)
+            )
         sub = self._subscriptions.get(msg.sid)
         if sub is None:
             return
@@ -73,8 +75,10 @@ class MessageDispatcher(DispatcherProto):
 
     async def dispatch_hmsg(self, msg: HMsg) -> None:
         core_msg = self._build_core_msg(msg)
-        if msg.is_request_inbox:
-            return await self._dispatch_to_inbox(core_msg, msg.inbox_id)
+        if msg.is_request_inbox(self._client.inbox_prefix):
+            return await self._dispatch_to_inbox(
+                core_msg, msg.inbox_id(self._client.inbox_prefix)
+            )
         sub = self._subscriptions.get(msg.sid)
         if sub is None:
             return

@@ -3,6 +3,7 @@ from typing import Mapping, NoReturn, Optional
 
 from natsio.abc.connection import StreamProto
 from natsio.const import CRLF, CRLF_SIZE
+from natsio.exceptions.client import InvalidHeaderVersion
 from natsio.exceptions.protocol import (
     PublishPermissionsViolation,
     SubscriptionPermissionsViolation,
@@ -43,7 +44,7 @@ class ProtocolParser:
 
         headers_version = lines.pop(0)
         if headers_version != b"NATS/1.0":
-            raise ValueError(f"Invalid headers version: {headers_version.decode()}")
+            raise InvalidHeaderVersion(headers_version)
 
         if not lines:
             return None
@@ -88,13 +89,14 @@ class ProtocolParser:
         try:
             error_class = name_to_error[err_name]
         except KeyError:
-            if err_name.startswith("Permissions Violation for Subscription to "):
-                raise SubscriptionPermissionsViolation(name=err_name)
-            if err_name.startswith("Permissions Violation for Publish to "):
-                raise PublishPermissionsViolation(name=err_name)
-            raise UnknownProtocol(extra=err_name)
-        else:
-            raise error_class()
+            if err_name.startswith("Permissions Violation for Subscription "):
+                subject = err_name.split(" ")[-1]
+                raise SubscriptionPermissionsViolation(subject) from None
+            if err_name.startswith("Permissions Violation for Publish "):
+                subject = err_name.split(" ")[-1]
+                raise PublishPermissionsViolation(subject) from None
+            raise UnknownProtocol(extra=err_name) from None
+        raise error_class()
 
     def parse_info(self, data: bytes) -> Info:
         fields = json_loads(data)

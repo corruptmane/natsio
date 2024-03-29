@@ -9,7 +9,13 @@ from typing import (
     Optional,
 )
 
-from natsio.exceptions.connection import TimeoutError
+from natsio.exceptions.client import ClientClosedError
+from natsio.exceptions.subscription import (
+    MessageRetrievalTimeoutError,
+    SubscriptionAlreadyStartedError,
+    SubscriptionClosedError,
+    SubscriptionSetupError,
+)
 from natsio.messages.core import CoreMsg
 from natsio.utils.logger import subscription_logger as log
 from natsio.utils.uuid import get_uuid
@@ -65,7 +71,7 @@ class Subscription:
 
     def _raise_if_client_closed(self) -> None:
         if self._client.is_closed:
-            raise ValueError("Client is closed")
+            raise ClientClosedError()
 
     async def add_msg(self, msg: CoreMsg) -> None:
         await self._msg_queue.put(msg)
@@ -75,9 +81,11 @@ class Subscription:
 
     async def next_msg(self, timeout: Optional[float] = 1) -> CoreMsg:
         if self._callback is not None:
-            raise ValueError("this method can not be used in async subscriptions")
+            raise SubscriptionSetupError(
+                "this method can not be used in async subscriptions"
+            )
         if self._status is SubscriptionStatus.CLOSED:
-            raise ValueError("Subscription is closed")
+            raise SubscriptionClosedError()
 
         task_id = get_uuid()
         try:
@@ -86,7 +94,7 @@ class Subscription:
             msg = await fut
         except asyncio.TimeoutError:
             self._raise_if_client_closed()
-            raise TimeoutError("timeout waiting for message")
+            raise MessageRetrievalTimeoutError()
         else:
             self._pending_size -= len(msg.payload)
             self._msg_queue.task_done()
@@ -95,9 +103,13 @@ class Subscription:
             self._pending_next_msg_calls.pop(task_id, None)
 
     async def start(self) -> None:
+        if self._status is SubscriptionStatus.OPERATING:
+            raise SubscriptionAlreadyStartedError()
+        if self._status is SubscriptionStatus.CLOSED:
+            raise SubscriptionClosedError()
         if self._callback is not None:
             if self._reader_task is not None:
-                raise ValueError("reader task is already running")
+                raise SubscriptionAlreadyStartedError()
             self._reader_task = asyncio.create_task(self._reader())
         else:
             self._message_iterator = SubscriptionMessageIterator(self)
@@ -105,7 +117,7 @@ class Subscription:
 
     async def _reader_loop(self) -> None:
         if self._callback is None:
-            raise ValueError("callback is not set")
+            raise SubscriptionSetupError("callback is not set")
         while True:
             msg = await self._msg_queue.get()
             self._pending_size -= len(msg.payload)
@@ -176,7 +188,7 @@ class Subscription:
             self._status is not SubscriptionStatus.OPERATING
             or self._message_iterator is None
         ):
-            raise ValueError("Subscription is not started")
+            raise SubscriptionSetupError("subscription is not started")
         return self._message_iterator
 
 

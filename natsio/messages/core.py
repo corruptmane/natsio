@@ -1,5 +1,7 @@
 from typing import TYPE_CHECKING, Mapping, Optional
 
+from natsio.exceptions.client import ClientError
+
 if TYPE_CHECKING:
     from natsio.client.core import NATSCore
 
@@ -23,5 +25,5 @@ class CoreMsg:
         self, data: bytes, headers: Optional[Mapping[str, str]] = None
     ) -> None:
         if self.reply_to is None:
-            raise ValueError("reply_to is not set")
+            raise ClientError("reply_to is not set")
         await self._client.publish(self.reply_to, data, headers=headers)

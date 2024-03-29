@@ -3,6 +3,7 @@ from ssl import SSLContext
 from typing import TYPE_CHECKING, Optional, Protocol
 
 from natsio.connection.status import ConnectionStatus
+from natsio.protocol.operations.connect import Connect
 
 from .dispatcher import DispatcherProto
 from .protocol import ClientMessageProto
@@ -75,6 +76,7 @@ class ConnectionProto(Protocol):
         port: int,
         dispatcher: DispatcherProto,
         disconnect_event: asyncio.Event,
+        connect_operation: Connect,
         ssl: Optional[SSLContext],
         ssl_hostname: Optional[str],
         handshake_first: Optional[bool],

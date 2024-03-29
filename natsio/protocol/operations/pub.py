@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Final, Optional
+from typing import Final, MutableSequence, Optional
 
 from natsio.abc.protocol import ClientMessageProto
 from natsio.const import CRLF
@@ -14,13 +14,13 @@ class Pub(ClientMessageProto):
     payload: Optional[bytes] = None
 
     def _build_payload(self) -> bytes:
-        payload = self.subject.encode()
+        parts: MutableSequence[bytes] = [self.subject.encode()]
         if self.reply_to:
-            payload += b" " + self.reply_to.encode()
+            parts.append(self.reply_to.encode())
+
         payload_size = 0 if not self.payload else len(self.payload)
-        payload += b" " + str(payload_size).encode() + CRLF
-        payload += self.payload if self.payload else b""
-        return payload
+        parts.append(str(payload_size).encode())
+        return b" ".join(parts) + CRLF + (b"" if not self.payload else self.payload)
 
     def build(self) -> bytes:
         return PUB_OP + b" " + self._build_payload() + CRLF
