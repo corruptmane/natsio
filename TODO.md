@@ -1,0 +1,10 @@
+- [x] Reconnect (replay subscriptions)
+- [x] Switch servers upon disconnect
+- [x] Unsubscribe and process _max_msgs_ messages
+- [x] TLS
+- [x] Proper error handling
+- [x] Proper logging
+- [x] Proper limits handling
+- [x] Try reconnecting on initial connect failure
+- [ ] Auth (JWT, User/Pass, NKey)
+- [ ] JetStream (Pub, Pull/Push subscription, Ack, etc.)
