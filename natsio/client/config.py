@@ -21,7 +21,8 @@ DEFAULT_PING_INTERVAL: Final[int] = 120
 DEFAULT_MAX_OUTSTANDING_PINGS: Final[int] = 2
 DEFAULT_MAX_FLUSHER_QUEUE_SIZE: Final[int] = 1024
 DEFAULT_DRAIN_TIMEOUT: Final[float] = 30
-DEFAULT_PENDING_SIZE: Final[int] = 2 * 1024 * 1024
+DEFAULT_FLUSH_TIMEOUT: Final[int] = 10
+DEFAULT_MAX_PENDING_SIZE: Final[int] = 2 * 1024 * 1024
 
 
 @dataclass
@@ -93,8 +94,8 @@ class ClientConfig:
     token: Optional[str] = None
     drain_timeout: float = DEFAULT_DRAIN_TIMEOUT
     inbox_prefix: str = "_INBOX"
-    pending_size: int = DEFAULT_PENDING_SIZE
-    flush_timeout: Optional[float] = None
+    max_pending_size: int = DEFAULT_MAX_PENDING_SIZE
+    flush_timeout: int = DEFAULT_FLUSH_TIMEOUT
 
     def _build_single_server(self, server_url: str) -> Server:
         if server_url.startswith("nats://"):

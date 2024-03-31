@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Optional, Protocol
 from natsio.connection.status import ConnectionStatus
 from natsio.protocol.operations.connect import Connect
 
+from .client import ErrorCallback
 from .dispatcher import DispatcherProto
 from .protocol import ClientMessageProto
 
@@ -77,10 +78,16 @@ class ConnectionProto(Protocol):
         dispatcher: DispatcherProto,
         disconnect_event: asyncio.Event,
         connect_operation: Connect,
+        ping_interval: int,
+        max_outstanding_pings: int,
+        flusher_queue_size: int,
+        max_pending_size: int,
+        force_flush_timeout: int,
+        error_callback: ErrorCallback,
+        timeout: float,
         ssl: Optional[SSLContext],
         ssl_hostname: Optional[str],
         handshake_first: Optional[bool],
-        timeout: float,
     ) -> "ConnectionProto":
         raise NotImplementedError
 

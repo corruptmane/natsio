@@ -76,6 +76,27 @@ class MaxConnectionsExceeded(ProtocolError):
 
 class SlowConsumer(ProtocolError):
     description = "Slow Consumer"
+    subject: Optional[str] = None
+    sid: Optional[str] = None
+
+    def __init__(
+        self,
+        subject: Optional[str] = None,
+        sid: Optional[str] = None,
+        description: Optional[str] = None,
+        is_disconnected: bool = True,
+    ) -> None:
+        super().__init__(description=description, is_disconnected=is_disconnected)
+        self.subject = subject
+        self.sid = sid
+
+    def __str__(self) -> str:
+        text = f"NATS: {self.description}"
+        if self.subject is not None:
+            text += f" - [subject:{self.subject}]"
+        if self.sid is not None:
+            text += f" - [sid:{self.sid}]"
+        return text
 
 
 class MaxPayloadExceeded(ProtocolError):

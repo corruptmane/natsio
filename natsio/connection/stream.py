@@ -111,6 +111,8 @@ class Stream(StreamProto):
             await self._protocol.write_event.wait()
 
     async def close(self) -> None:
+        if self.is_closed:
+            return
         if self._transport.is_closing():
             return
 

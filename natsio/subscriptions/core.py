@@ -54,12 +54,9 @@ class Subscription:
         self.sid = sid
 
         self._client = client
-        self._msg_queue: asyncio.Queue[CoreMsg] = asyncio.Queue(
-            maxsize=pending_msgs_limit
-        )
+        self._msg_queue: asyncio.Queue[CoreMsg] = asyncio.Queue(maxsize=pending_msgs_limit)
         self._callback = callback
         self._pending_next_msg_calls: MutableMapping[str, asyncio.Future[CoreMsg]] = {}
-        self._pending_msgs_limit = pending_msgs_limit
         self._pending_bytes_limit = pending_bytes_limit
         self._pending_size = 0
         self._reader_task: Optional[asyncio.Task[None]] = None
@@ -69,13 +66,28 @@ class Subscription:
         self._max_msgs = 0
         self._close_after_task: Optional[asyncio.Task[None]] = None
 
+    def _raise_if_slow_consumer(self, new_data_size: int) -> None:
+        if self._pending_bytes_limit <= 0:
+            return
+        if self._pending_size + new_data_size >= self._pending_bytes_limit:
+            raise asyncio.QueueFull()
+        if self._msg_queue is not None and self._msg_queue.full():
+            raise asyncio.QueueFull()
+
+    def is_slow(self) -> bool:
+        if self._pending_bytes_limit <= 0:
+            return False
+        return self._pending_size >= self._pending_bytes_limit
+
     def _raise_if_client_closed(self) -> None:
         if self._client.is_closed:
             raise ClientClosedError()
 
     async def add_msg(self, msg: CoreMsg) -> None:
+        payload_size = len(msg.payload)
+        self._raise_if_slow_consumer(payload_size)
         await self._msg_queue.put(msg)
-        self._pending_size += len(msg.payload)
+        self._pending_size += payload_size
         if self._max_msgs > 0:
             self._received += 1
 

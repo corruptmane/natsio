@@ -20,6 +20,10 @@ class FlushTimeoutError(TimeoutError):
     description = "Flush timed out"
 
 
+class DrainTimeoutError(TimeoutError):
+    description = "Drain timed out"
+
+
 class BadURIError(NATSConnectionError):
     description = "Bad URI"
 
@@ -51,3 +55,7 @@ class ConnectionClosedError(NATSConnectionError):
 
 class TLSError(NATSConnectionError):
     description = "TLS error"
+
+
+class OutboundBufferLimitError(NATSConnectionError):
+    description = "Outbound buffer limit reached"

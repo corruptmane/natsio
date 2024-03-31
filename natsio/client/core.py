@@ -4,6 +4,7 @@ from itertools import cycle
 from types import TracebackType
 from typing import Final, Iterator, Mapping, MutableSequence, Optional, Tuple, Type
 
+from natsio.abc.client import ErrorCallback
 from natsio.abc.connection import ConnectionProto
 from natsio.abc.dispatcher import DispatcherProto
 from natsio.abc.protocol import ClientMessageProto
@@ -17,6 +18,7 @@ from natsio.exceptions.client import (
 from natsio.exceptions.connection import (
     BadHostnameError,
     BadPortError,
+    DrainTimeoutError,
     NoConnectionError,
     TimeoutError,
 )
@@ -92,10 +94,15 @@ class ServerPoolIterator:
             return server
 
 
+async def _default_error_cb(exc: Exception) -> None:
+    log.error("NATS: Encountered error", exc_info=exc)
+
+
 class NATSCore:
     __slots__ = (
         "_config",
         "_server_pool_iterator",
+        "_error_cb",
         "_connection",
         "_dispatcher",
         "_disconnect_event",
@@ -106,6 +113,7 @@ class NATSCore:
     def __init__(
         self,
         config: ClientConfig,
+        error_callback: Optional[ErrorCallback] = None,
     ) -> None:
         self._config: ClientConfig = config
         self._server_pool_iterator = ServerPoolIterator(
@@ -113,6 +121,9 @@ class NATSCore:
             max_reconnect_attempts=self._config.max_reconnect_attempts,
             reconnect_time_wait=self._config.reconnect_time_wait,
         )
+        if error_callback is None:
+            error_callback = _default_error_cb
+        self._error_cb = error_callback
         self._connection: Optional[ConnectionProto] = None
         self._dispatcher: DispatcherProto = MessageDispatcher(self)
         self._disconnect_event: asyncio.Event = asyncio.Event()
@@ -189,10 +200,16 @@ class NATSCore:
             dispatcher=self._dispatcher,
             disconnect_event=self._disconnect_event,
             connect_operation=self._config.build_connect_operation(),
+            ping_interval=self._config.ping_interval,
+            max_outstanding_pings=self._config.max_outstanding_pings,
+            flusher_queue_size=self._config.flusher_queue_size,
+            max_pending_size=self._config.max_pending_size,
+            force_flush_timeout=self._config.flush_timeout,
+            error_callback=self._error_cb,
+            timeout=self._config.connection_timeout,
             ssl=ssl_context,
             ssl_hostname=ssl_hostname,
             handshake_first=handshake_first,
-            timeout=self._config.connection_timeout,
         )
         self._status = ClientStatus.CONNECTED
         server.info = self._connection.server_info
@@ -211,8 +228,13 @@ class NATSCore:
         ):
             self._on_disconnect_waiter.cancel()
             self._on_disconnect_waiter = None
+        self._status = ClientStatus.DRAINING
         if self._connection is not None and not self._connection.is_closed:
-            await self._connection.close(flush)
+            try:
+                await asyncio.wait_for(self._connection.close(flush), timeout=self._config.drain_timeout)
+            except asyncio.TimeoutError:
+                await self._error_cb(DrainTimeoutError())
+        self._status = ClientStatus.CLOSED
 
     async def flush(self) -> None:
         if self._connection is None:
