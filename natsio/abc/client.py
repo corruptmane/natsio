@@ -1,4 +1,3 @@
-from typing import Awaitable, Callable, TypeAlias
+from typing import Awaitable, Callable
 
-
-ErrorCallback: TypeAlias = Callable[[Exception], Awaitable[None]]
+ErrorCallback = Callable[[Exception], Awaitable[None]]

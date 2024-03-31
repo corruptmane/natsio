@@ -54,7 +54,9 @@ class Subscription:
         self.sid = sid
 
         self._client = client
-        self._msg_queue: asyncio.Queue[CoreMsg] = asyncio.Queue(maxsize=pending_msgs_limit)
+        self._msg_queue: asyncio.Queue[CoreMsg] = asyncio.Queue(
+            maxsize=pending_msgs_limit
+        )
         self._callback = callback
         self._pending_next_msg_calls: MutableMapping[str, asyncio.Future[CoreMsg]] = {}
         self._pending_bytes_limit = pending_bytes_limit

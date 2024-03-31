@@ -1,6 +1,6 @@
 import asyncio
 from ssl import SSLContext
-from typing import TYPE_CHECKING, Awaitable, Callable, List, Optional, Tuple, cast
+from typing import TYPE_CHECKING, List, Optional, Tuple, cast
 
 from natsio.abc.client import ErrorCallback
 from natsio.abc.connection import ConnectionProto, StreamProto
@@ -14,7 +14,12 @@ from natsio.exceptions.connection import (
     OutboundBufferLimitError,
     TLSError,
 )
-from natsio.exceptions.protocol import ProtocolError, SlowConsumer, StaleConnection, UnknownProtocol
+from natsio.exceptions.protocol import (
+    ProtocolError,
+    SlowConsumer,
+    StaleConnection,
+    UnknownProtocol,
+)
 from natsio.exceptions.stream import EndOfStream
 from natsio.protocol.operations.connect import Connect
 from natsio.protocol.operations.err import ERR_OP
@@ -59,7 +64,9 @@ class TCPConnection(ConnectionProto):
         self._listener_task: Optional[asyncio.Task[None]] = None
         self._pinger_task: Optional[asyncio.Task[None]] = None
         self._flusher_task: Optional[asyncio.Task[None]] = None
-        self._flush_queue: asyncio.Queue[asyncio.Future[None]] = asyncio.Queue(maxsize=flusher_queue_size)
+        self._flush_queue: asyncio.Queue[asyncio.Future[None]] = asyncio.Queue(
+            maxsize=flusher_queue_size
+        )
         self._pending: List[bytes] = []
         self._pending_data_size: int = 0
         self._outstanding_pings = 0
@@ -340,12 +347,17 @@ class TCPConnection(ConnectionProto):
         fut: asyncio.Future[None] = asyncio.Future()
         msg = cmd.build()
         msg_size = len(msg)
-        if self._max_pending_size > 0 and (msg_size + self._pending_data_size > self._max_pending_size):
+        if self._max_pending_size > 0 and (
+            msg_size + self._pending_data_size > self._max_pending_size
+        ):
             raise OutboundBufferLimitError()
         self._pending.append(msg)
         self._pending_data_size += msg_size
         await self._flush_queue.put(fut)
-        if force_flush or (self._max_pending_size > 0 and self._pending_data_size > self._max_pending_size):
+        if force_flush or (
+            self._max_pending_size > 0
+            and self._pending_data_size > self._max_pending_size
+        ):
             try:
                 await asyncio.wait_for(fut, timeout=self._force_flush_timeout)
             except asyncio.TimeoutError:
@@ -394,14 +406,22 @@ class TCPConnection(ConnectionProto):
         try:
             await self._dispatcher.dispatch_msg(parsed)
         except asyncio.QueueFull:
-            await self._error_cb(SlowConsumer(subject=parsed.subject, sid=parsed.sid, is_disconnected=False))
+            await self._error_cb(
+                SlowConsumer(
+                    subject=parsed.subject, sid=parsed.sid, is_disconnected=False
+                )
+            )
 
     async def process_hmsg(self, payload: bytes) -> None:
         parsed = await self._parser.parse_hmsg(payload, self._stream)
         try:
             await self._dispatcher.dispatch_hmsg(parsed)
         except asyncio.QueueFull:
-            await self._error_cb(SlowConsumer(subject=parsed.subject, sid=parsed.sid, is_disconnected=False))
+            await self._error_cb(
+                SlowConsumer(
+                    subject=parsed.subject, sid=parsed.sid, is_disconnected=False
+                )
+            )
 
     async def process_error(self, payload: bytes) -> None:
         self._parser.parse_and_raise_error(payload)

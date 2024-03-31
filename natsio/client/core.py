@@ -231,7 +231,9 @@ class NATSCore:
         self._status = ClientStatus.DRAINING
         if self._connection is not None and not self._connection.is_closed:
             try:
-                await asyncio.wait_for(self._connection.close(flush), timeout=self._config.drain_timeout)
+                await asyncio.wait_for(
+                    self._connection.close(flush), timeout=self._config.drain_timeout
+                )
             except asyncio.TimeoutError:
                 await self._error_cb(DrainTimeoutError())
         self._status = ClientStatus.CLOSED
