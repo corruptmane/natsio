@@ -79,23 +79,23 @@ class ClientConfig:
     pedantic: bool = True
     verbose: bool = False
     allow_reconnect: bool = True
-    connection_timeout: float = DEFAULT_CONNECT_TIMEOUT
     reconnect_time_wait: float = DEFAULT_RECONNECT_TIME_WAIT
-    max_reconnect_attempts: int = DEFAULT_MAX_RECONNECT_ATTEMPTS
-    ping_interval: int = DEFAULT_PING_INTERVAL
-    max_outstanding_pings: int = DEFAULT_MAX_OUTSTANDING_PINGS
-    randomize_servers: bool = False
+    connection_timeout: float = DEFAULT_CONNECT_TIMEOUT
+    drain_timeout: float = DEFAULT_DRAIN_TIMEOUT
+    flush_timeout: int = DEFAULT_FLUSH_TIMEOUT
     flusher_queue_size: int = DEFAULT_MAX_FLUSHER_QUEUE_SIZE
+    max_pending_size: int = DEFAULT_MAX_PENDING_SIZE
+    max_reconnect_attempts: int = DEFAULT_MAX_RECONNECT_ATTEMPTS
+    max_outstanding_pings: int = DEFAULT_MAX_OUTSTANDING_PINGS
+    ping_interval: int = DEFAULT_PING_INTERVAL
+    randomize_servers: bool = False
     echo: bool = True
     tls: Optional[TLSConfig] = None
     tls_required: bool = False
     user: Optional[str] = None
     password: Optional[str] = None
     token: Optional[str] = None
-    drain_timeout: float = DEFAULT_DRAIN_TIMEOUT
     inbox_prefix: str = "_INBOX"
-    max_pending_size: int = DEFAULT_MAX_PENDING_SIZE
-    flush_timeout: int = DEFAULT_FLUSH_TIMEOUT
 
     def _build_single_server(self, server_url: str) -> Server:
         if server_url.startswith("nats://"):
