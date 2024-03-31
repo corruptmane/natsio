@@ -12,15 +12,16 @@ from natsio.connection.status import ConnectionStatus
 from natsio.connection.tcp import TCPConnection
 from natsio.exceptions.client import (
     ClientClosedError,
+    ClientError,
+    DrainTimeoutError,
     MaxPayloadError,
     NoServersAvailable,
 )
 from natsio.exceptions.connection import (
-    BadHostnameError,
-    BadPortError,
-    DrainTimeoutError,
+    ConnectionFailedError,
+    ConnectionTimeoutError,
+    NATSConnectionError,
     NoConnectionError,
-    TimeoutError,
 )
 from natsio.exceptions.stream import EndOfStream
 from natsio.messages.core import CoreMsg
@@ -95,7 +96,7 @@ class ServerPoolIterator:
 
 
 async def _default_error_cb(exc: Exception) -> None:
-    log.error("NATS: Encountered error", exc_info=exc)
+    log.error("NATS: Encountered error: %s", exc.__class__.__name__, exc_info=exc)
 
 
 class NATSCore:
@@ -181,9 +182,9 @@ class NATSCore:
 
     async def _connect(self, server: Server) -> None:
         if server.uri.hostname is None:
-            raise BadHostnameError(server.uri.hostname)
+            raise ClientError(f"Bad hostname: {server.uri.hostname}")
         if server.uri.port is None:
-            raise BadPortError(server.uri.port)
+            raise ClientError(f"Bad port: {server.uri.port}")
 
         ssl_context = None
         ssl_hostname = None
@@ -216,7 +217,11 @@ class NATSCore:
 
     async def connect(self) -> None:
         server = self._server_pool_iterator.current_server
-        await self._connect(server)
+        try:
+            await self._connect(server)
+        except NATSConnectionError as exc:
+            await self._error_cb(exc)
+            await self._reconnect()
         self._on_disconnect_waiter = asyncio.create_task(self._on_disconnect())
 
     async def close(self, flush: bool = True, timeout: float = 5) -> None:
@@ -267,17 +272,19 @@ class NATSCore:
                 await self._connect(server)
             except EndOfStream:
                 continue
-            except TimeoutError:
+            except asyncio.TimeoutError:
                 server.reconnects += 1
-                log.error("Connection to server %s timed out", server.uri.netloc)
+                await self._error_cb(ConnectionTimeoutError(uri=server.uri.netloc))
                 continue
             except Exception as exc:
                 server.reconnects += 1
-                log.exception(
-                    "Failed to reconnect to server %s: %s",
-                    server.uri.netloc,
-                    exc.__class__.__name__,
-                )
+                if isinstance(exc, NATSConnectionError) and exc.uri is None:
+                    exc.uri = server.uri.netloc
+                    error = exc
+                else:
+                    error = ConnectionFailedError(uri=server.uri.netloc)
+                    error.set_cause(exc)
+                await self._error_cb(error)
                 continue
             else:
                 log.info("Reconnected to NATS server %s", server.uri.netloc)

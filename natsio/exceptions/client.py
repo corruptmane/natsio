@@ -1,6 +1,6 @@
 from typing import Optional
 
-from .base import NATSError
+from .base import NATSError, TimeoutError
 
 
 class ClientError(NATSError):
@@ -48,3 +48,15 @@ class InvalidHeaderVersion(ParserError):
 
     def __str__(self) -> str:
         return f"NATS: {self.description} - {self.version.decode()}"
+
+
+class TLSError(ClientError):
+    description = "TLS error"
+
+
+class DrainTimeoutError(TimeoutError):
+    description = "Drain timed out"
+
+
+class FlushTimeoutError(TimeoutError):
+    description = "Flush timed out"

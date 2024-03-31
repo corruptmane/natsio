@@ -24,11 +24,11 @@ class StreamProtocol(asyncio.Protocol):
         self.write_event = asyncio.Event()
         self.write_event.set()
         self.disconnect_event.clear()
-        log.info("Connection established")
+        log.debug("Connection established")
         self.patch_transport(cast(asyncio.Transport, transport))
 
     def connection_lost(self, exc: Optional[Exception]) -> None:
-        log.warning("Connection lost")
+        log.debug("Connection lost")
         if exc:
             log.exception(exc)
             self.exception = exc
@@ -43,7 +43,7 @@ class StreamProtocol(asyncio.Protocol):
         self.read_event.set()
 
     def eof_received(self) -> None:
-        log.warning("EOF received")
+        log.debug("EOF received")
         self.read_event.set()
 
     def pause_writing(self) -> None:

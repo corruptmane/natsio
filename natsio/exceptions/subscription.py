@@ -1,7 +1,7 @@
 from typing import Optional
 
+from .base import TimeoutError
 from .client import ClientError
-from .connection import TimeoutError
 
 
 class SubscriptionError(ClientError):

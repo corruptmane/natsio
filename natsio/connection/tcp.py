@@ -7,12 +7,12 @@ from natsio.abc.connection import ConnectionProto, StreamProto
 from natsio.abc.dispatcher import DispatcherProto
 from natsio.abc.protocol import ClientMessageProto
 from natsio.const import CRLF
+from natsio.exceptions.client import FlushTimeoutError, TLSError
 from natsio.exceptions.connection import (
+    ConnectionFailedError,
     ConnectionTimeoutError,
-    FlushTimeoutError,
     NoConnectionError,
     OutboundBufferLimitError,
-    TLSError,
 )
 from natsio.exceptions.protocol import (
     ProtocolError,
@@ -186,8 +186,13 @@ class TCPConnection(ConnectionProto):
                     timeout=timeout,
                 ),
             )
-        except OSError:
+        except asyncio.TimeoutError:
             raise ConnectionTimeoutError() from None
+        except OSError as exc:
+            cause: Optional[OSError] = exc
+            if "Connect call failed" in str(cause):
+                cause = None
+            raise ConnectionFailedError() from cause
         self = cls(
             stream=Stream(transport, protocol),
             dispatcher=dispatcher,

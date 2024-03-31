@@ -1,3 +1,4 @@
+import asyncio
 from typing import Optional
 
 
@@ -10,3 +11,7 @@ class NATSError(Exception):
 
     def __str__(self) -> str:
         return f"NATS: {self.description}"
+
+
+class TimeoutError(NATSError, asyncio.TimeoutError):
+    description = "Operation timed out"
