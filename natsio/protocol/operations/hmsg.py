@@ -20,7 +20,7 @@ class HMsg(ServerMessageProto):
         return self.subject.startswith(inbox_prefix)
 
     def inbox_id(self, inbox_prefix: str) -> str:
-        return self.subject.rstrip(inbox_prefix + ".")
+        return self.subject.lstrip(inbox_prefix + ".")
 
 
 __all__ = (
