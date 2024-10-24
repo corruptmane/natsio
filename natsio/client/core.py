@@ -8,8 +8,10 @@ from natsio.abc.client import ErrorCallback
 from natsio.abc.connection import ConnectionProto
 from natsio.abc.dispatcher import DispatcherProto
 from natsio.abc.protocol import ClientMessageProto
+from natsio.client.jetstream.client import JetStream
 from natsio.connection.status import ConnectionStatus
 from natsio.connection.tcp import TCPConnection
+from natsio.exceptions.base import TimeoutError
 from natsio.exceptions.client import (
     ClientClosedError,
     ClientError,
@@ -385,6 +387,11 @@ class NATSCore:
         inbox_id = self._nuid_generator().decode()
         inbox = self.inbox_prefix + "." + inbox_id
         return inbox_id, inbox
+
+    def jetstream(self, domain: str | None = None, timeout: int | float | None = None) -> JetStream:
+        if timeout is None:
+            timeout = self._config.request_timeout
+        return JetStream(self, domain, timeout)
 
     async def request(
         self,
