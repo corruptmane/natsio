@@ -22,6 +22,7 @@ DEFAULT_MAX_OUTSTANDING_PINGS: Final[int] = 2
 DEFAULT_MAX_FLUSHER_QUEUE_SIZE: Final[int] = 1024
 DEFAULT_DRAIN_TIMEOUT: Final[float] = 30
 DEFAULT_FLUSH_TIMEOUT: Final[int] = 10
+DEFAULT_REQUEST_TIMEOUT: Final[int] = 5
 DEFAULT_MAX_PENDING_SIZE: Final[int] = 2 * 1024 * 1024
 
 
@@ -83,6 +84,7 @@ class ClientConfig:
     connection_timeout: float = DEFAULT_CONNECT_TIMEOUT
     drain_timeout: float = DEFAULT_DRAIN_TIMEOUT
     flush_timeout: int = DEFAULT_FLUSH_TIMEOUT
+    request_timeout: float | int = DEFAULT_REQUEST_TIMEOUT
     flusher_queue_size: int = DEFAULT_MAX_FLUSHER_QUEUE_SIZE
     max_pending_size: int = DEFAULT_MAX_PENDING_SIZE
     max_reconnect_attempts: int = DEFAULT_MAX_RECONNECT_ATTEMPTS
