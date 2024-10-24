@@ -58,6 +58,9 @@ class NUID:
         prefix.extend(suffix)
         return prefix
 
+    def __call__(self) -> bytearray:
+        return self.next()
+
     def randomize_prefix(self) -> None:
         random_bytes = token_bytes(PREFIX_LENGTH)
         self._prefix = bytearray(DIGITS[c % BASE] for c in random_bytes)

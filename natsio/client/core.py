@@ -37,6 +37,7 @@ from natsio.subscriptions.core import (
     Subscription,
 )
 from natsio.utils.logger import client_logger as log
+from natsio.utils.nuid import NUID
 from natsio.utils.uuid import get_uuid
 
 from .config import ClientConfig, Server
@@ -109,6 +110,7 @@ class NATSCore:
         "_disconnect_event",
         "_on_disconnect_waiter",
         "_status",
+        "_nuid_generator",
     )
 
     def __init__(
@@ -130,6 +132,7 @@ class NATSCore:
         self._disconnect_event: asyncio.Event = asyncio.Event()
         self._on_disconnect_waiter: Optional[asyncio.Task[None]] = None
         self._status: ClientStatus = ClientStatus.DISCONNECTED
+        self._nuid_generator = NUID()
 
     @property
     def inbox_prefix(self) -> str:
@@ -376,6 +379,11 @@ class NATSCore:
         else:
             self._dispatcher.remove_subscription_when_ready(sub.sid)
 
+    def _generate_unique_inbox(self) -> tuple[str, str]:
+        inbox_id = self._nuid_generator().decode()
+        inbox = self.inbox_prefix + "." + inbox_id
+        return inbox_id, inbox
+
     async def request(
         self,
         subject: str,
@@ -385,14 +393,13 @@ class NATSCore:
     ) -> CoreMsg:
         self._raise_if_closed()
         sid = get_uuid()
-        inbox_id = get_uuid()
-        reply_to = f"{self.inbox_prefix}.{inbox_id}"
+        inbox_id, inbox = self._generate_unique_inbox()
         future: asyncio.Future[CoreMsg] = asyncio.Future()
-        await self._send_command(Sub(subject=reply_to, sid=sid))
+        await self._send_command(Sub(subject=inbox, sid=sid))
         self._dispatcher.add_request_inbox(inbox_id, future)
 
         try:
-            await self.publish(subject, data, reply_to=reply_to, headers=headers)
+            await self.publish(subject, data, reply_to=inbox, headers=headers)
             return await asyncio.wait_for(future, timeout)
         except asyncio.TimeoutError:
             future.cancel()
