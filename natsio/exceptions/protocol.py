@@ -128,6 +128,10 @@ class PublishPermissionsViolation(PermissionsViolation):
     description = "Permissions Violation for Publish"
 
 
+class NoRespondersError(ProtocolError):
+    description = "Subject has no subscribers"
+
+
 name_to_error: Mapping[str, Type[ProtocolError]] = {
     "Unknown Protocol Operation": UnknownProtocol,
     "Attempted To Connect To Route Port": RoutePortConnectAttempt,
