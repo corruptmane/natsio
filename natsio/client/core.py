@@ -23,9 +23,11 @@ from natsio.exceptions.connection import (
     NATSConnectionError,
     NoConnectionError,
 )
+from natsio.exceptions.protocol import NoRespondersError
 from natsio.exceptions.stream import EndOfStream
 from natsio.messages.core import CoreMsg
 from natsio.messages.dispatcher import MessageDispatcher
+from natsio.protocol.headers import Header
 from natsio.protocol.operations.hpub import HPub
 from natsio.protocol.operations.pub import Pub
 from natsio.protocol.operations.sub import Sub
@@ -400,7 +402,10 @@ class NATSCore:
 
         try:
             await self.publish(subject, data, reply_to=inbox, headers=headers)
-            return await asyncio.wait_for(future, timeout)
+            res = await asyncio.wait_for(future, timeout)
+            if res.headers and Header.STATUS in res.headers and res.headers[Header.STATUS] == "503":
+                raise NoRespondersError()
+            return res
         except asyncio.TimeoutError:
             future.cancel()
             raise TimeoutError("Request timeout")
