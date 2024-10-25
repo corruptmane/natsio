@@ -15,7 +15,7 @@ from natsio.protocol.operations.info import Info
 from natsio.protocol.operations.msg import Msg
 from natsio.utils.json import json_loads
 
-WHITESPACE_RE = re.compile(b"\s+")
+WHITESPACE_RE = re.compile(rb"\s+")
 ERR_NAME_RE = re.compile(r"'(.*?)'")
 
 
