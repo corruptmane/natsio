@@ -28,7 +28,7 @@ def _map_to_dataclass(data: Mapping[str, Any], cls: Type[T]) -> T:
     return cls(**filtered_data)
 
 
-@dataclass(init=False)
+@dataclass
 class Base:
     @classmethod
     def from_response(cls: Type[Self], **data: Any) -> Self:
