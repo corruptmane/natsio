@@ -1,7 +1,9 @@
-from dataclasses import Field, dataclass, fields, is_dataclass
+from dataclasses import Field, asdict, dataclass, fields, is_dataclass
 from enum import Enum
 from functools import cached_property
-from typing import Any, ClassVar, Final, Mapping, Protocol, Self, Type, TypeVar
+from typing import Any, ClassVar, Mapping, Protocol, Self, Type, TypeVar
+
+from natsio.utils.time import from_nanoseconds
 
 
 class DataclassInstance(Protocol):
@@ -9,8 +11,6 @@ class DataclassInstance(Protocol):
 
 
 T = TypeVar("T", bound=DataclassInstance)
-
-NANOSECOND_POWER: Final[int] = 10**9
 
 
 def _map_to_dataclass(data: Mapping[str, Any], cls: Type[T]) -> T:
@@ -33,6 +33,9 @@ class Base:
     @classmethod
     def from_response(cls: Type[Self], **data: Any) -> Self:
         return _map_to_dataclass(data, cls)
+
+    def to_dict(self) -> Mapping[str, Any]:
+        return asdict(self)
 
 
 @dataclass
@@ -149,9 +152,9 @@ class ConsumerLimits(Base):
 
     @cached_property
     def inactive_threshold_seconds(self) -> float | None:
-        if self.inactive_threshold is not None:
-            return self.inactive_threshold / NANOSECOND_POWER
-        return self.inactive_threshold
+        if self.inactive_threshold is None:
+            return self.inactive_threshold
+        return from_nanoseconds(self.inactive_threshold)
 
 
 @dataclass
@@ -191,13 +194,13 @@ class StreamConfig(Base):
 
     @cached_property
     def max_age_seconds(self) -> float:
-        return self.max_age / NANOSECOND_POWER
+        return from_nanoseconds(self.max_age)
 
     @cached_property
     def duplicate_window_seconds(self) -> float | None:
-        if self.duplicate_window is not None:
-            return self.duplicate_window / NANOSECOND_POWER
-        return self.duplicate_window
+        if self.duplicate_window is None:
+            return self.duplicate_window
+        return from_nanoseconds(self.duplicate_window)
 
 
 @dataclass
@@ -233,7 +236,7 @@ class Replica(Base):
 
     @cached_property
     def active_seconds(self) -> float:
-        return self.active / NANOSECOND_POWER
+        return from_nanoseconds(self.active)
 
 
 @dataclass
@@ -263,7 +266,7 @@ class Mirror(Base):
 
     @cached_property
     def active_seconds(self) -> float:
-        return self.active / NANOSECOND_POWER
+        return from_nanoseconds(self.active)
 
 
 @dataclass
@@ -278,7 +281,7 @@ class Source(Base):
 
     @cached_property
     def active_seconds(self) -> float:
-        return self.active / NANOSECOND_POWER
+        return from_nanoseconds(self.active)
 
 
 @dataclass
@@ -301,3 +304,44 @@ class StreamInfo(Base):
     mirror: Mirror | None = None
     sources: list[Source] | None = None
     alternates: list[Alternate] | None = None
+
+
+@dataclass
+class UpdateStreamRequest(Base):
+    retention: Retention
+    max_consumers: int
+    max_msgs: int
+    max_bytes: int
+    max_age: int
+    storage: Storage
+    num_replicas: int
+    name: str | None = None
+    description: str | None = None
+    subjects: list[str] | None = None
+    subject_transform: SubjectTransform | None = None
+    max_msgs_per_subject: int | None = -1
+    max_msg_size: int | None = -1
+    compression: Compression | None = Compression.none
+    first_seq: int | None = None
+    no_ack: bool | None = False
+    template_owner: str | None = None
+    discard: Discard | None = Discard.old
+    duplicate_window: int | None = 0
+    placement: Placement | None = None
+    mirror: Mirror | None = None
+    sources: list[Source] | None = None
+    sealed: bool | None = False
+    deny_delete: bool | None = False
+    deny_purge: bool | None = False
+    allow_rollup_hdrs: bool | None = False
+    allow_direct: bool | None = False
+    mirror_direct: bool | None = False
+    republish: Republish | None = None
+    discard_new_per_subject: bool | None = False
+    metadata: Mapping[str, str] | None = None
+    consumer_limits: ConsumerLimits | None = None
+
+
+@dataclass
+class CreateStreamRequest(UpdateStreamRequest):
+    pedantic: bool | None = False
