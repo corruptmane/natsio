@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from functools import cached_property
-from typing import Final, List, Optional
+from typing import Final
 
 from natsio.abc.protocol import ServerMessageProto
 from natsio.client.config import ServerInfo
@@ -19,21 +19,21 @@ class Info(ServerMessageProto):
     headers: bool
     max_payload: int
     proto: int
-    client_id: Optional[int] = None
-    auth_required: Optional[bool] = None
-    tls_required: Optional[bool] = None
-    tls_verify: Optional[bool] = None
-    tls_available: Optional[bool] = None
-    connect_urls: Optional[List[str]] = None
-    ws_connect_urls: Optional[List[str]] = None
-    ldm: Optional[bool] = None
-    git_commit: Optional[str] = None
-    jetstream: Optional[bool] = None
-    ip: Optional[str] = None
-    client_ip: Optional[str] = None
-    nonce: Optional[str] = None
-    cluster: Optional[str] = None
-    domain: Optional[str] = None
+    client_id: int | None = None
+    auth_required: bool | None = None
+    tls_required: bool | None = None
+    tls_verify: bool | None = None
+    tls_available: bool | None = None
+    connect_urls: list[str] | None = None
+    ws_connect_urls: list[str] | None = None
+    ldm: bool | None = None
+    git_commit: str | None = None
+    jetstream: bool | None = None
+    ip: str | None = None
+    client_ip: str | None = None
+    nonce: str | None = None
+    cluster: str | None = None
+    domain: str | None = None
 
     @cached_property
     def server_info(self) -> ServerInfo:

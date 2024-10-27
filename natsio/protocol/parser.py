@@ -1,5 +1,5 @@
 import re
-from typing import Mapping, NoReturn, Optional
+from typing import Mapping, NoReturn
 
 from natsio.abc.connection import StreamProto
 from natsio.const import CRLF, CRLF_SIZE
@@ -35,7 +35,7 @@ class ProtocolParser:
         payload = await stream.read_until(CRLF)
         return Msg(subject.decode(), sid.decode(), payload_size, reply_to, payload)
 
-    def _parse_headers(self, data: bytes) -> Optional[Mapping[str, str]]:
+    def _parse_headers(self, data: bytes) -> Mapping[str, str] | None:
         headers = {}
 
         headers_payload = data.split(2 * CRLF)[0].rstrip(2 * CRLF)

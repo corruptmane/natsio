@@ -1,11 +1,10 @@
 import asyncio
-from typing import Optional
 
 
 class NATSError(Exception):
     description: str = "error"
 
-    def __init__(self, description: Optional[str] = None) -> None:
+    def __init__(self, description: str | None = None) -> None:
         if description is not None:
             self.description = description
 

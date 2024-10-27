@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 from functools import cached_property
 from random import shuffle
 from ssl import SSLContext
-from typing import Final, List, Optional, Tuple
+from typing import Final, Tuple
 from urllib.parse import ParseResult, urlparse
 
 from natsio import __version__ as natsio_version
@@ -29,7 +29,7 @@ DEFAULT_MAX_PENDING_SIZE: Final[int] = 2 * 1024 * 1024
 @dataclass
 class TLSConfig:
     ssl: SSLContext
-    hostname: Optional[str] = None
+    hostname: str | None = None
     handshake_first: bool = False
 
 
@@ -44,21 +44,21 @@ class ServerInfo:
     headers: bool
     max_payload: int
     proto: int
-    client_id: Optional[int] = None
-    auth_required: Optional[bool] = None
-    tls_required: Optional[bool] = None
-    tls_verify: Optional[bool] = None
-    tls_available: Optional[bool] = None
-    connect_urls: Optional[List[str]] = None
-    ws_connect_urls: Optional[List[str]] = None
-    ldm: Optional[bool] = None
-    git_commit: Optional[str] = None
-    jetstream: Optional[bool] = None
-    ip: Optional[str] = None
-    client_ip: Optional[str] = None
-    nonce: Optional[str] = None
-    cluster: Optional[str] = None
-    domain: Optional[str] = None
+    client_id: int | None = None
+    auth_required: bool | None = None
+    tls_required: bool | None = None
+    tls_verify: bool | None = None
+    tls_available: bool | None = None
+    connect_urls: list[str] | None = None
+    ws_connect_urls: list[str] | None = None
+    ldm: bool | None = None
+    git_commit: str | None = None
+    jetstream: bool | None = None
+    ip: str | None = None
+    client_ip: str | None = None
+    nonce: str | None = None
+    cluster: str | None = None
+    domain: str | None = None
 
 
 @dataclass
@@ -66,7 +66,7 @@ class Server:
     uri: ParseResult
     reconnects: int = 0
     last_attempt: int = 0
-    info: Optional[ServerInfo] = None
+    info: ServerInfo | None = None
 
     @property
     def is_discovered(self) -> bool:
@@ -75,8 +75,8 @@ class Server:
 
 @dataclass
 class ClientConfig:
-    servers: List[str] = field(default_factory=lambda: ["nats://localhost:4222"])
-    name: Optional[str] = None
+    servers: list[str] = field(default_factory=lambda: ["nats://localhost:4222"])
+    name: str | None = None
     pedantic: bool = True
     verbose: bool = False
     allow_reconnect: bool = True
@@ -92,11 +92,11 @@ class ClientConfig:
     ping_interval: int = DEFAULT_PING_INTERVAL
     randomize_servers: bool = False
     echo: bool = True
-    tls: Optional[TLSConfig] = None
+    tls: TLSConfig | None = None
     tls_required: bool = False
-    user: Optional[str] = None
-    password: Optional[str] = None
-    token: Optional[str] = None
+    user: str | None = None
+    password: str | None = None
+    token: str | None = None
     inbox_prefix: str = "_INBOX"
 
     def _build_single_server(self, server_url: str) -> Server:
@@ -122,7 +122,7 @@ class ClientConfig:
     def server_pool(self) -> Tuple[Server, ...]:
         if not self.servers:
             raise NoServersProvided()
-        parsed_servers: List[Server] = []
+        parsed_servers: list[Server] = []
         for server in self.servers:
             parsed_servers.append(self._build_single_server(server))
         if self.randomize_servers:

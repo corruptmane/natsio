@@ -1,5 +1,3 @@
-from typing import Optional
-
 from .base import NATSError, TimeoutError
 
 
@@ -42,7 +40,7 @@ class ParserError(ClientError):
 class InvalidHeaderVersion(ParserError):
     description = "Invalid headers version"
 
-    def __init__(self, version: bytes, description: Optional[str] = None) -> None:
+    def __init__(self, version: bytes, description: str | None = None) -> None:
         super().__init__(description)
         self.version = version
 

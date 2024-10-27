@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Final, Mapping, MutableSequence, Optional
+from typing import Final, Mapping, MutableSequence
 
 from natsio.abc.protocol import ClientMessageProto
 from natsio.const import CRLF
@@ -11,8 +11,8 @@ HPUB_OP: Final[bytes] = b"HPUB"
 class HPub(ClientMessageProto):
     subject: str
     headers: Mapping[str, str]
-    reply_to: Optional[str] = None
-    payload: Optional[bytes] = None
+    reply_to: str | None = None
+    payload: bytes | None = None
 
     def _build_headers(self) -> bytes:
         headers = b"NATS/1.0" + CRLF

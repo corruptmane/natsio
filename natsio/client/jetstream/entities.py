@@ -1,30 +1,34 @@
-from dataclasses import dataclass, fields, is_dataclass
+from dataclasses import Field, dataclass, fields, is_dataclass
 from enum import Enum
 from functools import cached_property
-from typing import Any, Final, Mapping, Type, TypeVar, cast
+from typing import Any, ClassVar, Final, Mapping, Protocol, Self, Type, TypeVar
 
-Self = TypeVar("Self", bound="Base")
-T = TypeVar("T")
+
+class DataclassInstance(Protocol):
+    __dataclass_fields__: ClassVar[dict[str, Field[Any]]]
+
+
+T = TypeVar("T", bound=DataclassInstance)
 
 NANOSECOND_POWER: Final[int] = 10**9
 
 
-def _map_to_dataclass(data: Mapping[str, Any], type: Type[T]) -> T:
-    if not is_dataclass(type):
+def _map_to_dataclass(data: Mapping[str, Any], cls: Type[T]) -> T:
+    if not is_dataclass(cls):
         raise ValueError("Provided class is not a dataclass")
 
-    field_names = {field.name: field.type for field in fields(type)}
+    field_names = {field.name: field.type for field in fields(cls)}
     filtered_data = {}
     
     for key, value in data.items():
         if key in field_names:
             field_type = field_names[key]
             if is_dataclass(field_type):
-                filtered_data[key] = _map_to_dataclass(value, cast(Type, field_type))
+                filtered_data[key] = _map_to_dataclass(value, field_type)  # type: ignore[arg-type]
             else:
                 filtered_data[key] = value
     
-    return type(**filtered_data)
+    return cls(**filtered_data)
 
 
 @dataclass(init=False)

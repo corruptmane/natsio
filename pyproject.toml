@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "natsio"
 description = "NATS client for Python"
-requires-python = ">=3.9"
+requires-python = ">=3.11"
 license = "MIT"
 readme = "README.md"
 authors = [{ name = "Corrupt Mane", email = "corruptmane@gmail.com" }]
@@ -21,16 +21,15 @@ keywords = [
 classifiers = [
     "License :: OSI Approved :: MIT License",
     "Development Status :: 1 - Planning",
-    "Environment :: Console",
+    "Development Status :: 2 - Pre-Alpha",
     "Framework :: AsyncIO",
     "Intended Audience :: Developers",
     "Intended Audience :: Information Technology",
     "Intended Audience :: System Administrators",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: Implementation :: CPython",
     "Typing :: Typed",
 ]
@@ -39,6 +38,27 @@ dynamic = ["version"]
 [project.urls]
 Homepage = "https://github.com/corruptmane/natsio"
 Repository = "https://github.com/corruptmane/natsio"
+
+[project.optional-dependencies]
+speed = [
+    "orjson~=3.10.10",
+    "uuid6~=2024.7.10",
+]
+dev = [
+    "mypy~=1.11.2",
+    "ruff~=0.6.4",
+]
+
+[tool.mypy]
+files = ["natsio"]
+python_version = "3.11"
+strict = true
+
+[tool.ruff]
+line-length = 99
+src = ["natsio"]
+target-version = "py312"
+exclude = ["natsio/utils/nuid.py"]
 
 [tool.hatch.version]
 path = "natsio/__init__.py"

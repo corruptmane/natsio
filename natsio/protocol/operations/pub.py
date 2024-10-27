@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Final, MutableSequence, Optional
+from typing import Final, MutableSequence
 
 from natsio.abc.protocol import ClientMessageProto
 from natsio.const import CRLF
@@ -10,8 +10,8 @@ PUB_OP: Final[bytes] = b"PUB"
 @dataclass
 class Pub(ClientMessageProto):
     subject: str
-    reply_to: Optional[str] = None
-    payload: Optional[bytes] = None
+    reply_to: str | None = None
+    payload: bytes | None = None
 
     def _build_payload(self) -> bytes:
         parts: MutableSequence[bytes] = [self.subject.encode()]

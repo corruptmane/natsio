@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Any, Final, Mapping, cast
+from typing import TYPE_CHECKING, Any, Final, Mapping, MutableMapping, cast
 
 from natsio.exceptions.jetstream import APIError, ServiceUnavailableError
 from natsio.exceptions.protocol import NoRespondersError
@@ -30,7 +30,7 @@ class JetStream:
         return AccountInfo.from_response(**resp)
 
     async def get_stream_list(self, subject: str | None = None, offset: int = 0) -> list[StreamInfo]:
-        data: Mapping[str, str | int] = dict(offset=offset)
+        data: MutableMapping[str, str | int] = dict(offset=offset)
         if subject is not None:
             data["subject"] = subject
         resp = await self._api_request("{self._prefix}.STREAM.LIST", json_dumps(data))
@@ -45,7 +45,7 @@ class JetStream:
         except NoRespondersError:
             raise ServiceUnavailableError()
 
-        resp = json_loads(msg.payload)
+        resp = cast(Mapping[str, Any], json_loads(msg.payload))
         if "error" in resp:
             raise APIError.from_error(**resp)
 

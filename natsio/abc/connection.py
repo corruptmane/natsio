@@ -1,6 +1,6 @@
 import asyncio
 from ssl import SSLContext
-from typing import TYPE_CHECKING, Optional, Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from natsio.connection.status import ConnectionStatus
 from natsio.protocol.operations.connect import Connect
@@ -85,9 +85,9 @@ class ConnectionProto(Protocol):
         force_flush_timeout: int,
         error_callback: ErrorCallback,
         timeout: float,
-        ssl: Optional[SSLContext],
-        ssl_hostname: Optional[str],
-        handshake_first: Optional[bool],
+        ssl: SSLContext | None,
+        ssl_hostname: str | None,
+        handshake_first: bool | None,
     ) -> "ConnectionProto":
         raise NotImplementedError
 

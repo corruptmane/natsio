@@ -22,15 +22,16 @@ class APIError(NATSError):
         if "code" not in data:
             return cls(**data)
         code = data["code"]
+        err_class: type[APIError]
         match code:
-            case 503:
-                err_class = ServiceUnavailableError
-            case 500:
-                err_class = ServerError
-            case 404:
-                err_class = NotFoundError
             case 400:
                 err_class = BadRequestError
+            case 404:
+                err_class = NotFoundError
+            case 500:
+                err_class = ServerError
+            case 503:
+                err_class = ServiceUnavailableError
             case _:
                 err_class = APIError
         return err_class(**data)

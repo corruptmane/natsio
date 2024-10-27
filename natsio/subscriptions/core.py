@@ -6,7 +6,7 @@ from typing import (
     Awaitable,
     Callable,
     MutableMapping,
-    Optional,
+    
 )
 
 from natsio.exceptions.client import ClientClosedError
@@ -41,9 +41,9 @@ class Subscription:
         self,
         client: "NATSCore",
         subject: str,
-        queue: Optional[str] = None,
-        sid: Optional[str] = None,
-        callback: Optional[CoreCallback] = None,
+        queue: str | None = None,
+        sid: str | None = None,
+        callback: CoreCallback | None = None,
         pending_msgs_limit: int = DEFAULT_SUB_PENDING_MSGS_LIMIT,
         pending_bytes_limit: int = DEFAULT_SUB_PENDING_BYTES_LIMIT,
     ) -> None:
@@ -61,12 +61,12 @@ class Subscription:
         self._pending_next_msg_calls: MutableMapping[str, asyncio.Future[CoreMsg]] = {}
         self._pending_bytes_limit = pending_bytes_limit
         self._pending_size = 0
-        self._reader_task: Optional[asyncio.Task[None]] = None
-        self._message_iterator: Optional[SubscriptionMessageIterator] = None
+        self._reader_task: asyncio.Task[None] | None = None
+        self._message_iterator: SubscriptionMessageIterator | None = None
         self._status = SubscriptionStatus.INITIALISING
         self._received = 0
         self._max_msgs = 0
-        self._close_after_task: Optional[asyncio.Task[None]] = None
+        self._close_after_task: asyncio.Task[None] | None = None
 
     def _raise_if_slow_consumer(self, new_data_size: int) -> None:
         if self._pending_bytes_limit <= 0:
@@ -93,7 +93,7 @@ class Subscription:
         if self._max_msgs > 0:
             self._received += 1
 
-    async def next_msg(self, timeout: Optional[float] = 1) -> CoreMsg:
+    async def next_msg(self, timeout: float | None = 1) -> CoreMsg:
         if self._callback is not None:
             raise SubscriptionSetupError(
                 "this method can not be used in async subscriptions"

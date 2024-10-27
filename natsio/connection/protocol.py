@@ -1,6 +1,6 @@
 import asyncio
 from collections import deque
-from typing import Deque, Optional, cast
+from typing import Deque, cast
 
 from natsio.utils.logger import connection_logger as log
 
@@ -9,7 +9,7 @@ class StreamProtocol(asyncio.Protocol):
     read_queue: Deque[bytes]
     read_event: asyncio.Event
     write_event: asyncio.Event
-    exception: Optional[Exception] = None
+    exception: Exception | None = None
     disconnect_event: asyncio.Event
 
     def __init__(self, disconnect_event: asyncio.Event) -> None:
@@ -27,7 +27,7 @@ class StreamProtocol(asyncio.Protocol):
         log.debug("Connection established")
         self.patch_transport(cast(asyncio.Transport, transport))
 
-    def connection_lost(self, exc: Optional[Exception]) -> None:
+    def connection_lost(self, exc: Exception | None) -> None:
         log.debug("Connection lost")
         if exc:
             log.exception(exc)

@@ -1,11 +1,12 @@
 import asyncio
 from ssl import SSLContext
-from typing import TYPE_CHECKING, List, Optional, Tuple, cast
+from typing import Tuple, cast
 
 from natsio.abc.client import ErrorCallback
 from natsio.abc.connection import ConnectionProto, StreamProto
 from natsio.abc.dispatcher import DispatcherProto
 from natsio.abc.protocol import ClientMessageProto
+from natsio.client.config import ServerInfo
 from natsio.const import CRLF
 from natsio.exceptions.client import FlushTimeoutError, TLSError
 from natsio.exceptions.connection import (
@@ -35,9 +36,6 @@ from .protocol import StreamProtocol
 from .status import ConnectionStatus
 from .stream import Stream
 
-if TYPE_CHECKING:
-    from natsio.client.config import ServerInfo
-
 
 class TCPConnection(ConnectionProto):
     def __init__(
@@ -61,19 +59,19 @@ class TCPConnection(ConnectionProto):
         self._force_flush_timeout = force_flush_timeout
         self._error_cb = error_callback
         self._parser = ProtocolParser()
-        self._listener_task: Optional[asyncio.Task[None]] = None
-        self._pinger_task: Optional[asyncio.Task[None]] = None
-        self._flusher_task: Optional[asyncio.Task[None]] = None
+        self._listener_task: asyncio.Task[None] | None = None
+        self._pinger_task: asyncio.Task[None] | None = None
+        self._flusher_task: asyncio.Task[None] | None = None
         self._flush_queue: asyncio.Queue[asyncio.Future[None]] = asyncio.Queue(
             maxsize=flusher_queue_size
         )
-        self._pending: List[bytes] = []
+        self._pending: list[bytes] = []
         self._pending_data_size: int = 0
         self._outstanding_pings = 0
         self._status = ConnectionStatus.CONNECTING
         self._dispatcher = dispatcher
         self._disconnect_event = disconnect_event
-        self._server_info: Optional["Info"] = None
+        self._server_info: Info | None = None
 
     @property
     def outstanding_pings(self) -> int:
@@ -104,7 +102,7 @@ class TCPConnection(ConnectionProto):
         return self.status == ConnectionStatus.DRAINING
 
     @property
-    def server_info(self) -> "ServerInfo":
+    def server_info(self) -> ServerInfo:
         if self._server_info is None:
             raise NoConnectionError()
         return self._server_info.server_info
@@ -114,8 +112,8 @@ class TCPConnection(ConnectionProto):
         loop: asyncio.AbstractEventLoop,
         transport: asyncio.Transport,
         protocol: StreamProtocol,
-        ssl: Optional[SSLContext],
-        hostname: Optional[str],
+        ssl: SSLContext | None,
+        hostname: str | None,
     ) -> asyncio.Transport:
         if ssl is None:
             raise TLSError("SSLContext is required for TLS upgrade")
@@ -132,9 +130,9 @@ class TCPConnection(ConnectionProto):
         loop: asyncio.AbstractEventLoop,
         transport: asyncio.Transport,
         protocol: StreamProtocol,
-        ssl: Optional[SSLContext],
-        ssl_hostname: Optional[str],
-        handshake_first: Optional[bool],
+        ssl: SSLContext | None,
+        ssl_hostname: str | None,
+        handshake_first: bool | None,
     ) -> None:
         if handshake_first is True:
             transport = await self._upgrade_tls(
@@ -169,9 +167,9 @@ class TCPConnection(ConnectionProto):
         force_flush_timeout: int,
         error_callback: ErrorCallback,
         timeout: float,
-        ssl: Optional[SSLContext] = None,
-        ssl_hostname: Optional[str] = None,
-        handshake_first: Optional[bool] = None,
+        ssl: SSLContext | None = None,
+        ssl_hostname: str | None = None,
+        handshake_first: bool | None = None,
     ) -> "TCPConnection":
         loop = asyncio.get_running_loop()
         try:
@@ -189,7 +187,7 @@ class TCPConnection(ConnectionProto):
         except asyncio.TimeoutError:
             raise ConnectionTimeoutError() from None
         except OSError as exc:
-            cause: Optional[OSError] = exc
+            cause: OSError | None = exc
             if "Connect call failed" in str(cause):
                 cause = None
             raise ConnectionFailedError() from cause
@@ -248,7 +246,7 @@ class TCPConnection(ConnectionProto):
 
     async def _listen(self) -> None:
         while True:
-            log.debug("Listener loop start")
+            log.debug("listener loop start")
             if self.is_closed:
                 break
 

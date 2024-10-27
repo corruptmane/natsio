@@ -2,7 +2,7 @@ import asyncio
 import time
 from itertools import cycle
 from types import TracebackType
-from typing import Final, Iterator, Mapping, MutableSequence, Optional, Tuple, Type
+from typing import Final, Iterator, Mapping, MutableSequence, Tuple, Type
 
 from natsio.abc.client import ErrorCallback
 from natsio.abc.connection import ConnectionProto
@@ -120,7 +120,7 @@ class NATSCore:
     def __init__(
         self,
         config: ClientConfig,
-        error_callback: Optional[ErrorCallback] = None,
+        error_callback: ErrorCallback | None = None,
     ) -> None:
         self._config: ClientConfig = config
         self._server_pool_iterator = ServerPoolIterator(
@@ -131,10 +131,10 @@ class NATSCore:
         if error_callback is None:
             error_callback = _default_error_cb
         self._error_cb = error_callback
-        self._connection: Optional[ConnectionProto] = None
+        self._connection: ConnectionProto | None = None
         self._dispatcher: DispatcherProto = MessageDispatcher(self)
         self._disconnect_event: asyncio.Event = asyncio.Event()
-        self._on_disconnect_waiter: Optional[asyncio.Task[None]] = None
+        self._on_disconnect_waiter: asyncio.Task[None] | None = None
         self._status: ClientStatus = ClientStatus.DISCONNECTED
         self._nuid_generator = NUID()
 
@@ -327,9 +327,9 @@ class NATSCore:
 
     async def __aexit__(
         self,
-        exc_type: Optional[Type[BaseException]],
-        exc_val: Optional[BaseException],
-        exc_tb: Optional[TracebackType],
+        exc_type: Type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
     ) -> None:
         await self.close()
 
@@ -342,8 +342,8 @@ class NATSCore:
         self,
         subject: str,
         data: bytes,
-        reply_to: Optional[str] = None,
-        headers: Optional[Mapping[str, str]] = None,
+        reply_to: str | None = None,
+        headers: Mapping[str, str] | None = None,
     ) -> None:
         self._raise_if_closed()
         if len(data) > self._max_payload:
@@ -362,8 +362,8 @@ class NATSCore:
     async def subscribe(
         self,
         subject: str,
-        queue: Optional[str] = None,
-        callback: Optional[CoreCallback] = None,
+        queue: str | None = None,
+        callback: CoreCallback | None = None,
         pending_msgs_limit: int = DEFAULT_SUB_PENDING_MSGS_LIMIT,
         pending_bytes_limit: int = DEFAULT_SUB_PENDING_BYTES_LIMIT,
     ) -> Subscription:
@@ -397,7 +397,7 @@ class NATSCore:
         self,
         subject: str,
         data: bytes,
-        headers: Optional[Mapping[str, str]] = None,
+        headers: Mapping[str, str] | None = None,
         timeout: float = 1,
     ) -> CoreMsg:
         self._raise_if_closed()

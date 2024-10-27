@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Final, Optional
+from typing import Final
 
 from natsio.abc.protocol import ServerMessageProto
 
@@ -11,8 +11,8 @@ class Msg(ServerMessageProto):
     subject: str
     sid: str
     payload_size: int
-    reply_to: Optional[str] = None
-    payload: Optional[bytes] = None
+    reply_to: str | None = None
+    payload: bytes | None = None
 
     def is_request_inbox(self, inbox_prefix: str) -> bool:
         return self.subject.startswith(inbox_prefix)

@@ -1,14 +1,12 @@
-from typing import Optional
-
 from .base import NATSError, TimeoutError
 
 
 class NATSConnectionError(NATSError, ConnectionError):
     description = "Connection error"
-    uri: Optional[str]
+    uri: str | None
 
     def __init__(
-        self, uri: Optional[str] = None, description: Optional[str] = None
+        self, uri: str | None = None, description: str | None = None
     ) -> None:
         super().__init__(description)
         self.uri = uri
@@ -22,13 +20,13 @@ class NATSConnectionError(NATSError, ConnectionError):
 
 class ConnectionFailedError(NATSConnectionError):
     description = "Connection failed"
-    cause: Optional[str]
+    cause: str | None
 
     def __init__(
         self,
-        cause: Optional[str] = None,
-        uri: Optional[str] = None,
-        description: Optional[str] = None,
+        cause: str | None = None,
+        uri: str | None = None,
+        description: str | None = None,
     ) -> None:
         super().__init__(uri=uri, description=description)
         self.cause = cause

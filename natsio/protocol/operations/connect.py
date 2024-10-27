@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Final, Optional, Union
+from typing import Final, Union
 
 from natsio.abc.protocol import ClientMessageProto
 from natsio.const import CRLF
@@ -15,17 +15,17 @@ class Connect(ClientMessageProto):
     tls_required: bool
     lang: str
     version: str
-    auth_token: Optional[str] = None
-    user: Optional[str] = None
-    password: Optional[str] = None
-    name: Optional[str] = None
-    protocol: Optional[int] = None
-    echo: Optional[bool] = None
-    sig: Optional[str] = None
-    jwt: Optional[str] = None
-    no_responders: Optional[bool] = None
-    headers: Optional[bool] = None
-    nkey: Optional[str] = None
+    auth_token: str | None = None
+    user: str | None = None
+    password: str | None = None
+    name: str | None = None
+    protocol: int | None = None
+    echo: bool | None = None
+    sig: str | None = None
+    jwt: str | None = None
+    no_responders: bool | None = None
+    headers: bool | None = None
+    nkey: str | None = None
 
     def _build_payload(self) -> bytes:
         payload: dict[str, Union[str, bool, int]] = dict(

@@ -8,5 +8,7 @@ except ImportError:
 
 else:
 
+    print("uuid6 pizda")
+
     def get_uuid() -> str:
         return str(uuid6.uuid7())

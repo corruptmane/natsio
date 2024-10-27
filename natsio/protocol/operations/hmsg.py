@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Final, Mapping, Optional
+from typing import Final, Mapping
 
 from natsio.abc.protocol import ServerMessageProto
 
@@ -12,9 +12,9 @@ class HMsg(ServerMessageProto):
     sid: str
     headers_size: int
     total_size: int
-    reply_to: Optional[str] = None
-    headers: Optional[Mapping[str, str]] = None
-    payload: Optional[bytes] = None
+    reply_to: str | None = None
+    headers: Mapping[str, str] | None = None
+    payload: bytes | None = None
 
     def is_request_inbox(self, inbox_prefix: str) -> bool:
         return self.subject.startswith(inbox_prefix)

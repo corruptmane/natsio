@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Mapping, Optional
+from typing import TYPE_CHECKING, Mapping
 
 from natsio.exceptions.client import ClientError
 
@@ -12,8 +12,8 @@ class CoreMsg:
         client: "NATSCore",
         subject: str,
         payload: bytes,
-        reply_to: Optional[str] = None,
-        headers: Optional[Mapping[str, str]] = None,
+        reply_to: str | None = None,
+        headers: Mapping[str, str] | None = None,
     ) -> None:
         self._client = client
         self.subject = subject
@@ -22,7 +22,7 @@ class CoreMsg:
         self.headers = headers
 
     async def reply(
-        self, data: bytes, headers: Optional[Mapping[str, str]] = None
+        self, data: bytes, headers: Mapping[str, str] | None = None
     ) -> None:
         if self.reply_to is None:
             raise ClientError("reply_to is not set")

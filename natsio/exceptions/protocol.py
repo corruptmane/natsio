@@ -1,4 +1,4 @@
-from typing import Mapping, Optional, Type
+from typing import Mapping, Type
 
 from .base import NATSError
 
@@ -8,7 +8,7 @@ class ProtocolError(NATSError):
 
     def __init__(
         self,
-        description: Optional[str] = None,
+        description: str | None = None,
         is_disconnected: bool = True,
     ) -> None:
         super().__init__(description)
@@ -20,13 +20,13 @@ class ProtocolError(NATSError):
 
 class UnknownProtocol(ProtocolError):
     description = "Unknown Protocol Operation"
-    extra: Optional[str] = None
+    extra: str | None = None
 
     def __init__(
         self,
-        extra: Optional[str] = None,
+        extra: str | None = None,
         is_disconnected: bool = True,
-        description: Optional[str] = None,
+        description: str | None = None,
     ) -> None:
         super().__init__(description=description, is_disconnected=is_disconnected)
         self.extra = extra
@@ -76,14 +76,14 @@ class MaxConnectionsExceeded(ProtocolError):
 
 class SlowConsumer(ProtocolError):
     description = "Slow Consumer"
-    subject: Optional[str] = None
-    sid: Optional[str] = None
+    subject: str | None = None
+    sid: str | None = None
 
     def __init__(
         self,
-        subject: Optional[str] = None,
-        sid: Optional[str] = None,
-        description: Optional[str] = None,
+        subject: str | None = None,
+        sid: str | None = None,
+        description: str | None = None,
         is_disconnected: bool = True,
     ) -> None:
         super().__init__(description=description, is_disconnected=is_disconnected)
@@ -112,7 +112,7 @@ class PermissionsViolation(ProtocolError):
     description = "Permissions Violation"
     is_disconnected = False
 
-    def __init__(self, subject: str, description: Optional[str] = None) -> None:
+    def __init__(self, subject: str, description: str | None = None) -> None:
         super().__init__(description=description, is_disconnected=False)
         self.subject = subject
 

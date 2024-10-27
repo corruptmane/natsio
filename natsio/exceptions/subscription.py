@@ -1,5 +1,3 @@
-from typing import Optional
-
 from .base import TimeoutError
 from .client import ClientError
 
@@ -19,7 +17,7 @@ class SubscriptionAlreadyStartedError(SubscriptionError):
 class SubscriptionSetupError(SubscriptionError):
     description = "Subscription setup error"
 
-    def __init__(self, extra: str, description: Optional[str] = None) -> None:
+    def __init__(self, extra: str, description: str | None = None) -> None:
         super().__init__(description)
         self.extra = extra
 
