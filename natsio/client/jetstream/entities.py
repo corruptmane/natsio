@@ -14,9 +14,6 @@ NANOSECOND_POWER: Final[int] = 10**9
 
 
 def _map_to_dataclass(data: Mapping[str, Any], cls: Type[T]) -> T:
-    if not is_dataclass(cls):
-        raise ValueError("Provided class is not a dataclass")
-
     field_names = {field.name: field.type for field in fields(cls)}
     filtered_data = {}
     
