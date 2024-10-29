@@ -12,7 +12,6 @@ except ImportError:
         return json.dumps(obj, sort_keys=True).encode()
 
 else:
-    print("orjson pizda")
 
     def json_loads(obj: Union[str, bytes]) -> Any:
         return orjson.loads(obj)
