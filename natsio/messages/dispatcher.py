@@ -1,5 +1,5 @@
 import asyncio
-from typing import TYPE_CHECKING, MutableMapping, Sequence, Set, Union
+from typing import TYPE_CHECKING, MutableMapping, Sequence, Union
 
 from natsio.abc.dispatcher import DispatcherProto
 from natsio.protocol.operations.hmsg import HMsg
@@ -17,7 +17,7 @@ class MessageDispatcher(DispatcherProto):
         self._client = client
         self._subscriptions: MutableMapping[str, Subscription] = {}
         self._inboxes: MutableMapping[str, asyncio.Future[CoreMsg]] = {}
-        self._to_remove_sub_tasks: Set[asyncio.Task[None]] = set()
+        self._to_remove_sub_tasks: set[asyncio.Task[None]] = set()
 
     def all_subscriptions(self) -> Sequence[Subscription]:
         return list(self._subscriptions.values())
@@ -65,9 +65,7 @@ class MessageDispatcher(DispatcherProto):
     async def dispatch_msg(self, msg: Msg) -> None:
         core_msg = self._build_core_msg(msg)
         if msg.is_request_inbox(self._client.inbox_prefix):
-            return await self._dispatch_to_inbox(
-                core_msg, msg.inbox_id(self._client.inbox_prefix)
-            )
+            return await self._dispatch_to_inbox(core_msg, msg.inbox_id(self._client.inbox_prefix))
         sub = self._subscriptions.get(msg.sid)
         if sub is None:
             return
@@ -76,9 +74,7 @@ class MessageDispatcher(DispatcherProto):
     async def dispatch_hmsg(self, msg: HMsg) -> None:
         core_msg = self._build_core_msg(msg)
         if msg.is_request_inbox(self._client.inbox_prefix):
-            return await self._dispatch_to_inbox(
-                core_msg, msg.inbox_id(self._client.inbox_prefix)
-            )
+            return await self._dispatch_to_inbox(core_msg, msg.inbox_id(self._client.inbox_prefix))
         sub = self._subscriptions.get(msg.sid)
         if sub is None:
             return

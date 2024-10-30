@@ -1,5 +1,3 @@
 from .core import CoreMsg
 
-__all__ = (
-    "CoreMsg",
-)
+__all__ = ("CoreMsg",)
