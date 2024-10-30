@@ -1,5 +1,6 @@
 from enum import Enum
 
+
 class Header(str, Enum):
     MSG_ID = "Nats-Msg-Id"
     EXPECTED_STREAM = "Nats-Expected-Stream"

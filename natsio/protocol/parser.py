@@ -1,5 +1,5 @@
 import re
-from typing import Mapping, NoReturn
+from typing import Final, Mapping, NoReturn, Pattern
 
 from natsio.abc.connection import StreamProto
 from natsio.const import CRLF, CRLF_SIZE
@@ -15,8 +15,29 @@ from natsio.protocol.operations.info import Info
 from natsio.protocol.operations.msg import Msg
 from natsio.utils.json import json_loads
 
-WHITESPACE_RE = re.compile(rb"\s+")
-ERR_NAME_RE = re.compile(r"'(.*?)'")
+WHITESPACE_RE: Final[Pattern[bytes]] = re.compile(rb"\s+")
+ERR_NAME_RE: Final[Pattern[str]] = re.compile(r"'(.*?)'")
+NATS_HDR: Final[bytes] = b"NATS/1.0"
+
+
+def parse_headers(data: bytes) -> Mapping[str, str] | None:
+    headers = {}
+
+    headers_payload = data.split(2 * CRLF)[0].rstrip(2 * CRLF)
+
+    lines = headers_payload.split(CRLF)
+
+    headers_version = lines.pop(0)
+    if headers_version != NATS_HDR:
+        raise InvalidHeaderVersion(headers_version)
+
+    if not lines:
+        return None
+
+    for line in lines:
+        key, value = line.split(b":", 1)
+        headers[key.decode()] = value.strip().decode()
+    return headers
 
 
 class ProtocolParser:
@@ -35,25 +56,6 @@ class ProtocolParser:
         payload = await stream.read_until(CRLF)
         return Msg(subject.decode(), sid.decode(), payload_size, reply_to, payload)
 
-    def _parse_headers(self, data: bytes) -> Mapping[str, str] | None:
-        headers = {}
-
-        headers_payload = data.split(2 * CRLF)[0].rstrip(2 * CRLF)
-
-        lines = headers_payload.split(CRLF)
-
-        headers_version = lines.pop(0)
-        if headers_version != b"NATS/1.0":
-            raise InvalidHeaderVersion(headers_version)
-
-        if not lines:
-            return None
-
-        for line in lines:
-            key, value = line.split(b":", 1)
-            headers[key.decode()] = value.strip().decode()
-        return headers
-
     async def parse_hmsg(self, data: bytes, stream: StreamProto) -> HMsg:
         fields = WHITESPACE_RE.split(data, maxsplit=4)
 
@@ -70,7 +72,7 @@ class ProtocolParser:
         total_size = int(total_size)
 
         body = (await stream.read_exactly(int(total_size) + CRLF_SIZE))[:-CRLF_SIZE]
-        headers = self._parse_headers(body)
+        headers = parse_headers(body)
         payload = body[headers_size:]
 
         return HMsg(

@@ -32,12 +32,7 @@ class HPub(ClientMessageProto):
         total_size = headers_size + (0 if not self.payload else len(self.payload))
         parts.append(str(total_size).encode())
 
-        return (
-            b" ".join(parts)
-            + CRLF
-            + headers
-            + (b"" if not self.payload else self.payload)
-        )
+        return b" ".join(parts) + CRLF + headers + (b"" if not self.payload else self.payload)
 
     def build(self) -> bytes:
         return HPUB_OP + b" " + self._build_payload() + CRLF

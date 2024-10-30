@@ -3,7 +3,7 @@ from functools import cached_property
 from typing import Final
 
 from natsio.abc.protocol import ServerMessageProto
-from natsio.client.config import ServerInfo
+from natsio.config import ServerInfo
 
 INFO_OP: Final[bytes] = b"INFO"
 
