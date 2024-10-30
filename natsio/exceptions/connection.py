@@ -5,9 +5,7 @@ class NATSConnectionError(NATSError, ConnectionError):
     description = "Connection error"
     uri: str | None
 
-    def __init__(
-        self, uri: str | None = None, description: str | None = None
-    ) -> None:
+    def __init__(self, uri: str | None = None, description: str | None = None) -> None:
         super().__init__(description)
         self.uri = uri
 
