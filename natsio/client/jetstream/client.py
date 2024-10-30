@@ -134,31 +134,31 @@ class JetStream:
     async def get_msg(self, stream_name: str, req: GetMsgRequest) -> RawMsg:
         validate_name(stream_name)
 
-        payload: MutableMapping[str, str | int | list[str]] = {}
+        data: MutableMapping[str, str | int | list[str]] = {}
         if req.seq and req.last_by_subj:
             raise ValueError("`seq` and `last_by_subj` properties can not be combined")
         if req.seq is None and req.last_by_subj is None:
             raise ValueError("One of `seq` and `last_by_subj` must be specified")
         if req.seq is not None:
-            payload["seq"] = req.seq
+            data["seq"] = req.seq
         if req.last_by_subj is not None:
-            payload["last_by_subj"] = req.last_by_subj
+            data["last_by_subj"] = req.last_by_subj
         if req.next_by_subj is not None:
-            payload["next_by_subj"] = req.next_by_subj
+            data["next_by_subj"] = req.next_by_subj
         if req.batch is not None:
-            payload["batch"] = req.batch
+            data["batch"] = req.batch
         if req.max_bytes is not None:
-            payload["max_bytes"] = req.max_bytes
+            data["max_bytes"] = req.max_bytes
         if req.start_time is not None:
-            payload["start_time"] = req.render_start_time()  # type: ignore[assignment]
+            data["start_time"] = req.render_start_time()  # type: ignore[assignment]
         if req.multi_last is not None:
-            payload["multi_last"] = req.multi_last
+            data["multi_last"] = req.multi_last
         if req.up_to_seq is not None:
-            payload["up_to_seq"] = req.up_to_seq
+            data["up_to_seq"] = req.up_to_seq
         if req.up_to_time is not None:
-            payload["up_to_time"] = req.render_up_to_time()  # type: ignore[assignment]
+            data["up_to_time"] = req.render_up_to_time()  # type: ignore[assignment]
 
-        return await self._get_msg(stream_name, payload)
+        return await self._get_msg(stream_name, data)
 
     async def create_or_update_consumer(
         self,
@@ -183,16 +183,31 @@ class JetStream:
         else:
             subj = f"{self._prefix}.CONSUMER.CREATE.{stream_name}"
 
-        payload = {"stream_name": stream_name, "config": config.to_dict()}
-        resp = await self._api_request(subj, json_dumps(payload))
+        data = {"stream_name": stream_name, "config": config.to_dict()}
+        resp = await self._api_request(subj, json_dumps(data))
         return ConsumerInfo.from_response(**resp)
 
     async def get_consumer_list(self, stream_name: str, offset: int = 0) -> ConsumerList:
         validate_name(stream_name)
+
         resp = await self._api_request(
             f"{self._prefix}.CONSUMER.LIST.{stream_name}", json_dumps({"offset": offset})
         )
+
         return ConsumerList.from_response(**resp)
+
+    async def get_consumer_names(self, stream_name: str, subject: str | None = None, offset: int = 0) -> list[str]:
+        validate_name(stream_name)
+
+        data: MutableMapping[str, str | int] = dict(offset=offset)
+        if subject is not None:
+            data["subject"] = subject
+
+        resp = await self._api_request(
+            f"{self._prefix}.CONSUMER.NAMES.{stream_name}", json_dumps(data)
+        )
+
+        return cast(list[str], resp["consumers"])
 
     async def _api_request(
         self, subject: str, data: bytes = b"", timeout: int | float | None = None
