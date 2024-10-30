@@ -2,13 +2,12 @@ import asyncio
 import time
 from itertools import cycle
 from types import TracebackType
-from typing import Final, Iterator, Mapping, MutableSequence, Tuple, Type
+from typing import Final, Iterator, Mapping, MutableSequence, Type
 
 from natsio.abc.client import ErrorCallback
 from natsio.abc.connection import ConnectionProto
 from natsio.abc.dispatcher import DispatcherProto
 from natsio.abc.protocol import ClientMessageProto
-from natsio.client.jetstream.client import JetStream
 from natsio.connection.status import ConnectionStatus
 from natsio.connection.tcp import TCPConnection
 from natsio.exceptions.base import TimeoutError
@@ -25,6 +24,7 @@ from natsio.exceptions.connection import (
     NATSConnectionError,
     NoConnectionError,
 )
+from natsio.config import ClientConfig, Server, ServerVersion
 from natsio.exceptions.protocol import NoRespondersError
 from natsio.exceptions.stream import EndOfStream
 from natsio.messages.core import CoreMsg
@@ -44,7 +44,7 @@ from natsio.utils.logger import client_logger as log
 from natsio.utils.nuid import NUID
 from natsio.utils.uuid import get_uuid
 
-from .config import ClientConfig, Server
+from .jetstream.client import JetStream
 from .status import ClientStatus
 
 DEFAULT_MAX_PAYLOAD_SIZE: Final[int] = 1_048_576
@@ -57,7 +57,7 @@ def get_now() -> int:
 class ServerPoolIterator:
     def __init__(
         self,
-        pool: Tuple[Server, ...],
+        pool: tuple[Server, ...],
         max_reconnect_attempts: int,
         reconnect_time_wait: float,
     ):
@@ -81,10 +81,7 @@ class ServerPoolIterator:
         if self._max_reconnect_attempts <= 0:
             return self._next_server
         while True:
-            if all(
-                server.reconnects >= self._max_reconnect_attempts
-                for server in self._pool
-            ):
+            if all(server.reconnects >= self._max_reconnect_attempts for server in self._pool):
                 raise NoServersAvailable()
             server = self._next_server
             if server.reconnects >= self._max_reconnect_attempts:
@@ -154,6 +151,12 @@ class NATSCore:
         if self._connection is None:
             raise NoConnectionError()
         return self._connection.status
+
+    @property
+    def current_server_version(self) -> ServerVersion:
+        if self._connection is None:
+            raise NoConnectionError()
+        return self._connection.server_info.server_version
 
     @property
     def status(self) -> ClientStatus:
@@ -234,10 +237,7 @@ class NATSCore:
     async def close(self, flush: bool = True, timeout: float = 5) -> None:
         if self.is_closed:
             return
-        if (
-            self._on_disconnect_waiter is not None
-            and not self._on_disconnect_waiter.done()
-        ):
+        if self._on_disconnect_waiter is not None and not self._on_disconnect_waiter.done():
             self._on_disconnect_waiter.cancel()
             self._on_disconnect_waiter = None
         self._status = ClientStatus.DRAINING
@@ -266,9 +266,7 @@ class NATSCore:
         for sub in to_remove:
             self._dispatcher.remove_subscription(sub.sid)
         for sub in to_replay:
-            await self._send_command(
-                Sub(sid=sub.sid, subject=sub.subject, queue=sub.queue)
-            )
+            await self._send_command(Sub(sid=sub.sid, subject=sub.subject, queue=sub.queue))
 
     async def _reconnect(self) -> None:
         while True:
@@ -349,9 +347,7 @@ class NATSCore:
         if len(data) > self._max_payload:
             raise MaxPayloadError()
         if not headers:
-            await self._send_command(
-                Pub(subject=subject, payload=data, reply_to=reply_to)
-            )
+            await self._send_command(Pub(subject=subject, payload=data, reply_to=reply_to))
         else:
             await self._send_command(
                 HPub(subject=subject, payload=data, reply_to=reply_to, headers=headers)
@@ -383,12 +379,16 @@ class NATSCore:
         else:
             self._dispatcher.remove_subscription_when_ready(sub.sid)
 
+    unsub = unsubscribe
+
     def _generate_unique_inbox(self) -> tuple[str, str]:
         inbox_id = self._nuid_generator().decode()
         inbox = self.inbox_prefix + "." + inbox_id
         return inbox_id, inbox
 
-    def jetstream(self, domain: str | None = None, timeout: int | float | None = None) -> JetStream:
+    def jetstream(
+        self, domain: str | None = None, timeout: int | float | None = None
+    ) -> JetStream:
         if timeout is None:
             timeout = self._config.request_timeout
         return JetStream(self, domain, timeout)
@@ -410,7 +410,11 @@ class NATSCore:
         try:
             await self.publish(subject, data, reply_to=inbox, headers=headers)
             res = await asyncio.wait_for(future, timeout)
-            if res.headers and Header.STATUS in res.headers and res.headers[Header.STATUS] == "503":
+            if (
+                res.headers
+                and Header.STATUS in res.headers
+                and res.headers[Header.STATUS] == "503"
+            ):
                 raise NoRespondersError()
             return res
         except asyncio.TimeoutError:
