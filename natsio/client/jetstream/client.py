@@ -209,6 +209,14 @@ class JetStream:
 
         return cast(list[str], resp["consumers"])
 
+    async def get_consumer_info(self, stream_name: str, consumer_name: str) -> ConsumerInfo:
+        validate_name(stream_name)
+        validate_name(consumer_name)
+
+        resp = await self._api_request(f"{self._prefix}.CONSUMER.INFO.{stream_name}.{consumer_name}")
+
+        return ConsumerInfo.from_response(**resp)
+
     async def _api_request(
         self, subject: str, data: bytes = b"", timeout: int | float | None = None
     ) -> Mapping[str, Any]:
