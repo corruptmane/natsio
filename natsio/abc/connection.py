@@ -1,16 +1,14 @@
 import asyncio
 from ssl import SSLContext
-from typing import TYPE_CHECKING, Protocol
+from typing import Protocol
 
+from natsio.config import ServerInfo
 from natsio.connection.status import ConnectionStatus
 from natsio.protocol.operations.connect import Connect
 
 from .client import ErrorCallback
 from .dispatcher import DispatcherProto
 from .protocol import ClientMessageProto
-
-if TYPE_CHECKING:
-    from natsio.client.config import ServerInfo
 
 
 class StreamProto(Protocol):
@@ -67,7 +65,7 @@ class ConnectionProto(Protocol):
         raise NotImplementedError
 
     @property
-    def server_info(self) -> "ServerInfo":
+    def server_info(self) -> ServerInfo:
         raise NotImplementedError
 
     @classmethod
@@ -91,9 +89,7 @@ class ConnectionProto(Protocol):
     ) -> "ConnectionProto":
         raise NotImplementedError
 
-    async def send_command(
-        self, cmd: ClientMessageProto, force_flush: bool = False
-    ) -> None:
+    async def send_command(self, cmd: ClientMessageProto, force_flush: bool = False) -> None:
         raise NotImplementedError
 
     async def flush(self) -> None:
