@@ -1,12 +1,12 @@
 import asyncio
 from ssl import SSLContext
-from typing import Tuple, cast
+from typing import cast
 
 from natsio.abc.client import ErrorCallback
 from natsio.abc.connection import ConnectionProto, StreamProto
 from natsio.abc.dispatcher import DispatcherProto
 from natsio.abc.protocol import ClientMessageProto
-from natsio.client.config import ServerInfo
+from natsio.config import ServerInfo
 from natsio.const import CRLF
 from natsio.exceptions.client import FlushTimeoutError, TLSError
 from natsio.exceptions.connection import (
@@ -117,9 +117,7 @@ class TCPConnection(ConnectionProto):
     ) -> asyncio.Transport:
         if ssl is None:
             raise TLSError("SSLContext is required for TLS upgrade")
-        new_transport = await loop.start_tls(
-            transport, protocol, ssl, server_hostname=hostname
-        )
+        new_transport = await loop.start_tls(transport, protocol, ssl, server_hostname=hostname)
         if new_transport is not None:
             protocol.patch_transport(new_transport)
             return new_transport
@@ -135,18 +133,14 @@ class TCPConnection(ConnectionProto):
         handshake_first: bool | None,
     ) -> None:
         if handshake_first is True:
-            transport = await self._upgrade_tls(
-                loop, transport, protocol, ssl, ssl_hostname
-            )
+            transport = await self._upgrade_tls(loop, transport, protocol, ssl, ssl_hostname)
             self._stream.upgraded_to_tls(transport)
         while True:
             operation, payload = await self._get_operation_and_payload()
             if operation != INFO_OP:
                 continue
             if handshake_first is False:
-                transport = await self._upgrade_tls(
-                    loop, transport, protocol, ssl, ssl_hostname
-                )
+                transport = await self._upgrade_tls(loop, transport, protocol, ssl, ssl_hostname)
                 self._stream.upgraded_to_tls(transport)
             await self.process_info(payload)
             break
@@ -174,7 +168,7 @@ class TCPConnection(ConnectionProto):
         loop = asyncio.get_running_loop()
         try:
             transport, protocol = cast(
-                Tuple[asyncio.Transport, StreamProtocol],
+                tuple[asyncio.Transport, StreamProtocol],
                 await asyncio.wait_for(
                     loop.create_connection(
                         lambda: StreamProtocol(disconnect_event=disconnect_event),
@@ -232,7 +226,7 @@ class TCPConnection(ConnectionProto):
         except Exception as exc:
             await self._error_cb(exc)
 
-    async def _get_operation_and_payload(self) -> Tuple[bytes, bytes]:
+    async def _get_operation_and_payload(self) -> tuple[bytes, bytes]:
         data = await self._stream.read_until(CRLF)
         data = data.strip()
 
@@ -246,7 +240,6 @@ class TCPConnection(ConnectionProto):
 
     async def _listen(self) -> None:
         while True:
-            log.debug("listener loop start")
             if self.is_closed:
                 break
 
@@ -263,7 +256,7 @@ class TCPConnection(ConnectionProto):
                 continue
             except Exception as exc:
                 # TODO: add error handling
-                log.exception(exc)
+                log.error("Unexpected error while reading data stream: %s", exc, exc_info=exc)
                 continue
 
             try:
@@ -280,16 +273,11 @@ class TCPConnection(ConnectionProto):
 
     async def _flusher_loop(self, is_last_run: bool = False) -> None:
         while True:
-            log.debug("Flusher loop start")
             if self._disconnect_event.is_set():
                 if self._status != ConnectionStatus.DISCONNECTED:
                     self._status = ConnectionStatus.DISCONNECTED
                 break
-            if (
-                is_last_run
-                and self._flush_queue is not None
-                and self._flush_queue.empty()
-            ):
+            if is_last_run and self._flush_queue is not None and self._flush_queue.empty():
                 break
 
             if not (self.is_connected or self.is_draining) or self.is_connecting:
@@ -344,9 +332,7 @@ class TCPConnection(ConnectionProto):
         except asyncio.CancelledError:
             pass
 
-    async def send_command(
-        self, cmd: ClientMessageProto, force_flush: bool = False
-    ) -> None:
+    async def send_command(self, cmd: ClientMessageProto, force_flush: bool = False) -> None:
         fut: asyncio.Future[None] = asyncio.Future()
         msg = cmd.build()
         msg_size = len(msg)
@@ -358,8 +344,7 @@ class TCPConnection(ConnectionProto):
         self._pending_data_size += msg_size
         await self._flush_queue.put(fut)
         if force_flush or (
-            self._max_pending_size > 0
-            and self._pending_data_size > self._max_pending_size
+            self._max_pending_size > 0 and self._pending_data_size > self._max_pending_size
         ):
             try:
                 await asyncio.wait_for(fut, timeout=self._force_flush_timeout)
@@ -410,9 +395,7 @@ class TCPConnection(ConnectionProto):
             await self._dispatcher.dispatch_msg(parsed)
         except asyncio.QueueFull:
             await self._error_cb(
-                SlowConsumer(
-                    subject=parsed.subject, sid=parsed.sid, is_disconnected=False
-                )
+                SlowConsumer(subject=parsed.subject, sid=parsed.sid, is_disconnected=False)
             )
 
     async def process_hmsg(self, payload: bytes) -> None:
@@ -421,9 +404,7 @@ class TCPConnection(ConnectionProto):
             await self._dispatcher.dispatch_hmsg(parsed)
         except asyncio.QueueFull:
             await self._error_cb(
-                SlowConsumer(
-                    subject=parsed.subject, sid=parsed.sid, is_disconnected=False
-                )
+                SlowConsumer(subject=parsed.subject, sid=parsed.sid, is_disconnected=False)
             )
 
     async def process_error(self, payload: bytes) -> None:
