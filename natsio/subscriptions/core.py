@@ -6,7 +6,6 @@ from typing import (
     Awaitable,
     Callable,
     MutableMapping,
-    
 )
 
 from natsio.exceptions.client import ClientClosedError
@@ -54,9 +53,7 @@ class Subscription:
         self.sid = sid
 
         self._client = client
-        self._msg_queue: asyncio.Queue[CoreMsg] = asyncio.Queue(
-            maxsize=pending_msgs_limit
-        )
+        self._msg_queue: asyncio.Queue[CoreMsg] = asyncio.Queue(maxsize=pending_msgs_limit)
         self._callback = callback
         self._pending_next_msg_calls: MutableMapping[str, asyncio.Future[CoreMsg]] = {}
         self._pending_bytes_limit = pending_bytes_limit
@@ -95,9 +92,7 @@ class Subscription:
 
     async def next_msg(self, timeout: float | None = 1) -> CoreMsg:
         if self._callback is not None:
-            raise SubscriptionSetupError(
-                "this method can not be used in async subscriptions"
-            )
+            raise SubscriptionSetupError("this method can not be used in async subscriptions")
         if self._status is SubscriptionStatus.CLOSED:
             raise SubscriptionClosedError()
 
@@ -165,11 +160,7 @@ class Subscription:
 
     @property
     def is_ready_to_close(self) -> bool:
-        if (
-            self._max_msgs > 0
-            and self._received >= self._max_msgs
-            and self._msg_queue.empty()
-        ):
+        if self._max_msgs > 0 and self._received >= self._max_msgs and self._msg_queue.empty():
             return True
         return False
 
@@ -198,10 +189,7 @@ class Subscription:
 
     @property
     def messages(self) -> AsyncIterator[CoreMsg]:
-        if (
-            self._status is not SubscriptionStatus.OPERATING
-            or self._message_iterator is None
-        ):
+        if self._status is not SubscriptionStatus.OPERATING or self._message_iterator is None:
             raise SubscriptionSetupError("subscription is not started")
         return self._message_iterator
 

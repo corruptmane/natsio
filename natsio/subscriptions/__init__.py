@@ -1,5 +1,3 @@
 from .core import Subscription
 
-__all__ = (
-    "Subscription",
-)
+__all__ = ("Subscription",)
