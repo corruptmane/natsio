@@ -10,6 +10,7 @@ from natsio.exceptions.protocol import (
     UnknownProtocol,
     name_to_error,
 )
+from natsio.protocol.headers import Header
 from natsio.protocol.operations.hmsg import HMsg
 from natsio.protocol.operations.info import Info
 from natsio.protocol.operations.msg import Msg
@@ -27,9 +28,18 @@ def parse_headers(data: bytes) -> Mapping[str, str] | None:
 
     lines = headers_payload.split(CRLF)
 
-    headers_version = lines.pop(0)
+    headers_status_line = lines.pop(0).split(b" ")
+    headers_version = headers_status_line[0]
     if headers_version != NATS_HDR:
         raise InvalidHeaderVersion(headers_version)
+
+    if len(headers_status_line) > 1:
+        inline_status = headers_status_line[1].decode()
+        if inline_status.isdigit():
+            headers[Header.STATUS.value] = inline_status
+        if len(headers_status_line) > 2:
+            inline_description = b" ".join(headers_status_line[2:])
+            headers[Header.DESCRIPTION.value] = inline_description.decode()
 
     if not lines:
         return None
