@@ -2,7 +2,6 @@ from dataclasses import Field, asdict, dataclass, fields, is_dataclass
 from datetime import datetime
 from enum import Enum
 from functools import cached_property
-import logging
 from types import UnionType
 from typing import (
     Any,
@@ -20,8 +19,6 @@ from base64 import b64decode
 
 from natsio.protocol.parser import parse_headers
 from natsio.utils.time import from_nanoseconds, fromisoformat
-
-log = logging.getLogger(__name__)
 
 
 class DataclassInstance(Protocol):
@@ -59,8 +56,8 @@ def _map_to_dataclass(data: Mapping[str, Any], cls: Type[T]) -> T:
             elif isinstance(field_type, type) and issubclass(field_type, Enum):
                 filtered_data[key] = field_type(value)  # type: ignore[assignment]
             elif (
-                origin in (UnionType,) and isinstance(args[0], type) and issubclass(args[0], Enum)
-            ):  # pyright: ignore[reportGeneralTypeIssues]
+                origin in (UnionType,) and isinstance(args[0], type) and issubclass(args[0], Enum)  # pyright: ignore[reportGeneralTypeIssues]
+            ):
                 filtered_data[key] = args[0](value)  # type: ignore[assignment]
             else:
                 filtered_data[key] = value
@@ -504,7 +501,7 @@ class _ConsumerConfig(Base):
 
 @dataclass(kw_only=True)
 class PushConsumerConfig(_ConsumerConfig):
-    deliver_subject: str | None = None
+    deliver_subject: str
     deliver_group: str | None = None
     flow_control: bool | None = None
     idle_heartbeat: int | None = None
@@ -579,7 +576,7 @@ class ConsumerInfo(Base):
             tp = PushConsumerConfig
         else:
             tp = PullConsumerConfig
-        data["config"] = tp.from_response(**data)
+        data["config"] = tp.from_response(**data["config"])
 
         return _map_to_dataclass(data, cls)
 
