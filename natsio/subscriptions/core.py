@@ -1,13 +1,8 @@
 import asyncio
 from enum import Enum
-from typing import (
-    TYPE_CHECKING,
-    AsyncIterator,
-    Awaitable,
-    Callable,
-    MutableMapping,
-)
+from typing import TYPE_CHECKING, AsyncIterator, MutableMapping
 
+from natsio.abc.subscription import CoreCallback, SubscriptionStatus
 from natsio.exceptions.client import ClientClosedError
 from natsio.exceptions.subscription import (
     MessageRetrievalTimeoutError,
@@ -21,8 +16,6 @@ from natsio.utils.uuid import get_uuid
 
 if TYPE_CHECKING:
     from natsio.client.core import NATSCore
-
-CoreCallback = Callable[[CoreMsg], Awaitable[None]]
 
 DEFAULT_SUB_PENDING_MSGS_LIMIT = 512 * 1024
 DEFAULT_SUB_PENDING_BYTES_LIMIT = 128 * 1024 * 1024
@@ -64,6 +57,10 @@ class Subscription:
         self._received = 0
         self._max_msgs = 0
         self._close_after_task: asyncio.Task[None] | None = None
+
+    @property
+    def status(self) -> SubscriptionStatus:
+        return self._status
 
     def _raise_if_slow_consumer(self, new_data_size: int) -> None:
         if self._pending_bytes_limit <= 0:
