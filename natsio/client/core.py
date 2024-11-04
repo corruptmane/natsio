@@ -8,6 +8,7 @@ from natsio.abc.client import ErrorCallback
 from natsio.abc.connection import ConnectionProto
 from natsio.abc.dispatcher import DispatcherProto
 from natsio.abc.protocol import ClientMessageProto
+from natsio.abc.subscription import CoreCallback
 from natsio.connection.status import ConnectionStatus
 from natsio.connection.tcp import TCPConnection
 from natsio.exceptions.base import TimeoutError
@@ -37,7 +38,6 @@ from natsio.protocol.operations.unsub import Unsub
 from natsio.subscriptions.core import (
     DEFAULT_SUB_PENDING_BYTES_LIMIT,
     DEFAULT_SUB_PENDING_MSGS_LIMIT,
-    CoreCallback,
     Subscription,
 )
 from natsio.utils.logger import client_logger as log
@@ -385,6 +385,10 @@ class NATSCore:
         inbox_id = self._nuid_generator().decode()
         inbox = self.inbox_prefix + "." + inbox_id
         return inbox_id, inbox
+
+    def new_unique_inbox(self) -> str:
+        _, inbox = self._generate_unique_inbox()
+        return inbox
 
     def jetstream(
         self, domain: str | None = None, timeout: int | float | None = None
