@@ -1,11 +1,17 @@
-import logging
+from contextlib import suppress
 from typing import TYPE_CHECKING, Any, Final, Mapping, MutableMapping, cast
 
+from natsio.abc.subscription import CoreCallback, JetStreamCallback
 from natsio.exceptions.jetstream import APIError, ServiceUnavailableError
 from natsio.exceptions.protocol import NoRespondersError
+from natsio.messages.core import CoreMsg
+from natsio.messages.jetstream import JetStreamMsg
+from natsio.subscriptions.core import DEFAULT_SUB_PENDING_BYTES_LIMIT, DEFAULT_SUB_PENDING_MSGS_LIMIT
+from natsio.subscriptions.jetstream import PushSubscription
 from natsio.utils.json import json_dumps, json_loads
 from .entities import (
     AccountInfo,
+    AckPolicy,
     ConsumerInfo,
     ConsumerList,
     GetMsgRequest,
@@ -21,13 +27,20 @@ from .entities import (
 if TYPE_CHECKING:
     from natsio.client.core import NATSCore
 
-log = logging.getLogger(__name__)
-
-JS_API_PREFIX: Final[str] = "$JS{domain}.API"
 NAME_INVALID_CHARS: Final[set[str]] = set(".*>/\\")
 NAME_INVALID_CHARS_LIST_PRETTY: Final[str] = ", ".join(
     [f'"{char}"' for char in NAME_INVALID_CHARS]
 )
+
+
+def auto_ack_wrapper(callback: JetStreamCallback) -> JetStreamCallback:
+
+    async def wrapper(msg: JetStreamMsg) -> None:
+        await callback(msg)
+        with suppress(Exception):  # TODO: use dedicated msg acknowledgement error
+            await msg.ack()
+
+    return wrapper
 
 
 def validate_name(name: str | None) -> None:
@@ -52,9 +65,9 @@ class JetStream:
     ) -> None:
         self._nc = core
         if domain is None:
-            self._prefix = JS_API_PREFIX.format(domain="")
+            self._prefix = "$JS.API"
         else:
-            self._prefix = JS_API_PREFIX.format(domain=f".{domain}")
+            self._prefix = f"$JS.{domain}.API"
         self.timeout = timeout
 
     async def get_account_info(self) -> AccountInfo:
@@ -125,7 +138,6 @@ class JetStream:
         return bool(resp["purged"])
 
     async def _get_msg(self, stream_name: str, payload: Mapping[str, Any]) -> RawMsg:
-        log.info("Request payload: %s", payload)
         resp = await self._api_request(
             f"{self._prefix}.STREAM.MSG.GET.{stream_name}", json_dumps(payload)
         )
@@ -216,6 +228,52 @@ class JetStream:
         resp = await self._api_request(f"{self._prefix}.CONSUMER.INFO.{stream_name}.{consumer_name}")
 
         return ConsumerInfo.from_response(**resp)
+
+    async def delete_consumer(self, stream_name: str, consumer_name: str) -> bool:
+        validate_name(stream_name)
+        validate_name(consumer_name)
+
+        resp = await self._api_request(f"{self._prefix}.CONSUMER.DELETE.{stream_name}.{consumer_name}")
+
+        return cast(bool, resp["success"])
+
+    def _wrap_callback(self, callback: JetStreamCallback) -> CoreCallback:
+
+        async def wrapper(msg: CoreMsg) -> None:
+            return await callback(JetStreamMsg(jetstream=self, msg=msg))
+
+        return wrapper
+
+    async def push_subscribe(
+        self,
+        stream_name: str,
+        consumer_name: str,
+        consumer_config: PushConsumerConfig,
+        callback: JetStreamCallback | None = None,
+        manual_ack: bool = False,
+        pending_msgs_limit: int = DEFAULT_SUB_PENDING_MSGS_LIMIT,
+        pending_bytes_limit: int = DEFAULT_SUB_PENDING_BYTES_LIMIT,
+    ) -> PushSubscription:
+        if callback is not None and not manual_ack and consumer_config.ack_policy is not AckPolicy.none:
+            callback = auto_ack_wrapper(callback)
+
+        sub = await self._nc.subscribe(
+            subject=consumer_config.deliver_subject,
+            queue=consumer_config.deliver_group,
+            callback=self._wrap_callback(callback) if callback is not None else None,
+            pending_msgs_limit=pending_msgs_limit,
+            pending_bytes_limit=pending_bytes_limit,
+        )
+
+        return PushSubscription(
+            client=self._nc,
+            jetstream=self,
+            sub=sub,
+            stream_name=stream_name,
+            consumer_name=consumer_name,
+            has_callback=callback is not None,
+        )
+
 
     async def _api_request(
         self, subject: str, data: bytes = b"", timeout: int | float | None = None
