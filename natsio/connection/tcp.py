@@ -377,9 +377,7 @@ class TCPConnection(ConnectionProto):
         self._server_info = self._parser.parse_info(payload)
         if self._server_info.headers:
             self._connect_operation.headers = True
-            self._connect_operation.no_responders = (
-                False  # TODO: support no_responders headers parsing
-            )
+            self._connect_operation.no_responders = True
         # TODO: sig/jwt/nkey support
         await self._stream.write(self._connect_operation.build())
 
