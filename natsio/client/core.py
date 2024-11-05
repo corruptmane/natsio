@@ -364,7 +364,14 @@ class NATSCore:
         pending_bytes_limit: int = DEFAULT_SUB_PENDING_BYTES_LIMIT,
     ) -> Subscription:
         self._raise_if_closed()
-        sub = Subscription(self, subject, queue, callback=callback)
+        sub = Subscription(
+            client=self,
+            subject=subject,
+            queue=queue,
+            callback=callback,
+            pending_msgs_limit=pending_msgs_limit,
+            pending_bytes_limit=pending_bytes_limit,
+        )
         await self._send_command(Sub(sid=sub.sid, subject=subject, queue=queue))
         self._dispatcher.add_subscription(sub)
         await sub.start()
