@@ -20,3 +20,11 @@ class Header(str, Enum):
     CONSUMER_STALLED = "Nats-Consumer-Stalled"
     STATUS = "Status"
     DESCRIPTION = "Description"
+
+
+class StatusCode(str, Enum):
+    SERVICE_UNAVAILABLE = "503"
+    NO_MESSAGES = "404"
+    REQUEST_TIMEOUT = "408"
+    CONFLICT = "409"
+    CONTROL_MESSAGE = "100"
