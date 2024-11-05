@@ -7,7 +7,7 @@ from natsio.exceptions.protocol import NoRespondersError
 from natsio.messages.core import CoreMsg
 from natsio.messages.jetstream import JetStreamMsg
 from natsio.subscriptions.core import DEFAULT_SUB_PENDING_BYTES_LIMIT, DEFAULT_SUB_PENDING_MSGS_LIMIT
-from natsio.subscriptions.jetstream import PushSubscription
+from natsio.subscriptions.jetstream import PullSubscription, PushSubscription
 from natsio.utils.json import json_dumps, json_loads
 from .entities import (
     AccountInfo,
@@ -240,7 +240,7 @@ class JetStream:
     def _wrap_callback(self, callback: JetStreamCallback) -> CoreCallback:
 
         async def wrapper(msg: CoreMsg) -> None:
-            return await callback(JetStreamMsg(jetstream=self, msg=msg))
+            return await callback(JetStreamMsg(nats=self._nc, jetstream=self, msg=msg))
 
         return wrapper
 
@@ -272,6 +272,29 @@ class JetStream:
             stream_name=stream_name,
             consumer_name=consumer_name,
             has_callback=callback is not None,
+        )
+
+    async def pull_subscribe(
+        self,
+        stream_name: str,
+        consumer_name: str,
+        pending_msgs_limit: int = DEFAULT_SUB_PENDING_MSGS_LIMIT,
+        pending_bytes_limit: int = DEFAULT_SUB_PENDING_BYTES_LIMIT,
+    ) -> PullSubscription:
+        inbox = self._nc.new_unique_inbox()
+        sub = await self._nc.subscribe(
+            subject=inbox,
+            pending_msgs_limit=pending_msgs_limit,
+            pending_bytes_limit=pending_bytes_limit,
+        )
+
+        return PullSubscription(
+            client=self._nc,
+            jetstream=self,
+            sub=sub,
+            stream_name=stream_name,
+            consumer_name=consumer_name,
+            prefix=self._prefix,
         )
 
 
