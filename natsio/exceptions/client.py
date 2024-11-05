@@ -58,3 +58,7 @@ class DrainTimeoutError(TimeoutError):
 
 class FlushTimeoutError(TimeoutError):
     description = "Flush timed out"
+
+
+class MessageAlreadyAckedError(ClientError):
+    description = "Message was already acknowledged"
