@@ -2,7 +2,7 @@ import asyncio
 from enum import Enum
 from typing import TYPE_CHECKING, AsyncIterator, MutableMapping
 
-from natsio.abc.subscription import CoreCallback, SubscriptionStatus
+from natsio.abc.subscription import CoreCallback
 from natsio.exceptions.client import ClientClosedError
 from natsio.exceptions.subscription import (
     MessageRetrievalTimeoutError,
@@ -61,6 +61,9 @@ class Subscription:
     @property
     def status(self) -> SubscriptionStatus:
         return self._status
+
+    def is_empty(self) -> bool:
+        return self._msg_queue.empty()
 
     def _raise_if_slow_consumer(self, new_data_size: int) -> None:
         if self._pending_bytes_limit <= 0:
