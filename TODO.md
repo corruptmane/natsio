@@ -6,5 +6,8 @@
 - [x] Proper logging
 - [x] Proper limits handling
 - [x] Try reconnecting on initial connect failure
+- [x] JetStream (Pub, Pull/Push subscription, Ack, etc.)
+- [ ] JetStream (Idle heartbeat, KV storage, Object storage)
 - [ ] Auth (JWT, User/Pass, NKey)
-- [ ] JetStream (Pub, Pull/Push subscription, Ack, etc.)
+- [ ] Micro
+- [ ] Tests with devcontainers
