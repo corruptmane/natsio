@@ -11,3 +11,4 @@ dist/
 
 *.lock
 test.py
+pyrightconfig.json
