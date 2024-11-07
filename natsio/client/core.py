@@ -13,6 +13,7 @@ from natsio.connection.status import ConnectionStatus
 from natsio.connection.tcp import TCPConnection
 from natsio.exceptions.base import TimeoutError
 from natsio.exceptions.client import (
+    BadSubjectError,
     ClientClosedError,
     ClientError,
     DrainTimeoutError,
@@ -99,6 +100,11 @@ class ServerPoolIterator:
 
 async def _default_error_cb(exc: Exception) -> None:
     log.error("NATS: Encountered error: %s", exc.__class__.__name__, exc_info=exc)
+
+
+def _validate_subject(subj: str) -> None:
+    if any(char in subj for char in "< \"'\\/"):
+        raise BadSubjectError()
 
 
 class NATSCore:
@@ -344,6 +350,9 @@ class NATSCore:
         headers: Mapping[str, str] | None = None,
     ) -> None:
         self._raise_if_closed()
+        _validate_subject(subject)
+        if reply_to:
+            _validate_subject(reply_to)
         if len(data) > self._max_payload:
             raise MaxPayloadError()
         if not headers:
@@ -364,6 +373,9 @@ class NATSCore:
         pending_bytes_limit: int = DEFAULT_SUB_PENDING_BYTES_LIMIT,
     ) -> Subscription:
         self._raise_if_closed()
+        _validate_subject(subject)
+        if queue is not None:
+            _validate_subject(queue)
         sub = Subscription(
             client=self,
             subject=subject,
@@ -412,6 +424,7 @@ class NATSCore:
         timeout: float = 1,
     ) -> CoreMsg:
         self._raise_if_closed()
+        _validate_subject(subject)
         sid = get_uuid()
         inbox_id, inbox = self._generate_unique_inbox()
         future: asyncio.Future[CoreMsg] = asyncio.Future()

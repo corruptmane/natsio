@@ -62,3 +62,7 @@ class FlushTimeoutError(TimeoutError):
 
 class MessageAlreadyAckedError(ClientError):
     description = "Message was already acknowledged"
+
+
+class BadSubjectError(ClientError):
+    description = "Invalid subject"
