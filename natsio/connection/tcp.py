@@ -38,6 +38,28 @@ from .stream import Stream
 
 
 class TCPConnection(ConnectionProto):
+    __slots__ = (
+        "_stream",
+        "_connect_operation",
+        "_ping_interval",
+        "_max_outstanding_pings",
+        "_max_pending_size",
+        "_force_flush_timeout",
+        "_error_cb",
+        "_parser",
+        "_listener_task",
+        "_pinger_task",
+        "_flusher_task",
+        "_flush_queue",
+        "_pending",
+        "_pending_data_size",
+        "_outstanding_pings",
+        "_status",
+        "_dispatcher",
+        "_disconnect_event",
+        "_server_info",
+    )
+
     def __init__(
         self,
         stream: StreamProto,
@@ -414,5 +436,5 @@ class TCPConnection(ConnectionProto):
 
     async def _setup_loops(self, loop: asyncio.AbstractEventLoop) -> None:
         self._listener_task = loop.create_task(self._listener())
-        self._ping_task = loop.create_task(self._pinger())
-        self._flush_task = loop.create_task(self._flusher())
+        self._pinger_task = loop.create_task(self._pinger())
+        self._flusher_task = loop.create_task(self._flusher())
