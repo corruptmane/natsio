@@ -70,7 +70,7 @@ class ProtocolParser:
             reply_to = reply_to.decode()
 
         payload_size = int(payload_size)
-        payload = await stream.read_until(CRLF)
+        payload = (await stream.read_exactly(payload_size + CRLF_SIZE))[:-CRLF_SIZE]
         return Msg(subject.decode(), sid.decode(), payload_size, reply_to, payload)
 
     async def parse_hmsg(self, data: bytes, stream: StreamProto) -> HMsg:
