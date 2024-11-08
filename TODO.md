@@ -17,3 +17,4 @@
     5. - [ ] NATS JetStream (pull/push sub, kv/object storage)
 - [ ] Auth (JWT, User/Pass, NKey)
 - [ ] Micro
+- [ ] Cluster support (cluster endpoints discovery, update server info when `INFO` operation message passed, etc.)
