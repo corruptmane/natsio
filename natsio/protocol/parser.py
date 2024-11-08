@@ -45,8 +45,15 @@ def parse_headers(data: bytes) -> Mapping[str, str] | None:
         return None
 
     for line in lines:
-        key, value = line.split(b":", 1)
-        headers[key.decode()] = value.strip().decode()
+        try:
+            key, value = line.split(b":", 1)
+        except ValueError:
+            raise ValueError("Malformed header line")
+        key = key.strip().decode()
+        value = value.strip().decode()
+        if any(not (33 < ord(char) < 126) for char in key):
+            raise ValueError(f'Invalid characters in header key: "{key}"')
+        headers[key] = value
     return headers
 
 
