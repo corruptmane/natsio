@@ -6,14 +6,12 @@ from natsio.protocol.headers import Header, StatusCode
 class APIError(NATSError):
     def __init__(
         self,
-        code: str | int | None = None,
+        code: int | None = None,
         description: str | None = None,
         err_code: int | None = None,
         stream: str | None = None,
         seq: int | None = None,
     ) -> None:
-        if code is not None:
-            code = int(code)
         self.code = code
         self.err_code = err_code
         self.description = description or ""
