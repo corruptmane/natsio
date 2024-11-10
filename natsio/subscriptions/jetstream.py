@@ -1,15 +1,18 @@
 import asyncio
 import time
-from typing import TYPE_CHECKING, AsyncIterator, MutableMapping
+from typing import TYPE_CHECKING, AsyncIterator, MutableMapping, Self
 
+from natsio.abc.subscription import JetStreamCallback, SubscriptionProto, SubscriptionStatus
+from natsio.exceptions.client import ClientClosedError
 from natsio.exceptions.jetstream import APIError
-from natsio.exceptions.subscription import MessageRetrievalTimeoutError, SubscriptionSetupError
+from natsio.exceptions.subscription import MessageRetrievalTimeoutError, SubscriptionAlreadyStartedError, SubscriptionClosedError, SubscriptionSetupError
 from natsio.messages.core import CoreMsg
 from natsio.messages.jetstream import JetStreamMsg
 from natsio.protocol.headers import Header, StatusCode
 from natsio.utils.json import json_dumps
 from natsio.utils.logger import subscription_logger as log
 from natsio.utils.time import to_nanoseconds
+from natsio.utils.uuid import get_uuid
 
 from .core import Subscription
 
@@ -17,49 +20,217 @@ if TYPE_CHECKING:
     from natsio.client.core import NATSCore
     from natsio.client.jetstream import JetStream
 
+DEFAULT_SUB_PENDING_MSGS_LIMIT = 512 * 1024
+DEFAULT_SUB_PENDING_BYTES_LIMIT = 256 * 1024 * 1024
 
-class PushSubscription:
+
+class PushSubscription(SubscriptionProto):
     def __init__(
         self,
         client: "NATSCore",
         jetstream: "JetStream",
-        sub: Subscription,
         stream_name: str,
         consumer_name: str,
-        has_callback: bool,
+        subject: str,
+        queue: str | None = None,
+        sid: str | None = None,
+        callback: JetStreamCallback | None = None,
+        pending_msgs_limit: int = DEFAULT_SUB_PENDING_MSGS_LIMIT,
+        pending_bytes_limit: int = DEFAULT_SUB_PENDING_BYTES_LIMIT,
     ) -> None:
+        self.subject = subject
+        self.queue = queue
+        if sid is None:
+            sid = get_uuid()
+        self.sid = sid
         self._nc = client
         self._js = jetstream
-        self._sub = sub
         self._stream_name = stream_name
         self._consumer_name = consumer_name
-        self._message_iterator = PushSubscriptionMessageIterator(self) if not has_callback else None
+        self._msg_queue: asyncio.Queue[JetStreamMsg] = asyncio.Queue(maxsize=pending_msgs_limit)
+        self._callback = callback
+        self._pending_next_msg_calls: MutableMapping[str, asyncio.Future[JetStreamMsg]] = {}
+        self._pending_bytes_limit = pending_bytes_limit
+        self._pending_size = 0
+        self._reader_task: asyncio.Task[None] | None = None
+        self._message_iterator: PushSubscriptionMessageIterator | None = None
+        self._status = SubscriptionStatus.INITIALISING
+        self._received = 0
+        self._max_msgs = 0
+        self._close_after_task: asyncio.Task[None] | None = None
 
-    async def next_msg(self, timeout: float | int | None = 1) -> JetStreamMsg:
-        msg = await self._sub.next_msg(timeout)
-        if msg.headers and Header.STATUS in msg.headers:
+    @property
+    def status(self) -> SubscriptionStatus:
+        return self._status
+
+    def is_empty(self) -> bool:
+        return self._msg_queue.empty()
+
+    def _raise_if_slow_consumer(self, new_data_size: int) -> None:
+        if self._pending_bytes_limit <= 0:
+            return
+        if self._pending_size + new_data_size >= self._pending_bytes_limit:
+            raise asyncio.QueueFull()
+        if self._msg_queue is not None and self._msg_queue.full():
+            raise asyncio.QueueFull()
+
+    def is_slow(self) -> bool:
+        if self._pending_bytes_limit <= 0:
+            return False
+        return self._pending_size >= self._pending_bytes_limit
+
+    def _raise_if_client_closed(self) -> None:
+        if self._nc.is_closed:
+            raise ClientClosedError()
+
+    async def add_msg(self, msg: CoreMsg) -> None:
+        if (
+            not msg.payload
+            and not msg.headers
+            and msg.reply_to is not None
+            and msg.reply_to.startswith(f"$JS.FC.{self._stream_name}.{self._consumer_name}")
+        ):
+            return await msg.reply(b"")
+        if (
+            msg.headers
+            and Header.STATUS in msg.headers
+            and Header.DESCRIPTION in msg.headers
+            and msg.headers[Header.STATUS] == StatusCode.CONTROL_MESSAGE
+            and msg.headers[Header.DESCRIPTION] == "Idle Heartbeat"
+        ):
+            fc_reply = msg.headers.get(Header.CONSUMER_STALLED)
+            if fc_reply:
+                await self._nc.publish(fc_reply, b"")
+            return
+        payload_size = len(msg.payload)
+        self._raise_if_slow_consumer(payload_size)
+        await self._msg_queue.put(
+            JetStreamMsg(nats=self._nc, jetstream=self._js, msg=msg)
+        )
+        self._pending_size += payload_size
+        if self._max_msgs > 0:
+            self._received += 1
+
+    async def next_msg(self, timeout: float | None = 1) -> JetStreamMsg:
+        if self._callback is not None:
+            raise SubscriptionSetupError("this method can not be used in async subscriptions")
+        if self._status is SubscriptionStatus.CLOSED:
+            raise SubscriptionClosedError()
+
+        task_id = get_uuid()
+        try:
+            fut = asyncio.create_task(asyncio.wait_for(self._msg_queue.get(), timeout))
+            self._pending_next_msg_calls[task_id] = fut
+            msg = await fut
+        except asyncio.TimeoutError:
+            self._raise_if_client_closed()
+            raise MessageRetrievalTimeoutError()
+        else:
+            self._pending_size -= len(msg.payload)
+            self._msg_queue.task_done()
+            return msg
+        finally:
+            self._pending_next_msg_calls.pop(task_id, None)
+
+    async def start(self) -> None:
+        if self._status is SubscriptionStatus.OPERATING:
+            raise SubscriptionAlreadyStartedError()
+        if self._status is SubscriptionStatus.CLOSED:
+            raise SubscriptionClosedError()
+        if self._callback is not None:
+            if self._reader_task is not None:
+                raise SubscriptionAlreadyStartedError()
+            self._reader_task = asyncio.create_task(self._reader())
+        else:
+            self._message_iterator = PushSubscriptionMessageIterator(self)
+        self._status = SubscriptionStatus.OPERATING
+
+    async def _reader_loop(self) -> None:
+        if self._callback is None:
+            raise SubscriptionSetupError("callback is not set")
+        while True:
+            msg = await self._msg_queue.get()
+            self._pending_size -= len(msg.payload)
+
+            try:
+                await self._callback(msg)
+            except asyncio.CancelledError:
+                break
+            except Exception as exc:
+                # TODO: add error processing
+                log.exception(exc)
+            finally:
+                self._msg_queue.task_done()
+
+    async def _reader(self) -> None:
+        try:
+            await self._reader_loop()
+        except asyncio.CancelledError:
             pass
-        return JetStreamMsg(nats=self._nc, jetstream=self._js, msg=msg)
+
+    def _stop_processing(self) -> None:
+        if self._reader_task is not None and not self._reader_task.done():
+            self._reader_task.cancel()
+            self._reader_task = None
+
+        if self._message_iterator is not None:
+            self._message_iterator.cancel()
+            for fut in self._pending_next_msg_calls.values():
+                if not fut.done():
+                    fut.cancel()
+
+    @property
+    def is_ready_to_close(self) -> bool:
+        if self._max_msgs > 0 and self._received >= self._max_msgs and self._msg_queue.empty():
+            return True
+        return False
+
+    async def _close_after(self) -> None:
+        while True:
+            await asyncio.sleep(0)
+            if self.is_ready_to_close:
+                self._stop_processing()
+                self._status = SubscriptionStatus.CLOSED
+                break
+
+    async def unsubscribe(self, max_msgs: int = 0) -> None:
+        if (
+            self._status is SubscriptionStatus.CLOSED
+            or self._status is SubscriptionStatus.DRAINING
+        ):
+            return
+        self._status = SubscriptionStatus.DRAINING
+        await self._nc.unsubscribe(self, max_msgs)
+        if max_msgs <= 0:
+            self._stop_processing()
+            self._status = SubscriptionStatus.CLOSED
+        else:
+            self._max_msgs = max_msgs
+            self._close_after_task = asyncio.create_task(self._close_after())
 
     @property
     def messages(self) -> AsyncIterator[JetStreamMsg]:
-        if self._message_iterator is None:
-            raise SubscriptionSetupError("subscription does not have callback")
+        if self._status is not SubscriptionStatus.OPERATING or self._message_iterator is None:
+            raise SubscriptionSetupError("subscription is not started")
         return self._message_iterator
-
-    async def unsubscribe(self, max_msgs: int = 0) -> None:
-        await self._sub.unsubscribe(max_msgs)
 
 
 class PushSubscriptionMessageIterator:
     def __init__(self, subscription: PushSubscription) -> None:
-        self._sub = subscription
+        self._subscription = subscription
+        self._stop_iteration_future: asyncio.Future[bool] = asyncio.Future()
 
-    def __aiter__(self) -> "PushSubscriptionMessageIterator":
+    def cancel(self) -> None:
+        if not self._stop_iteration_future.done():
+            self._stop_iteration_future.set_result(True)
+
+    def __aiter__(self) -> Self:
         return self
 
     async def __anext__(self) -> JetStreamMsg:
-        return await self._sub.next_msg(timeout=None)
+        if self._stop_iteration_future.done():
+            raise StopAsyncIteration
+        return await self._subscription.next_msg(timeout=None)
 
 
 class PullSubscription:

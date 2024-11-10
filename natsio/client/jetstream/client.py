@@ -1,14 +1,18 @@
 from contextlib import suppress
-from typing import TYPE_CHECKING, Any, Final, Mapping, MutableMapping, cast
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Mapping, MutableMapping, cast
 
-from natsio.abc.subscription import CoreCallback, JetStreamCallback
+from natsio.abc.dispatcher import DispatcherProto
+from natsio.abc.protocol import ClientMessageProto
+from natsio.abc.subscription import JetStreamCallback
+from natsio.exceptions.client import MessageAlreadyAckedError
 from natsio.exceptions.jetstream import APIError, ServiceUnavailableError
 from natsio.exceptions.protocol import NoRespondersError
-from natsio.messages.core import CoreMsg
 from natsio.messages.jetstream import JetStreamMsg
+from natsio.protocol.operations.sub import Sub
 from natsio.subscriptions.core import DEFAULT_SUB_PENDING_BYTES_LIMIT, DEFAULT_SUB_PENDING_MSGS_LIMIT
 from natsio.subscriptions.jetstream import PullSubscription, PushSubscription
 from natsio.utils.json import json_dumps, json_loads
+from natsio.utils.validation import validate_name, validate_subject
 from .entities import (
     AccountInfo,
     AckPolicy,
@@ -27,43 +31,29 @@ from .entities import (
 if TYPE_CHECKING:
     from natsio.client.core import NATSCore
 
-NAME_INVALID_CHARS: Final[set[str]] = set(".*>/\\")
-NAME_INVALID_CHARS_LIST_PRETTY: Final[str] = ", ".join(
-    [f'"{char}"' for char in NAME_INVALID_CHARS]
-)
-
 
 def auto_ack_wrapper(callback: JetStreamCallback) -> JetStreamCallback:
 
     async def wrapper(msg: JetStreamMsg) -> None:
         await callback(msg)
-        with suppress(Exception):  # TODO: use dedicated msg acknowledgement error
+        with suppress(MessageAlreadyAckedError):
             await msg.ack()
 
     return wrapper
-
-
-def validate_name(name: str | None) -> None:
-    if name is None:
-        raise ValueError("Name is required")
-    if any(char in name for char in NAME_INVALID_CHARS):
-        raise ValueError(
-            f"Name contains one or more invalid characters ({NAME_INVALID_CHARS_LIST_PRETTY})"
-        )
-    if any(char.isspace() for char in name):
-        raise ValueError("Name contains whitespaces")
-    if not name.isprintable():
-        raise ValueError("Name contains unprintable characters")
 
 
 class JetStream:
     def __init__(
         self,
         core: "NATSCore",
+        command_sender: Callable[[ClientMessageProto], Awaitable[None]],
+        dispatcher: DispatcherProto,
         domain: str | None = None,
         timeout: float | int = 5,
     ) -> None:
         self._nc = core
+        self._send_command = command_sender
+        self._dispatcher = dispatcher
         if domain is None:
             self._prefix = "$JS.API"
         else:
@@ -237,13 +227,6 @@ class JetStream:
 
         return cast(bool, resp["success"])
 
-    def _wrap_callback(self, callback: JetStreamCallback) -> CoreCallback:
-
-        async def wrapper(msg: CoreMsg) -> None:
-            return await callback(JetStreamMsg(nats=self._nc, jetstream=self, msg=msg))
-
-        return wrapper
-
     async def push_subscribe(
         self,
         stream_name: str,
@@ -254,25 +237,28 @@ class JetStream:
         pending_msgs_limit: int = DEFAULT_SUB_PENDING_MSGS_LIMIT,
         pending_bytes_limit: int = DEFAULT_SUB_PENDING_BYTES_LIMIT,
     ) -> PushSubscription:
+        validate_subject(consumer_config.deliver_subject)
+        if consumer_config.deliver_group is not None:
+            validate_subject(consumer_config.deliver_group)
+
         if callback is not None and not manual_ack and consumer_config.ack_policy is not AckPolicy.none:
             callback = auto_ack_wrapper(callback)
 
-        sub = await self._nc.subscribe(
+        sub = PushSubscription(
+            client=self._nc,
+            jetstream=self,
+            stream_name=stream_name,
+            consumer_name=consumer_name,
             subject=consumer_config.deliver_subject,
             queue=consumer_config.deliver_group,
-            callback=self._wrap_callback(callback) if callback is not None else None,
+            callback=callback,
             pending_msgs_limit=pending_msgs_limit,
             pending_bytes_limit=pending_bytes_limit,
         )
-
-        return PushSubscription(
-            client=self._nc,
-            jetstream=self,
-            sub=sub,
-            stream_name=stream_name,
-            consumer_name=consumer_name,
-            has_callback=callback is not None,
-        )
+        await self._send_command(Sub(sid=sub.sid, subject=consumer_config.deliver_subject, queue=consumer_config.deliver_group))
+        self._dispatcher.add_subscription(sub)
+        await sub.start()
+        return sub
 
     async def pull_subscribe(
         self,
@@ -281,7 +267,7 @@ class JetStream:
         pending_msgs_limit: int = DEFAULT_SUB_PENDING_MSGS_LIMIT,
         pending_bytes_limit: int = DEFAULT_SUB_PENDING_BYTES_LIMIT,
     ) -> PullSubscription:
-        inbox = self._nc.new_unique_inbox()
+        inbox = self._nc.new_unique_deliver_subject()
         sub = await self._nc.subscribe(
             subject=inbox,
             pending_msgs_limit=pending_msgs_limit,
