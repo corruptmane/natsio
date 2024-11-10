@@ -1,6 +1,6 @@
 import asyncio
 from ssl import SSLContext
-from typing import Protocol
+from typing import Protocol, Self
 
 from natsio.config import ServerInfo
 from natsio.connection.status import ConnectionStatus
@@ -86,7 +86,7 @@ class ConnectionProto(Protocol):
         ssl: SSLContext | None,
         ssl_hostname: str | None,
         handshake_first: bool | None,
-    ) -> "ConnectionProto":
+    ) -> Self:
         raise NotImplementedError
 
     async def send_command(self, cmd: ClientMessageProto, force_flush: bool = False) -> None:

@@ -1,6 +1,6 @@
 import asyncio
 from ssl import SSLContext
-from typing import cast
+from typing import Self, cast
 
 from natsio.abc.client import ErrorCallback
 from natsio.abc.connection import ConnectionProto, StreamProto
@@ -186,7 +186,7 @@ class TCPConnection(ConnectionProto):
         ssl: SSLContext | None = None,
         ssl_hostname: str | None = None,
         handshake_first: bool | None = None,
-    ) -> "TCPConnection":
+    ) -> Self:
         loop = asyncio.get_running_loop()
         try:
             transport, protocol = cast(

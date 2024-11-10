@@ -1,7 +1,7 @@
 import asyncio
 from itertools import cycle
 from types import TracebackType
-from typing import Final, Iterator, Mapping, MutableSequence, Type
+from typing import Final, Iterator, Mapping, MutableSequence, Self, Type
 
 from natsio.abc.client import ErrorCallback
 from natsio.abc.connection import ConnectionProto
@@ -316,7 +316,7 @@ class NATSCore:
                 self._disconnect_event.clear()
                 await self._replay_subscriptions()
 
-    async def __aenter__(self) -> "NATSCore":
+    async def __aenter__(self) -> Self:
         await self.connect()
         return self
 

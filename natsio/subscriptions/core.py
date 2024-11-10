@@ -1,5 +1,5 @@
 import asyncio
-from typing import TYPE_CHECKING, AsyncIterator, MutableMapping
+from typing import TYPE_CHECKING, AsyncIterator, MutableMapping, Self
 
 from natsio.abc.subscription import CoreCallback, SubscriptionProto, SubscriptionStatus
 from natsio.exceptions.client import ClientClosedError
@@ -195,7 +195,7 @@ class SubscriptionMessageIterator:
         if not self._stop_iteration_future.done():
             self._stop_iteration_future.set_result(True)
 
-    def __aiter__(self) -> "SubscriptionMessageIterator":
+    def __aiter__(self) -> Self:
         return self
 
     async def __anext__(self) -> CoreMsg:
