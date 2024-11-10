@@ -1,28 +1,31 @@
 import asyncio
+import logging
 from typing import TYPE_CHECKING, MutableMapping, Sequence, Union
 
 from natsio.abc.dispatcher import DispatcherProto
+from natsio.abc.subscription import SubscriptionProto
 from natsio.protocol.operations.hmsg import HMsg
 from natsio.protocol.operations.msg import Msg
-from natsio.subscriptions.core import Subscription
 
 from .core import CoreMsg
 
 if TYPE_CHECKING:
     from natsio.client.core import NATSCore
 
+log = logging.getLogger(__name__)
+
 
 class MessageDispatcher(DispatcherProto):
     def __init__(self, client: "NATSCore") -> None:
         self._client = client
-        self._subscriptions: MutableMapping[str, Subscription] = {}
+        self._subscriptions: MutableMapping[str, SubscriptionProto] = {}
         self._inboxes: MutableMapping[str, asyncio.Future[CoreMsg]] = {}
         self._to_remove_sub_tasks: set[asyncio.Task[None]] = set()
 
-    def all_subscriptions(self) -> Sequence[Subscription]:
+    def all_subscriptions(self) -> Sequence[SubscriptionProto]:
         return list(self._subscriptions.values())
 
-    def add_subscription(self, sub: Subscription) -> None:
+    def add_subscription(self, sub: SubscriptionProto) -> None:
         self._subscriptions[sub.sid] = sub
 
     def remove_subscription(self, sid: str) -> None:
