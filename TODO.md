@@ -12,6 +12,7 @@
     3. - [ ] Ordered consumers
     4. - [ ] KV storage
     5. - [ ] Object storage
+    6. - [ ] DIRECT get message
 - [ ] Tests with devcontainers
     1. - [x] NATS Core
     2. - [x] Protocol parser
