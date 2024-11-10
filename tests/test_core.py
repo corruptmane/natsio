@@ -1,8 +1,7 @@
-# TODO: rewrite waits to futures.
 import asyncio
 from functools import partial
 from os import urandom
-from typing import Callable, Final
+from typing import Final
 import logging
 
 import pytest
