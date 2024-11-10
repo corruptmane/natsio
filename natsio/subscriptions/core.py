@@ -1,8 +1,7 @@
 import asyncio
-from enum import Enum
 from typing import TYPE_CHECKING, AsyncIterator, MutableMapping
 
-from natsio.abc.subscription import CoreCallback
+from natsio.abc.subscription import CoreCallback, SubscriptionProto, SubscriptionStatus
 from natsio.exceptions.client import ClientClosedError
 from natsio.exceptions.subscription import (
     MessageRetrievalTimeoutError,
@@ -21,14 +20,7 @@ DEFAULT_SUB_PENDING_MSGS_LIMIT = 512 * 1024
 DEFAULT_SUB_PENDING_BYTES_LIMIT = 128 * 1024 * 1024
 
 
-class SubscriptionStatus(Enum):
-    INITIALISING = "INITIALISING"
-    OPERATING = "OPERATING"
-    DRAINING = "DRAINING"
-    CLOSED = "CLOSED"
-
-
-class Subscription:
+class Subscription(SubscriptionProto):
     def __init__(
         self,
         client: "NATSCore",
