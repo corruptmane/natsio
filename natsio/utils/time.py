@@ -1,4 +1,5 @@
 from datetime import datetime
+import time
 from typing import Final, TypeVar
 
 NANOSECOND_POWER: Final[int] = 10**9
@@ -16,3 +17,7 @@ def from_nanoseconds(time: Time) -> float:
 
 def fromisoformat(time: str) -> datetime:
     return datetime.fromisoformat(time)
+
+
+def get_now_ns() -> int:
+    return time.monotonic_ns()

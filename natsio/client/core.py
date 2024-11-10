@@ -1,5 +1,4 @@
 import asyncio
-import time
 from itertools import cycle
 from types import TracebackType
 from typing import Final, Iterator, Mapping, MutableSequence, Type
@@ -8,12 +7,11 @@ from natsio.abc.client import ErrorCallback
 from natsio.abc.connection import ConnectionProto
 from natsio.abc.dispatcher import DispatcherProto
 from natsio.abc.protocol import ClientMessageProto
-from natsio.abc.subscription import CoreCallback
+from natsio.abc.subscription import CoreCallback, SubscriptionProto
 from natsio.connection.status import ConnectionStatus
 from natsio.connection.tcp import TCPConnection
 from natsio.exceptions.base import TimeoutError
 from natsio.exceptions.client import (
-    BadSubjectError,
     ClientClosedError,
     ClientError,
     DrainTimeoutError,
@@ -43,16 +41,14 @@ from natsio.subscriptions.core import (
 )
 from natsio.utils.logger import client_logger as log
 from natsio.utils.nuid import NUID
+from natsio.utils.time import get_now_ns
 from natsio.utils.uuid import get_uuid
+from natsio.utils.validation import validate_subject
 
 from .jetstream.client import JetStream
 from .status import ClientStatus
 
 DEFAULT_MAX_PAYLOAD_SIZE: Final[int] = 1_048_576
-
-
-def get_now() -> int:
-    return time.monotonic_ns()
 
 
 class ServerPoolIterator:
@@ -88,7 +84,7 @@ class ServerPoolIterator:
             if server.reconnects >= self._max_reconnect_attempts:
                 continue
 
-            now = get_now()
+            now = get_now_ns()
             if (
                 server.last_attempt != 0
                 and now < server.last_attempt + self._reconnect_time_wait_in_ns
@@ -100,11 +96,6 @@ class ServerPoolIterator:
 
 async def _default_error_cb(exc: Exception) -> None:
     log.error("NATS: Encountered error: %s", exc.__class__.__name__, exc_info=exc)
-
-
-def _validate_subject(subj: str) -> None:
-    if any(char in subj for char in "< \"'\\/"):
-        raise BadSubjectError()
 
 
 class NATSCore:
@@ -210,7 +201,7 @@ class NATSCore:
             ssl_hostname = self._config.tls.hostname
             handshake_first = self._config.tls.handshake_first
 
-        server.last_attempt = get_now()
+        server.last_attempt = get_now_ns()
         self._connection = await TCPConnection.connect(
             host=server.uri.hostname,
             port=server.uri.port,
@@ -262,8 +253,8 @@ class NATSCore:
         await self._connection.flush()
 
     async def _replay_subscriptions(self) -> None:
-        to_remove: MutableSequence[Subscription] = []
-        to_replay: MutableSequence[Subscription] = []
+        to_remove: MutableSequence[SubscriptionProto] = []
+        to_replay: MutableSequence[SubscriptionProto] = []
         for sub in self._dispatcher.all_subscriptions():
             if sub.is_ready_to_close:
                 to_remove.append(sub)
@@ -350,9 +341,9 @@ class NATSCore:
         headers: Mapping[str, str] | None = None,
     ) -> None:
         self._raise_if_closed()
-        _validate_subject(subject)
+        validate_subject(subject)
         if reply_to:
-            _validate_subject(reply_to)
+            validate_subject(reply_to)
         if len(data) > self._max_payload:
             raise MaxPayloadError()
         if not headers:
@@ -373,9 +364,9 @@ class NATSCore:
         pending_bytes_limit: int = DEFAULT_SUB_PENDING_BYTES_LIMIT,
     ) -> Subscription:
         self._raise_if_closed()
-        _validate_subject(subject)
+        validate_subject(subject)
         if queue is not None:
-            _validate_subject(queue)
+            validate_subject(queue)
         sub = Subscription(
             client=self,
             subject=subject,
@@ -391,7 +382,7 @@ class NATSCore:
 
     sub = subscribe
 
-    async def unsubscribe(self, sub: Subscription, max_msgs: int = 0) -> None:
+    async def unsubscribe(self, sub: SubscriptionProto, max_msgs: int = 0) -> None:
         await self._send_command(Unsub(sid=sub.sid, max_msgs=max_msgs))
         if max_msgs <= 0:
             self._dispatcher.remove_subscription(sub.sid)
@@ -409,12 +400,16 @@ class NATSCore:
         _, inbox = self._generate_unique_inbox()
         return inbox
 
+    def new_unique_deliver_subject(self) -> str:
+        inbox_id, _ = self._generate_unique_inbox()
+        return f"_DELIVERY{self.inbox_prefix}.{inbox_id}"
+
     def jetstream(
         self, domain: str | None = None, timeout: int | float | None = None
     ) -> JetStream:
         if timeout is None:
             timeout = self._config.request_timeout
-        return JetStream(self, domain, timeout)
+        return JetStream(self, self._send_command, self._dispatcher, domain, timeout)
 
     async def request(
         self,
@@ -424,7 +419,7 @@ class NATSCore:
         timeout: float = 1,
     ) -> CoreMsg:
         self._raise_if_closed()
-        _validate_subject(subject)
+        validate_subject(subject)
         sid = get_uuid()
         inbox_id, inbox = self._generate_unique_inbox()
         future: asyncio.Future[CoreMsg] = asyncio.Future()
