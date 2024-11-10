@@ -26,17 +26,16 @@ class APIError(NATSError):
             return cls(**data)
         code = data["code"]
         err_class: type[APIError]
-        match code:
-            case "400":
-                err_class = BadRequestError
-            case "404":
-                err_class = NotFoundError
-            case "500":
-                err_class = ServerError
-            case "503":
-                err_class = ServiceUnavailableError
-            case _:
-                err_class = APIError
+        if code == 400:
+            err_class = BadRequestError
+        elif code == 404:
+            err_class = NotFoundError
+        elif code == 500:
+            err_class = ServerError
+        elif code == 503:
+            err_class = ServiceUnavailableError
+        else:
+            err_class = APIError
         return err_class(**data)
 
     @classmethod
