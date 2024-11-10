@@ -8,7 +8,7 @@ from tests.utils import FakeStream
 
 
 @pytest.mark.asyncio
-async def test_parse_msg_without_reply():
+async def test_parse_msg_without_reply() -> None:
     subject = 'subject'
     sid = '1'
     payload = 'Hello World'
@@ -31,7 +31,7 @@ async def test_parse_msg_without_reply():
 
 
 @pytest.mark.asyncio
-async def test_parse_msg_with_reply():
+async def test_parse_msg_with_reply() -> None:
     subject = 'subject'
     sid = '1'
     reply_to = 'inbox'
@@ -55,7 +55,7 @@ async def test_parse_msg_with_reply():
 
 
 @pytest.mark.asyncio
-async def test_parse_hmsg_without_reply():
+async def test_parse_hmsg_without_reply() -> None:
     subject = 'subject'
     sid = '1'
     headers = 'NATS/1.0\r\nHeader: Value\r\n\r\n'
@@ -83,7 +83,7 @@ async def test_parse_hmsg_without_reply():
 
 
 @pytest.mark.asyncio
-async def test_parse_hmsg_with_reply():
+async def test_parse_hmsg_with_reply() -> None:
     subject = 'subject'
     sid = '1'
     reply_to = 'inbox'
@@ -111,7 +111,7 @@ async def test_parse_hmsg_with_reply():
     assert hmsg.payload == payload.encode()
 
 
-def test_parse_info():
+def test_parse_info() -> None:
     info_dict = {
         "server_id": "test-server",
         "server_name": "Test NATS Server",
@@ -136,13 +136,13 @@ def test_parse_info():
     assert info.go == "go1.14.1"
     assert info.host == "localhost"
     assert info.port == 4222
-    assert info.headers == True
+    assert info.headers == True  # noqa: E712
     assert info.max_payload == 1048576
     assert info.proto == 1
     assert info.client_id == 42
 
 
-def test_parse_and_raise_error_known():
+def test_parse_and_raise_error_known() -> None:
     data = b"'Unknown Protocol Operation'\r\n"
 
     parser = ProtocolParser()
@@ -150,7 +150,7 @@ def test_parse_and_raise_error_known():
     with pytest.raises(UnknownProtocol):
         parser.parse_and_raise_error(data)
 
-def test_parse_and_raise_error_unknown():
+def test_parse_and_raise_error_unknown() -> None:
     data = b"'Some Unknown Error'\r\n"
 
     parser = ProtocolParser()

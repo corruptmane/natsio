@@ -4,7 +4,7 @@ from natsio.exceptions.client import InvalidHeaderVersion
 from natsio.protocol.parser import parse_headers
 
 
-def test_basic_headers_parsing():
+def test_basic_headers_parsing() -> None:
     data = b"NATS/1.0\r\nContent-Type: text/plain\r\nSubject: greetings\r\n\r\n"
     expected_output = {
         "Content-Type": "text/plain",
@@ -14,7 +14,7 @@ def test_basic_headers_parsing():
     assert result == expected_output
 
 
-def test_multiple_headers_parsing():
+def test_multiple_headers_parsing() -> None:
     data = b"NATS/1.0\r\nHeader1: Value1\r\nHeader2: Value2\r\nHeader3: Value3\r\n\r\n"
     expected_output = {
         "Header1": "Value1",
@@ -25,7 +25,7 @@ def test_multiple_headers_parsing():
     assert result == expected_output
 
 
-def test_headers_with_whitespace_variations():
+def test_headers_with_whitespace_variations() -> None:
     data = b"NATS/1.0\r\nKey1:Value1\r\nKey2 : Value2\r\nKey3    :    Value3\r\n\r\n"
     expected_output = {
         "Key1": "Value1",
@@ -36,7 +36,7 @@ def test_headers_with_whitespace_variations():
     assert result == expected_output
 
 
-def test_duplicate_keys():
+def test_duplicate_keys() -> None:
     data = b"NATS/1.0\r\nDupKey: FirstValue\r\nDupKey: SecondValue\r\n\r\n"
     expected_output = {
         "DupKey": "SecondValue"
@@ -45,7 +45,7 @@ def test_duplicate_keys():
     assert result == expected_output
 
 
-def test_case_sensitivity():
+def test_case_sensitivity() -> None:
     data = b"NATS/1.0\r\nContent-Type: text/plain\r\ncontent-type: text/html\r\n\r\n"
     expected_output = {
         "Content-Type": "text/plain",
@@ -55,7 +55,7 @@ def test_case_sensitivity():
     assert result == expected_output
 
 
-def test_headers_with_leading_and_trailing_whitespace():
+def test_headers_with_leading_and_trailing_whitespace() -> None:
     data = b"NATS/1.0\r\n  KeyWithSpaces  :   ValueWithSpaces   \r\n\r\n"
     expected_output = {
         "KeyWithSpaces": "ValueWithSpaces"
@@ -64,20 +64,20 @@ def test_headers_with_leading_and_trailing_whitespace():
     assert result == expected_output
 
 
-def test_empty_headers():
+def test_empty_headers() -> None:
     data = b"NATS/1.0\r\n\r\n"
     expected_output = None
     result = parse_headers(data)
     assert result is expected_output
 
 
-def test_malformed_headers():
+def test_malformed_headers() -> None:
     data = b"NATS/1.0\r\nInvalidHeader\r\nAnotherHeader WithoutColon\r\n\r\n"
     with pytest.raises(ValueError, match="Malformed header line"):
         parse_headers(data)
 
 
-def test_headers_with_empty_values():
+def test_headers_with_empty_values() -> None:
     data = b"NATS/1.0\r\nEmptyValueHeader:\r\nAnotherHeader: Value\r\n\r\n"
     expected_output = {
         "EmptyValueHeader": "",
@@ -87,13 +87,13 @@ def test_headers_with_empty_values():
     assert result == expected_output
 
 
-def test_missing_version_line():
+def test_missing_version_line() -> None:
     data = b"Content-Type: text/plain\r\n\r\n"
     with pytest.raises(InvalidHeaderVersion):
         parse_headers(data)
 
 
-def test_headers_with_special_characters():
+def test_headers_with_special_characters() -> None:
     data = b"NATS/1.0\r\nX-Custom-Header: Value-With-Special_Characters!@#$%^&*\r\n\r\n"
     expected_output = {
         "X-Custom-Header": "Value-With-Special_Characters!@#$%^&*"
@@ -102,7 +102,7 @@ def test_headers_with_special_characters():
     assert result == expected_output
 
 
-def test_large_number_of_headers():
+def test_large_number_of_headers() -> None:
     headers = "".join([f"Header{i}: Value{i}\r\n" for i in range(1000)])
     data = ("NATS/1.0\r\n" + headers + "\r\n").encode()
     expected_output = {f"Header{i}": f"Value{i}" for i in range(1000)}
@@ -110,19 +110,19 @@ def test_large_number_of_headers():
     assert result == expected_output
 
 
-def test_unicode_characters_in_headers():
+def test_unicode_characters_in_headers() -> None:
     data = "NATS/1.0\r\nшо: нішо\r\n\r\n".encode("utf-8")
     with pytest.raises(ValueError, match="Invalid characters in header key"):
         parse_headers(data)
 
 
-def test_invalid_encoding():
+def test_invalid_encoding() -> None:
     data = b"NATS/1.0\r\nInvalidEncoding: \xff\xfe\xfd\r\n\r\n"
     with pytest.raises(UnicodeDecodeError):
         parse_headers(data)
 
 
-def test_header_value_with_whitespace():
+def test_header_value_with_whitespace() -> None:
     data = b"NATS/1.0\r\nHeader:    Value with spaces    \r\n\r\n"
     expected_output = {
         "Header": "Value with spaces"
@@ -131,14 +131,14 @@ def test_header_value_with_whitespace():
     assert result == expected_output
 
 
-def test_no_headers_after_version_line():
+def test_no_headers_after_version_line() -> None:
     data = b"NATS/1.0\r\n\r\n"
     expected_output = None
     result = parse_headers(data)
     assert result is expected_output
 
 
-def test_headers_with_multiple_colons_in_value():
+def test_headers_with_multiple_colons_in_value() -> None:
     data = b"NATS/1.0\r\nTime: 12:34:56\r\n\r\n"
     expected_output = {
         "Time": "12:34:56"
@@ -147,7 +147,7 @@ def test_headers_with_multiple_colons_in_value():
     assert result == expected_output
 
 
-def test_headers_with_tabs_and_whitespace():
+def test_headers_with_tabs_and_whitespace() -> None:
     data = b"NATS/1.0\r\nKey\t:\tValue\t\r\n\r\n"
     expected_output = {
         "Key": "Value"
@@ -156,7 +156,7 @@ def test_headers_with_tabs_and_whitespace():
     assert result == expected_output
 
 
-def test_headers_with_empty_lines_between_headers():
+def test_headers_with_empty_lines_between_headers() -> None:
     data = b"NATS/1.0\r\nHeader1: Value1\r\n\r\nHeader2: Value2\r\n\r\n"
     expected_output = {
         "Header1": "Value1"
@@ -165,19 +165,19 @@ def test_headers_with_empty_lines_between_headers():
     assert result == expected_output
 
 
-def test_malformed_version_line():
+def test_malformed_version_line() -> None:
     data = b"NATS/1.1\r\nHeader: Value\r\n\r\n"
     with pytest.raises(InvalidHeaderVersion):
         parse_headers(data)
 
 
-def test_headers_with_no_colon():
+def test_headers_with_no_colon() -> None:
     data = b"NATS/1.0\r\nHeaderWithoutColon\r\n\r\n"
     with pytest.raises(ValueError, match="Malformed header line"):
         parse_headers(data)
 
 
-def test_header_with_colon_in_key():
+def test_header_with_colon_in_key() -> None:
     data = b"NATS/1.0\r\nKey:Part1: Value\r\n\r\n"
     expected_output = {
         "Key": "Part1: Value"
@@ -186,13 +186,13 @@ def test_header_with_colon_in_key():
     assert result == expected_output
 
 
-def test_headers_with_non_ascii_characters_in_key():
+def test_headers_with_non_ascii_characters_in_key() -> None:
     data = "NATS/1.0\r\nключ: Value\r\n\r\n".encode("utf-8")
     with pytest.raises(ValueError, match="Invalid characters in header key"):
         parse_headers(data)
 
 
-def test_headers_with_non_ascii_characters_in_value():
+def test_headers_with_non_ascii_characters_in_value() -> None:
     data = "NATS/1.0\r\nHeader: значення\r\n\r\n".encode("utf-8")
     expected_output = {
         "Header": "значення"
@@ -201,7 +201,7 @@ def test_headers_with_non_ascii_characters_in_value():
     assert result == expected_output
 
 
-def test_headers_with_folded_lines():
+def test_headers_with_folded_lines() -> None:
     data = b"NATS/1.0\r\nFoldedHeader: Line1\r\n Line2\r\n\r\n"
     with pytest.raises(ValueError, match="Malformed header line"):
         parse_headers(data)
