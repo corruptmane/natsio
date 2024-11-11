@@ -1,3 +1,4 @@
+from base64 import b64decode
 from contextlib import suppress
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, Mapping, MutableMapping, cast
 
@@ -5,10 +6,12 @@ from natsio.abc.dispatcher import DispatcherProto
 from natsio.abc.protocol import ClientMessageProto
 from natsio.abc.subscription import JetStreamCallback
 from natsio.exceptions.client import MessageAlreadyAckedError
-from natsio.exceptions.jetstream import APIError, ServiceUnavailableError
+from natsio.exceptions.jetstream import APIError, NotFoundError, ServiceUnavailableError
 from natsio.exceptions.protocol import NoRespondersError
 from natsio.messages.jetstream import JetStreamMsg
+from natsio.protocol.headers import Header, StatusCode
 from natsio.protocol.operations.sub import Sub
+from natsio.protocol.parser import parse_headers
 from natsio.subscriptions.core import DEFAULT_SUB_PENDING_BYTES_LIMIT, DEFAULT_SUB_PENDING_MSGS_LIMIT
 from natsio.subscriptions.jetstream import PullSubscription, PushSubscription
 from natsio.utils.json import json_dumps, json_loads
@@ -18,6 +21,7 @@ from .entities import (
     AckPolicy,
     ConsumerInfo,
     ConsumerList,
+    GetMsgDirectRequest,
     GetMsgRequest,
     PullConsumerConfig,
     PushConsumerConfig,
@@ -127,12 +131,6 @@ class JetStream:
         resp = await self._api_request(f"{self._prefix}.STREAM.PURGE.{stream_name}", payload)
         return bool(resp["purged"])
 
-    async def _get_msg(self, stream_name: str, payload: Mapping[str, Any]) -> RawMsg:
-        resp = await self._api_request(
-            f"{self._prefix}.STREAM.MSG.GET.{stream_name}", json_dumps(payload)
-        )
-        return RawMsg.from_response(**resp["message"])
-
     async def get_msg(self, stream_name: str, req: GetMsgRequest) -> RawMsg:
         validate_name(stream_name)
 
@@ -141,6 +139,8 @@ class JetStream:
             raise ValueError("`seq` and `last_by_subj` properties can not be combined")
         if req.seq is None and req.last_by_subj is None:
             raise ValueError("One of `seq` and `last_by_subj` must be specified")
+        if req.seq is None and req.next_by_subj is not None:
+            raise ValueError("`seq` must be provided when using `next_by_subj`")
         if req.seq is not None:
             data["seq"] = req.seq
         if req.last_by_subj is not None:
@@ -160,7 +160,62 @@ class JetStream:
         if req.up_to_time is not None:
             data["up_to_time"] = req.render_up_to_time()  # type: ignore[assignment]
 
-        return await self._get_msg(stream_name, data)
+        resp = await self._api_request(
+            f"{self._prefix}.STREAM.MSG.GET.{stream_name}", json_dumps(data)
+        )
+        if "error" in resp:
+            raise APIError.from_error(**resp["error"])
+
+        msg = cast(Mapping[str, str], resp["message"])
+        payload = b64decode(msg["data"]) if "data" in msg else None
+        headers = parse_headers(b64decode(msg["hdrs"])) if "hdrs" in msg else None
+        return RawMsg(
+            subject=msg["subject"],
+            seq=int(msg["seq"]),
+            time=msg["time"],
+            payload=payload,
+            headers=headers,
+        )
+
+    async def get_msg_direct(self, stream_name: str, req: GetMsgDirectRequest, timeout: int | float | None = None) -> RawMsg:
+        validate_name(stream_name)
+        if timeout is None:
+            timeout = self.timeout
+
+        data: MutableMapping[str, str | int | list[str]] = {}
+        if req.seq and req.last_by_subj:
+            raise ValueError("`seq` and `last_by_subj` properties can not be combined")
+        if req.seq is None and req.last_by_subj is None:
+            raise ValueError("One of `seq` and `last_by_subj` must be specified")
+        if req.seq is None and req.next_by_subj is not None:
+            raise ValueError("`seq` must be provided when using `next_by_subj`")
+        if req.seq is not None:
+            data["seq"] = req.seq
+        if req.last_by_subj is not None:
+            data["last_by_subj"] = req.last_by_subj
+        if req.next_by_subj is not None:
+            data["next_by_subj"] = req.next_by_subj
+
+
+        try:
+            msg = await self._nc.request(
+                subject=f"{self._prefix}.DIRECT.GET.{stream_name}",
+                data=json_dumps(data), timeout=timeout,
+            )
+        except NoRespondersError:
+            raise ServiceUnavailableError()
+        if not msg.payload and msg.headers and Header.STATUS in msg.headers:
+            if msg.headers[Header.STATUS] == StatusCode.NO_MESSAGES:
+                raise NotFoundError()
+            raise APIError.from_msg_headers(msg.headers)
+        assert msg.headers
+        return RawMsg(
+            subject=msg.headers[Header.SUBJECT],
+            seq=int(msg.headers[Header.SEQUENCE]),
+            time=msg.headers[Header.TIMESTAMP],
+            payload=msg.payload,
+            headers=msg.headers,
+        )
 
     async def create_or_update_consumer(
         self,

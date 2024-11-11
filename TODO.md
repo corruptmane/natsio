@@ -9,10 +9,9 @@
 - [ ] JetStream
     1. - [x] Pub, Pull/Push subscription, Ack, Nak, etc.
     2. - [x] Flow control for push consumers
-    3. - [ ] Ordered consumers
+    3. - [x] DIRECT get message
     4. - [ ] KV storage
     5. - [ ] Object storage
-    6. - [ ] DIRECT get message
 - [ ] Tests with devcontainers
     1. - [x] NATS Core
     2. - [x] Protocol parser

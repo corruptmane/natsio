@@ -15,9 +15,7 @@ from typing import (
     get_args,
     get_origin,
 )
-from base64 import b64decode
 
-from natsio.protocol.parser import parse_headers
 from natsio.utils.time import from_nanoseconds, fromisoformat
 
 
@@ -433,25 +431,25 @@ class GetMsgRequest(Base):
 
 
 @dataclass(kw_only=True)
-class RawMsg(Base):
+class GetMsgDirectRequest(Base):
+    seq: int | None = None
+    last_by_subj: str | None = None
+    next_by_subj: str | None = None
+
+
+@dataclass(kw_only=True)
+class RawMsg:
     subject: str
     seq: int
     time: str
-    data: str | None = None  # b64 encoded payload, use `payload` instead
-    hdrs: str | None = None  # b64 encoded headers, use `headers` instead
+    payload: bytes | None
+    headers: Mapping[str, str] | None
 
     @cached_property
-    def payload(self) -> bytes | None:
-        if not self.data:
+    def time_dt(self) -> datetime | None:
+        if self.time is None:
             return None
-        return b64decode(self.data)
-
-    @cached_property
-    def headers(self) -> Mapping[str, str] | None:
-        if not self.hdrs:
-            return None
-        decoded_headers = b64decode(self.hdrs)
-        return parse_headers(decoded_headers)
+        return fromisoformat(self.time)
 
 
 class AckPolicy(str, Enum):
