@@ -35,6 +35,7 @@ class PushSubscription(SubscriptionProto):
         queue: str | None = None,
         sid: str | None = None,
         callback: JetStreamCallback | None = None,
+        is_flow_control: bool = False,
         pending_msgs_limit: int = DEFAULT_SUB_PENDING_MSGS_LIMIT,
         pending_bytes_limit: int = DEFAULT_SUB_PENDING_BYTES_LIMIT,
     ) -> None:
@@ -49,6 +50,7 @@ class PushSubscription(SubscriptionProto):
         self._consumer_name = consumer_name
         self._msg_queue: asyncio.Queue[JetStreamMsg] = asyncio.Queue(maxsize=pending_msgs_limit)
         self._callback = callback
+        self._is_flow_control = is_flow_control
         self._pending_next_msg_calls: MutableMapping[str, asyncio.Future[JetStreamMsg]] = {}
         self._pending_bytes_limit = pending_bytes_limit
         self._pending_size = 0
@@ -83,14 +85,15 @@ class PushSubscription(SubscriptionProto):
         if self._nc.is_closed:
             raise ClientClosedError()
 
-    async def add_msg(self, msg: CoreMsg) -> None:
+    async def _process_if_flow_control(self, msg: CoreMsg) -> bool:
         if (
             not msg.payload
             and not msg.headers
             and msg.reply_to is not None
             and msg.reply_to.startswith(f"$JS.FC.{self._stream_name}.{self._consumer_name}")
         ):
-            return await msg.reply(b"")
+            await msg.reply(b"")
+            return True
         if (
             msg.headers
             and Header.STATUS in msg.headers
@@ -101,12 +104,18 @@ class PushSubscription(SubscriptionProto):
             fc_reply = msg.headers.get(Header.CONSUMER_STALLED)
             if fc_reply:
                 await self._nc.publish(fc_reply, b"")
-            return
+            return True
+        return False
+
+    async def add_msg(self, msg: CoreMsg) -> None:
+        # NOTE: need consulting on flow control flow
+        if self._is_flow_control:
+            if await self._process_if_flow_control(msg):
+                return
+        # TODO: ordered consumer
         payload_size = len(msg.payload)
         self._raise_if_slow_consumer(payload_size)
-        await self._msg_queue.put(
-            JetStreamMsg(nats=self._nc, jetstream=self._js, msg=msg)
-        )
+        await self._msg_queue.put(JetStreamMsg(nats=self._nc, jetstream=self._js, msg=msg))
         self._pending_size += payload_size
         if self._max_msgs > 0:
             self._received += 1

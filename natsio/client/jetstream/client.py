@@ -241,6 +241,13 @@ class JetStream:
         if consumer_config.deliver_group is not None:
             validate_subject(consumer_config.deliver_group)
 
+        if (
+            (consumer_config.flow_control and not consumer_config.idle_heartbeat)
+            or
+            (not consumer_config.flow_control and consumer_config.idle_heartbeat)
+        ):
+            raise ValueError("Both `flow_control` and `idle_heartbeat` properties must be set for flow control")
+
         if callback is not None and not manual_ack and consumer_config.ack_policy is not AckPolicy.none:
             callback = auto_ack_wrapper(callback)
 
@@ -252,6 +259,7 @@ class JetStream:
             subject=consumer_config.deliver_subject,
             queue=consumer_config.deliver_group,
             callback=callback,
+            is_flow_control=bool(consumer_config.flow_control),
             pending_msgs_limit=pending_msgs_limit,
             pending_bytes_limit=pending_bytes_limit,
         )
