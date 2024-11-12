@@ -1,3 +1,4 @@
+import re
 from typing import Final
 from natsio.exceptions.client import BadSubjectError
 
@@ -5,7 +6,8 @@ NAME_INVALID_CHARS: Final[set[str]] = set(".*>/\\")
 NAME_INVALID_CHARS_LIST_PRETTY: Final[str] = ", ".join(
     [f'"{char}"' for char in NAME_INVALID_CHARS]
 )
-
+VALID_BUCKET_RE: re.Pattern[str] = re.compile(r"^[a-zA-Z0-9_-]+$")
+VALID_KEY_RE: re.Pattern[str] = re.compile(r"^[-/_=\.a-zA-Z0-9]+$")
 
 def validate_subject(subj: str) -> None:
     if any(char in subj for char in "< \"'\\/"):

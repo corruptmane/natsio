@@ -1,6 +1,6 @@
 from base64 import b64decode
 from contextlib import suppress
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, Mapping, MutableMapping, cast
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Final, Mapping, MutableMapping, cast
 
 from natsio.abc.dispatcher import DispatcherProto
 from natsio.abc.protocol import ClientMessageProto
@@ -14,25 +14,33 @@ from natsio.protocol.operations.sub import Sub
 from natsio.protocol.parser import parse_headers
 from natsio.subscriptions.core import DEFAULT_SUB_PENDING_BYTES_LIMIT, DEFAULT_SUB_PENDING_MSGS_LIMIT
 from natsio.subscriptions.jetstream import PullSubscription, PushSubscription
-from natsio.utils.validation import validate_name, validate_subject
+from natsio.utils.time import to_nanoseconds
+from natsio.utils.validation import VALID_BUCKET_RE, validate_name, validate_subject
 from .entities import (
     AccountInfo,
     AckPolicy,
     ConsumerInfo,
     ConsumerList,
+    Discard,
     GetMsgDirectRequest,
     GetMsgRequest,
+    KeyValueConfig,
     PullConsumerConfig,
     PushConsumerConfig,
     RawMsg,
+    Retention,
     StreamInfo,
     CreateStreamRequest,
     StreamList,
     UpdateStreamRequest,
 )
+from .key_value import KeyValue
 
 if TYPE_CHECKING:
     from natsio.client.core import NATSCore
+
+KV_STREAM_NAME_PREFIX: Final[str] = "KV_"
+KV_API_PREFIX: Final[str] = "$KV."
 
 
 def auto_ack_wrapper(callback: JetStreamCallback) -> JetStreamCallback:
@@ -355,6 +363,84 @@ class JetStream:
             prefix=self._prefix,
         )
 
+    async def get_key_value(self, bucket_name: str) -> KeyValue:
+        if not VALID_BUCKET_RE.match(bucket_name):
+            raise ValueError("Bad bucket name")  # TODO: use separate error
+
+        stream_name = f"{KV_STREAM_NAME_PREFIX}{bucket_name}"
+        try:
+            stream_info = await self.get_stream_info(stream_name)
+        except NotFoundError:
+            raise   # TODO: use separate error
+
+        if not stream_info.config.max_msgs_per_subject or stream_info.config.max_msgs_per_subject < 1:
+            raise ValueError("Bad bucket history value")   # TODO: use separate error
+
+        return KeyValue(
+            bucket_name=bucket_name,
+            stream_name=stream_name,
+            pre=f"{KV_API_PREFIX}.{bucket_name}.",
+            jetstream=self,
+            is_direct=bool(stream_info.config.allow_direct),
+        )
+
+    async def create_key_value(self, config: KeyValueConfig) -> KeyValue:
+        if not VALID_BUCKET_RE.match(config.bucket_name):
+            raise ValueError("Bad bucket name")  # TODO: use separate error
+
+        duplicate_window_seconds = 120  # 2 minutes
+        if config.ttl_seconds < duplicate_window_seconds:
+            duplicate_window_seconds = config.ttl_seconds
+        if config.history > 64:
+            raise ValueError("Key history is too large")  # TODO: use separate error
+
+        stream_name = f"{KV_STREAM_NAME_PREFIX}{config.bucket_name}"
+        req = CreateStreamRequest(
+            name=stream_name,
+            retention=Retention.limits,
+            description=config.description,
+            subjects=[f"$KV.{config.bucket_name}.>"],
+            allow_direct=config.allow_direct,
+            allow_rollup_hdrs=True,
+            deny_delete=True,
+            discard=Discard.new,
+            duplicate_window=to_nanoseconds(duplicate_window_seconds),
+            max_age=to_nanoseconds(config.ttl_seconds),
+            max_bytes=config.max_bytes if config.max_bytes else -1,
+            max_consumers=-1,
+            max_msg_size=config.max_value_size,
+            max_msgs=-1,
+            max_msgs_per_subject=config.history,
+            num_replicas=config.num_replicas,
+            storage=config.storage,
+            republish=config.republish,
+        )
+
+        await self.create_stream(req)
+
+        return KeyValue(
+            bucket_name=config.bucket_name,
+            stream_name=stream_name,
+            pre=f"{KV_API_PREFIX}.{config.bucket_name}.",
+            jetstream=self,
+            is_direct=bool(config.allow_direct),
+        )
+
+    async def delete_key_value(self, bucket_name: str) -> bool:
+        if not VALID_BUCKET_RE.match(bucket_name):
+            raise ValueError("Bad bucket name")  # TODO: use separate error
+
+        stream_name = f"{KV_STREAM_NAME_PREFIX}{bucket_name}"
+        return await self.delete_stream(stream_name)
+
+    async def get_object_store(self) -> None:
+        pass
+
+    async def create_object_store(self) -> None:
+        pass
+
+    async def delete_object_store(self) -> None:
+        pass
 
     async def _api_request(
         self, subject: str, data: bytes = b"", timeout: int | float | None = None

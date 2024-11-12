@@ -589,3 +589,18 @@ class ConsumerList(_PagedResult):
         paged = _PagedResult.from_response(**data)
         consumers = [ConsumerInfo.from_response(**consumer) for consumer in data["consumers"]]
         return cls(total=paged.total, offset=paged.offset, limit=paged.limit, consumers=consumers)
+
+
+@dataclass(kw_only=True)
+class KeyValueConfig(Base):
+    bucket_name: str
+    description: str | None = None
+    history: int = 1
+    max_value_size: int = -1
+    ttl_seconds: int = 120
+    max_bytes: int = -1
+    storage: Storage = Storage.file
+    num_replicas: int = 1
+    placement: Placement | None = None
+    republish: Republish | None = None
+    allow_direct: bool | None = None

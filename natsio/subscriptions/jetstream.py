@@ -267,7 +267,7 @@ class PullSubscription:
 
         payload: MutableMapping[str, int | bool] = dict(batch=batch_size)
         if expires is not None:
-            payload["expires"] = int(to_nanoseconds(expires))
+            payload["expires"] = to_nanoseconds(expires)
 
         await self._nc.publish(
             subject=self._request_batch_subject,
