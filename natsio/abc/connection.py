@@ -5,6 +5,7 @@ from typing import Protocol, Self
 from natsio.config import ServerInfo
 from natsio.connection.status import ConnectionStatus
 from natsio.protocol.operations.connect import Connect
+from natsio.utils.json.base import JSONSerializerProto
 
 from .client import ErrorCallback
 from .dispatcher import DispatcherProto
@@ -83,6 +84,7 @@ class ConnectionProto(Protocol):
         force_flush_timeout: int,
         error_callback: ErrorCallback,
         timeout: float,
+        json_serializer: JSONSerializerProto,
         ssl: SSLContext | None,
         ssl_hostname: str | None,
         handshake_first: bool | None,

@@ -66,3 +66,7 @@ class MessageAlreadyAckedError(ClientError):
 
 class BadSubjectError(ClientError):
     description = "Invalid subject"
+
+
+class NotJetStreamMessageError(ClientError):
+    description = "Not a JetStream message"

@@ -14,7 +14,7 @@ from natsio.protocol.headers import Header
 from natsio.protocol.operations.hmsg import HMsg
 from natsio.protocol.operations.info import Info
 from natsio.protocol.operations.msg import Msg
-from natsio.utils.json import json_loads
+from natsio.utils.json import JSONSerializerProto
 
 WHITESPACE_RE: Final[Pattern[bytes]] = re.compile(rb"\s+")
 ERR_NAME_RE: Final[Pattern[str]] = re.compile(r"'(.*?)'")
@@ -47,6 +47,8 @@ def parse_headers(data: bytes) -> Mapping[str, str] | None:
     for line in lines:
         try:
             key, value = line.decode().split(":", 1)
+        except UnicodeDecodeError:
+            raise
         except ValueError:
             raise ValueError("Malformed header line")
         key = key.strip()
@@ -58,6 +60,9 @@ def parse_headers(data: bytes) -> Mapping[str, str] | None:
 
 
 class ProtocolParser:
+    def __init__(self, json_serializer: JSONSerializerProto) -> None:
+        self._serializer = json_serializer
+
     async def parse_msg(self, data: bytes, stream: StreamProto) -> Msg:
         fields = WHITESPACE_RE.split(data, maxsplit=3)
 
@@ -118,7 +123,7 @@ class ProtocolParser:
         raise error_class()
 
     def parse_info(self, data: bytes) -> Info:
-        fields = json_loads(data)
+        fields = self._serializer.load(data)
         return Info(
             server_id=fields["server_id"],
             server_name=fields["server_name"],

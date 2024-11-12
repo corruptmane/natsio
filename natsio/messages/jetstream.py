@@ -2,10 +2,9 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 from functools import cached_property
-from typing import TYPE_CHECKING, Mapping, Self, Sequence, cast
+from typing import TYPE_CHECKING, Mapping, Self, Sequence
 
-from natsio.exceptions.client import MessageAlreadyAckedError
-from natsio.utils.json import json_dumps
+from natsio.exceptions.client import MessageAlreadyAckedError, NotJetStreamMessageError
 from natsio.utils.time import from_nanoseconds, to_nanoseconds
 
 from .core import CoreMsg
@@ -115,8 +114,8 @@ class JetStreamMsg:
         return self._msg.payload
 
     @property
-    def reply_to(self) -> str:
-        return cast(str, self._msg.reply_to)
+    def reply_to(self) -> str | None:
+        return self._msg.reply_to
 
     @property
     def headers(self) -> Mapping[str, str] | None:
@@ -124,39 +123,49 @@ class JetStreamMsg:
 
     @cached_property
     def metadata(self) -> Metadata | None:
-        return Metadata.from_reply_subject(self.reply_to)
+        self._raise_if_not_jetstream()
+        return Metadata.from_reply_subject(self.reply_to)  # type: ignore[arg-type]
 
     def _raise_if_already_acked(self) -> None:
         if self._is_acked:
             raise MessageAlreadyAckedError()
+
+    def _raise_if_not_jetstream(self) -> None:
+        if not self.reply_to:
+            raise NotJetStreamMessageError()
 
     async def reply(self, data: bytes, headers: Mapping[str, str] | None = None) -> None:
         await self._msg.reply(data, headers)
 
     async def ack(self) -> None:
         self._raise_if_already_acked()
+        self._raise_if_not_jetstream()
         await self.reply(b"")
         self._is_acked = True
 
     async def ack_sync(self, timeout: float = 1) -> CoreMsg:
         self._raise_if_already_acked()
-        resp = await self._nc.request(self.reply_to, b"", timeout=timeout)
+        self._raise_if_not_jetstream()
+        resp = await self._nc.request(self.reply_to, b"", timeout=timeout)  # type: ignore[arg-type]
         self._is_acked = True
         return resp
 
     async def nak(self, delay: float | int | None = None) -> None:
         self._raise_if_already_acked()
+        self._raise_if_not_jetstream()
         payload = Ack.Nak
         if delay is not None:
-            payload = payload + b" " + json_dumps({"delay": to_nanoseconds(delay)})
+            payload = payload + b" " + self._nc.serializer.dump({"delay": to_nanoseconds(delay)})
 
         await self.reply(payload)
         self._is_acked = True
 
     async def term(self) -> None:
         self._raise_if_already_acked()
+        self._raise_if_not_jetstream()
         await self.reply(Ack.Term)
         self._is_acked = True
 
     async def in_progress(self) -> None:
+        self._raise_if_not_jetstream()
         await self.reply(Ack.Progress)

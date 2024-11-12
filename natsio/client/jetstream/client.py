@@ -14,7 +14,6 @@ from natsio.protocol.operations.sub import Sub
 from natsio.protocol.parser import parse_headers
 from natsio.subscriptions.core import DEFAULT_SUB_PENDING_BYTES_LIMIT, DEFAULT_SUB_PENDING_MSGS_LIMIT
 from natsio.subscriptions.jetstream import PullSubscription, PushSubscription
-from natsio.utils.json import json_dumps, json_loads
 from natsio.utils.validation import validate_name, validate_subject
 from .entities import (
     AccountInfo,
@@ -72,7 +71,7 @@ class JetStream:
         data: MutableMapping[str, str | int] = dict(offset=offset)
         if subject is not None:
             data["subject"] = subject
-        resp = await self._api_request(f"{self._prefix}.STREAM.LIST", json_dumps(data))
+        resp = await self._api_request(f"{self._prefix}.STREAM.LIST", self._nc.serializer.dump(data))
         return StreamList.from_response(**resp)
 
     async def get_stream_names(
@@ -81,20 +80,20 @@ class JetStream:
         data: MutableMapping[str, str | int] = dict(offset=offset)
         if subject is not None:
             data["subject"] = subject
-        resp = await self._api_request(f"{self._prefix}.STREAM.NAMES", json_dumps(data))
+        resp = await self._api_request(f"{self._prefix}.STREAM.NAMES", self._nc.serializer.dump(data))
         return cast(list[str] | None, resp["streams"])
 
     async def create_stream(self, req: CreateStreamRequest) -> StreamInfo:
         validate_name(req.name)
         resp = await self._api_request(
-            f"{self._prefix}.STREAM.CREATE.{req.name}", json_dumps(req.to_dict())
+            f"{self._prefix}.STREAM.CREATE.{req.name}", self._nc.serializer.dump(req.to_dict())
         )
         return StreamInfo.from_response(**resp)
 
     async def update_stream(self, req: UpdateStreamRequest) -> StreamInfo:
         validate_name(req.name)
         resp = await self._api_request(
-            f"{self._prefix}.STREAM.UPDATE.{req.name}", json_dumps(req.to_dict())
+            f"{self._prefix}.STREAM.UPDATE.{req.name}", self._nc.serializer.dump(req.to_dict())
         )
         return StreamInfo.from_response(**resp)
 
@@ -126,10 +125,20 @@ class JetStream:
             data["seq"] = seq
         if keep:
             data["keep"] = keep
-        payload = json_dumps(data) if data else b""
+        payload = self._nc.serializer.dump(data) if data else b""
 
         resp = await self._api_request(f"{self._prefix}.STREAM.PURGE.{stream_name}", payload)
         return bool(resp["purged"])
+
+    async def delete_stream_msg(self, stream_name: str, seq: int, no_erase: bool | None = None) -> bool:
+        validate_name(stream_name)
+
+        data: MutableMapping[str, int | bool] = dict(seq=seq)
+        if no_erase is not None:
+            data["no_erase"] = no_erase
+
+        resp = await self._api_request(f"{self._prefix}.STREAM.MSG.DELETE.{stream_name}", self._nc.serializer.dump(data))
+        return bool(resp["success"])
 
     async def get_msg(self, stream_name: str, req: GetMsgRequest) -> RawMsg:
         validate_name(stream_name)
@@ -161,7 +170,7 @@ class JetStream:
             data["up_to_time"] = req.render_up_to_time()  # type: ignore[assignment]
 
         resp = await self._api_request(
-            f"{self._prefix}.STREAM.MSG.GET.{stream_name}", json_dumps(data)
+            f"{self._prefix}.STREAM.MSG.GET.{stream_name}", self._nc.serializer.dump(data)
         )
         if "error" in resp:
             raise APIError.from_error(**resp["error"])
@@ -200,7 +209,7 @@ class JetStream:
         try:
             msg = await self._nc.request(
                 subject=f"{self._prefix}.DIRECT.GET.{stream_name}",
-                data=json_dumps(data), timeout=timeout,
+                data=self._nc.serializer.dump(data), timeout=timeout,
             )
         except NoRespondersError:
             raise ServiceUnavailableError()
@@ -241,14 +250,14 @@ class JetStream:
             subj = f"{self._prefix}.CONSUMER.CREATE.{stream_name}"
 
         data = {"stream_name": stream_name, "config": config.to_dict()}
-        resp = await self._api_request(subj, json_dumps(data))
+        resp = await self._api_request(subj, self._nc.serializer.dump(data))
         return ConsumerInfo.from_response(**resp)
 
     async def get_consumer_list(self, stream_name: str, offset: int = 0) -> ConsumerList:
         validate_name(stream_name)
 
         resp = await self._api_request(
-            f"{self._prefix}.CONSUMER.LIST.{stream_name}", json_dumps({"offset": offset})
+            f"{self._prefix}.CONSUMER.LIST.{stream_name}", self._nc.serializer.dump({"offset": offset})
         )
 
         return ConsumerList.from_response(**resp)
@@ -261,7 +270,7 @@ class JetStream:
             data["subject"] = subject
 
         resp = await self._api_request(
-            f"{self._prefix}.CONSUMER.NAMES.{stream_name}", json_dumps(data)
+            f"{self._prefix}.CONSUMER.NAMES.{stream_name}", self._nc.serializer.dump(data)
         )
 
         return cast(list[str], resp["consumers"])
@@ -358,7 +367,7 @@ class JetStream:
         except NoRespondersError:
             raise ServiceUnavailableError()
 
-        resp = cast(Mapping[str, Any], json_loads(msg.payload))
+        resp = cast(Mapping[str, Any], self._nc.serializer.load(msg.payload))
         if "error" in resp:
             raise APIError.from_error(**resp["error"])
 

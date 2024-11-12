@@ -3,7 +3,7 @@ from typing import Final, Union
 
 from natsio.abc.protocol import ClientMessageProto
 from natsio.const import CRLF
-from natsio.utils.json import json_dumps
+from natsio.utils.json.native import JSONSerializer
 
 CONNECT_OP: Final[bytes] = b"CONNECT"
 
@@ -57,7 +57,7 @@ class Connect(ClientMessageProto):
             payload["headers"] = self.headers
         if self.nkey is not None:
             payload["nkey"] = self.nkey
-        return json_dumps(payload)
+        return JSONSerializer().dump(payload)
 
     def build(self) -> bytes:
         return CONNECT_OP + b" " + self._build_payload() + CRLF

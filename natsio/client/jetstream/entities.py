@@ -27,6 +27,7 @@ T = TypeVar("T", bound=DataclassInstance)
 
 
 def _map_to_dataclass(data: Mapping[str, Any], cls: Type[T]) -> T:
+    # NOTE: is a subject to change, I don't like it at all, sorry for anyone reading that
     field_names = {field.name: field.type for field in fields(cls)}
     filtered_data = {}
 

@@ -30,6 +30,7 @@ from natsio.protocol.operations.msg import MSG_OP
 from natsio.protocol.operations.ok import OK_OP
 from natsio.protocol.operations.ping_pong import PING_OP, PONG_OP, Ping, Pong
 from natsio.protocol.parser import ProtocolParser
+from natsio.utils.json.base import JSONSerializerProto
 from natsio.utils.logger import connection_logger as log
 
 from .protocol import StreamProtocol
@@ -63,6 +64,7 @@ class TCPConnection(ConnectionProto):
     def __init__(
         self,
         stream: StreamProto,
+        json_serializer: JSONSerializerProto,
         dispatcher: DispatcherProto,
         disconnect_event: asyncio.Event,
         connect_operation: Connect,
@@ -74,13 +76,14 @@ class TCPConnection(ConnectionProto):
         force_flush_timeout: int,
     ) -> None:
         self._stream = stream
+        self._serializer = json_serializer
         self._connect_operation = connect_operation
         self._ping_interval = ping_interval
         self._max_outstanding_pings = max_outstanding_pings
         self._max_pending_size = max_pending_size
         self._force_flush_timeout = force_flush_timeout
         self._error_cb = error_callback
-        self._parser = ProtocolParser()
+        self._parser = ProtocolParser(json_serializer)
         self._listener_task: asyncio.Task[None] | None = None
         self._pinger_task: asyncio.Task[None] | None = None
         self._flusher_task: asyncio.Task[None] | None = None
@@ -183,6 +186,7 @@ class TCPConnection(ConnectionProto):
         force_flush_timeout: int,
         error_callback: ErrorCallback,
         timeout: float,
+        json_serializer: JSONSerializerProto,
         ssl: SSLContext | None = None,
         ssl_hostname: str | None = None,
         handshake_first: bool | None = None,
@@ -209,6 +213,7 @@ class TCPConnection(ConnectionProto):
             raise ConnectionFailedError() from cause
         self = cls(
             stream=Stream(transport, protocol),
+            json_serializer=json_serializer,
             dispatcher=dispatcher,
             disconnect_event=disconnect_event,
             connect_operation=connect_operation,

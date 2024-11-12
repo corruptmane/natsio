@@ -39,6 +39,8 @@ from natsio.subscriptions.core import (
     DEFAULT_SUB_PENDING_MSGS_LIMIT,
     Subscription,
 )
+from natsio.utils.json.base import JSONSerializerProto
+from natsio.utils.json.native import JSONSerializer
 from natsio.utils.logger import client_logger as log
 from natsio.utils.nuid import NUID
 from natsio.utils.time import get_now_ns
@@ -101,6 +103,7 @@ async def _default_error_cb(exc: Exception) -> None:
 class NATSCore:
     __slots__ = (
         "_config",
+        "_serializer",
         "_server_pool_iterator",
         "_error_cb",
         "_connection",
@@ -114,9 +117,11 @@ class NATSCore:
     def __init__(
         self,
         config: ClientConfig,
+        json_serializer: JSONSerializerProto = JSONSerializer(),
         error_callback: ErrorCallback | None = None,
     ) -> None:
         self._config: ClientConfig = config
+        self._serializer = json_serializer
         self._server_pool_iterator = ServerPoolIterator(
             self._config.server_pool,
             max_reconnect_attempts=self._config.max_reconnect_attempts,
@@ -131,6 +136,10 @@ class NATSCore:
         self._on_disconnect_waiter: asyncio.Task[None] | None = None
         self._status: ClientStatus = ClientStatus.DISCONNECTED
         self._nuid_generator = NUID()
+
+    @property
+    def serializer(self) -> JSONSerializerProto:
+        return self._serializer
 
     @property
     def inbox_prefix(self) -> str:
@@ -215,6 +224,7 @@ class NATSCore:
             force_flush_timeout=self._config.flush_timeout,
             error_callback=self._error_cb,
             timeout=self._config.connection_timeout,
+            json_serializer=self._serializer,
             ssl=ssl_context,
             ssl_hostname=ssl_hostname,
             handshake_first=handshake_first,
@@ -231,9 +241,11 @@ class NATSCore:
             await self._reconnect()
         self._on_disconnect_waiter = asyncio.create_task(self._on_disconnect())
 
-    async def close(self, flush: bool = True, timeout: float = 5) -> None:
+    async def close(self, flush: bool = True, timeout: float | None = None) -> None:
         if self.is_closed:
             return
+        if timeout is None:
+            timeout = self._config.drain_timeout
         if self._on_disconnect_waiter is not None and not self._on_disconnect_waiter.done():
             self._on_disconnect_waiter.cancel()
             self._on_disconnect_waiter = None
@@ -241,7 +253,7 @@ class NATSCore:
         if self._connection is not None and not self._connection.is_closed:
             try:
                 await asyncio.wait_for(
-                    self._connection.close(flush), timeout=self._config.drain_timeout
+                    self._connection.close(flush), timeout=timeout,
                 )
             except asyncio.TimeoutError:
                 await self._error_cb(DrainTimeoutError())
@@ -409,7 +421,13 @@ class NATSCore:
     ) -> JetStream:
         if timeout is None:
             timeout = self._config.request_timeout
-        return JetStream(self, self._send_command, self._dispatcher, domain, timeout)
+        return JetStream(
+            core=self,
+            command_sender=self._send_command,
+            dispatcher=self._dispatcher,
+            domain=domain,
+            timeout=timeout,
+        )
 
     async def request(
         self,

@@ -18,7 +18,6 @@
     3. - [x] Headers parser
     4. - [ ] Different connections
     5. - [ ] NATS JetStream (pull/push sub, kv/object storage)
-- [ ] Rewrite JSON serializers from functions to classes
 - [ ] Auth (JWT, User/Pass, NKey)
 - [ ] Micro
 - [ ] Cluster support (cluster endpoints discovery, update server info on `INFO` operation message, etc.)

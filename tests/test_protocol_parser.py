@@ -3,12 +3,12 @@ import pytest
 from natsio.const import CRLF
 from natsio.exceptions.protocol import UnknownProtocol
 from natsio.protocol.parser import ProtocolParser
-from natsio.utils.json import json_dumps
+from natsio.utils.json.base import JSONSerializerProto
 from tests.utils import FakeStream
 
 
 @pytest.mark.asyncio
-async def test_parse_msg_without_reply() -> None:
+async def test_parse_msg_without_reply(serializer: JSONSerializerProto) -> None:
     subject = 'subject'
     sid = '1'
     payload = 'Hello World'
@@ -19,7 +19,7 @@ async def test_parse_msg_without_reply() -> None:
     stream_data = payload.encode() + CRLF
     stream = FakeStream(stream_data)
 
-    parser = ProtocolParser()
+    parser = ProtocolParser(serializer)
 
     msg = await parser.parse_msg(data, stream)
 
@@ -31,7 +31,7 @@ async def test_parse_msg_without_reply() -> None:
 
 
 @pytest.mark.asyncio
-async def test_parse_msg_with_reply() -> None:
+async def test_parse_msg_with_reply(serializer: JSONSerializerProto) -> None:
     subject = 'subject'
     sid = '1'
     reply_to = 'inbox'
@@ -43,7 +43,7 @@ async def test_parse_msg_with_reply() -> None:
     stream_data = payload.encode() + CRLF
     stream = FakeStream(stream_data)
 
-    parser = ProtocolParser()
+    parser = ProtocolParser(serializer)
 
     msg = await parser.parse_msg(data, stream)
 
@@ -55,7 +55,7 @@ async def test_parse_msg_with_reply() -> None:
 
 
 @pytest.mark.asyncio
-async def test_parse_hmsg_without_reply() -> None:
+async def test_parse_hmsg_without_reply(serializer: JSONSerializerProto) -> None:
     subject = 'subject'
     sid = '1'
     headers = 'NATS/1.0\r\nHeader: Value\r\n\r\n'
@@ -69,7 +69,7 @@ async def test_parse_hmsg_without_reply() -> None:
     stream_data = headers.encode() + payload.encode() + CRLF
     stream = FakeStream(stream_data)
     
-    parser = ProtocolParser()
+    parser = ProtocolParser(serializer)
     
     hmsg = await parser.parse_hmsg(data, stream)
     
@@ -83,7 +83,7 @@ async def test_parse_hmsg_without_reply() -> None:
 
 
 @pytest.mark.asyncio
-async def test_parse_hmsg_with_reply() -> None:
+async def test_parse_hmsg_with_reply(serializer: JSONSerializerProto) -> None:
     subject = 'subject'
     sid = '1'
     reply_to = 'inbox'
@@ -98,7 +98,7 @@ async def test_parse_hmsg_with_reply() -> None:
     stream_data = headers.encode() + payload.encode() + CRLF
     stream = FakeStream(stream_data)
     
-    parser = ProtocolParser()
+    parser = ProtocolParser(serializer)
     
     hmsg = await parser.parse_hmsg(data, stream)
     
@@ -111,7 +111,7 @@ async def test_parse_hmsg_with_reply() -> None:
     assert hmsg.payload == payload.encode()
 
 
-def test_parse_info() -> None:
+def test_parse_info(serializer: JSONSerializerProto) -> None:
     info_dict = {
         "server_id": "test-server",
         "server_name": "Test NATS Server",
@@ -124,9 +124,9 @@ def test_parse_info() -> None:
         "proto": 1,
         "client_id": 42,
     }
-    data = json_dumps(info_dict)
+    data = serializer.dump(info_dict)
 
-    parser = ProtocolParser()
+    parser = ProtocolParser(serializer)
 
     info = parser.parse_info(data)
 
@@ -142,18 +142,18 @@ def test_parse_info() -> None:
     assert info.client_id == 42
 
 
-def test_parse_and_raise_error_known() -> None:
+def test_parse_and_raise_error_known(serializer: JSONSerializerProto) -> None:
     data = b"'Unknown Protocol Operation'\r\n"
 
-    parser = ProtocolParser()
+    parser = ProtocolParser(serializer)
 
     with pytest.raises(UnknownProtocol):
         parser.parse_and_raise_error(data)
 
-def test_parse_and_raise_error_unknown() -> None:
+def test_parse_and_raise_error_unknown(serializer: JSONSerializerProto) -> None:
     data = b"'Some Unknown Error'\r\n"
 
-    parser = ProtocolParser()
+    parser = ProtocolParser(serializer)
 
     with pytest.raises(UnknownProtocol) as exc_info:
         parser.parse_and_raise_error(data)

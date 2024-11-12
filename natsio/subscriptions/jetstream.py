@@ -9,7 +9,6 @@ from natsio.exceptions.subscription import MessageRetrievalTimeoutError, Subscri
 from natsio.messages.core import CoreMsg
 from natsio.messages.jetstream import JetStreamMsg
 from natsio.protocol.headers import Header, StatusCode
-from natsio.utils.json import json_dumps
 from natsio.utils.logger import subscription_logger as log
 from natsio.utils.time import to_nanoseconds
 from natsio.utils.uuid import get_uuid
@@ -112,7 +111,6 @@ class PushSubscription(SubscriptionProto):
         if self._is_flow_control:
             if await self._process_if_flow_control(msg):
                 return
-        # TODO: ordered consumer
         payload_size = len(msg.payload)
         self._raise_if_slow_consumer(payload_size)
         await self._msg_queue.put(JetStreamMsg(nats=self._nc, jetstream=self._js, msg=msg))
@@ -273,7 +271,7 @@ class PullSubscription:
 
         await self._nc.publish(
             subject=self._request_batch_subject,
-            data=json_dumps(payload),
+            data=self._nc.serializer.dump(payload),
             reply_to=self._deliver_to,
         )
 
