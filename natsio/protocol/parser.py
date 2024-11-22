@@ -41,7 +41,7 @@ def parse_headers(data: bytes) -> Mapping[str, str] | None:
             inline_description = b" ".join(headers_status_line[2:])
             headers[Header.DESCRIPTION.value] = inline_description.decode()
 
-    if not lines:
+    if not lines and not headers:
         return None
 
     for line in lines:
