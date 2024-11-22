@@ -1,14 +1,18 @@
 import asyncio
 import time
-from typing import TYPE_CHECKING, AsyncIterator, MutableMapping, Self
+from typing import TYPE_CHECKING, AsyncIterator, Awaitable, Callable, MutableMapping, Self
 
+from natsio.abc.dispatcher import DispatcherProto
+from natsio.abc.protocol import ClientMessageProto
 from natsio.abc.subscription import JetStreamCallback, SubscriptionProto, SubscriptionStatus
-from natsio.exceptions.client import ClientClosedError
+from natsio.client.jetstream.entities import PushConsumerConfig
+from natsio.exceptions.client import ClientClosedError, NotJetStreamMessageError
 from natsio.exceptions.jetstream import APIError
 from natsio.exceptions.subscription import MessageRetrievalTimeoutError, SubscriptionAlreadyStartedError, SubscriptionClosedError, SubscriptionSetupError
 from natsio.messages.core import CoreMsg
 from natsio.messages.jetstream import JetStreamMsg
 from natsio.protocol.headers import Header, StatusCode
+from natsio.protocol.operations.sub import Sub
 from natsio.utils.logger import subscription_logger as log
 from natsio.utils.time import to_nanoseconds
 from natsio.utils.uuid import get_uuid
@@ -84,7 +88,7 @@ class PushSubscription(SubscriptionProto):
         if self._nc.is_closed:
             raise ClientClosedError()
 
-    async def _process_if_flow_control(self, msg: CoreMsg) -> bool:
+    async def _process_flow_control(self, msg: CoreMsg) -> bool:
         if (
             not msg.payload
             and not msg.headers
@@ -109,7 +113,7 @@ class PushSubscription(SubscriptionProto):
     async def add_msg(self, msg: CoreMsg) -> None:
         # NOTE: need consulting on flow control flow
         if self._is_flow_control:
-            if await self._process_if_flow_control(msg):
+            if await self._process_flow_control(msg):
                 return
         payload_size = len(msg.payload)
         self._raise_if_slow_consumer(payload_size)
@@ -220,6 +224,136 @@ class PushSubscription(SubscriptionProto):
         if self._status is not SubscriptionStatus.OPERATING or self._message_iterator is None:
             raise SubscriptionSetupError("subscription is not started")
         return self._message_iterator
+
+
+class OrderedPushSubscription(PushSubscription):
+    def __init__(
+        self,
+        client: "NATSCore",
+        jetstream: "JetStream",
+        consumer_config: PushConsumerConfig,
+        command_sender: Callable[[ClientMessageProto], Awaitable[None]],
+        dispatcher: DispatcherProto,
+        stream_name: str,
+        consumer_name: str,
+        subject: str,
+        sid: str | None = None,
+        pending_msgs_limit: int = DEFAULT_SUB_PENDING_MSGS_LIMIT,
+        pending_bytes_limit: int = DEFAULT_SUB_PENDING_BYTES_LIMIT,
+    ) -> None:
+        super().__init__(
+            client=client,
+            jetstream=jetstream,
+            stream_name=stream_name,
+            consumer_name=consumer_name,
+            subject=subject,
+            sid=sid,
+            queue=None,
+            callback=None,
+            pending_msgs_limit=pending_msgs_limit,
+            pending_bytes_limit=pending_bytes_limit,
+        )
+        self._send_command = command_sender
+        self._dispatcher = dispatcher
+        self._consumer_config = consumer_config
+        self._expected_consumer_seq = 1
+        self._expected_stream_seq = 0
+        self._reset_in_progress = False
+
+    async def _handle_sequence_mismatch(self, next_stream_seq: int) -> None:
+        if self._reset_in_progress:
+            return
+        self._reset_in_progress = True
+
+        self._stop_processing()
+        await self._nc.unsubscribe(self)
+        await asyncio.sleep(0)
+
+        new_deliver_subject = self._nc.new_unique_deliver_subject()
+
+        consumer_config = self._consumer_config
+        consumer_config.deliver_subject = new_deliver_subject
+        consumer_config.opt_start_seq = next_stream_seq
+
+        new_consumer_info = await self._js.create_or_update_consumer(
+            stream_name=self._stream_name,
+            config=consumer_config,
+        )
+        new_consumer_name = new_consumer_info.name
+
+        self.subject = new_deliver_subject
+        self.consumer_name = new_consumer_name
+        self.sid = get_uuid()
+
+        await self._send_command(Sub(sid=self.sid, subject=new_deliver_subject))
+        self._dispatcher.add_subscription(self)
+
+        self._expected_consumer_seq = 1
+        self._expected_stream_seq = next_stream_seq - 1
+        self._reset_in_progress = False
+
+    async def _process_ordered_consumer(self, msg: JetStreamMsg) -> bool:
+        try:
+            metadata = msg.metadata
+        except (IndexError, ValueError, NotJetStreamMessageError):
+            return False
+        if not metadata:
+            return False
+
+        delivery_sequence = metadata.consumer_seq
+        stream_sequence = metadata.stream_seq
+
+        if delivery_sequence != self._expected_consumer_seq:
+            await self._handle_sequence_mismatch(stream_sequence)
+            return True
+
+        self._expected_consumer_seq += 1
+        self._expected_stream_seq = stream_sequence
+        return False
+
+    async def add_msg(self, msg: CoreMsg) -> None:
+        if await self._process_flow_control(msg):
+            return
+
+        js_msg = JetStreamMsg(nats=self._nc, jetstream=self._js, msg=msg)
+        if await self._process_ordered_consumer(js_msg):
+            return
+
+        payload_size = len(msg.payload)
+        self._raise_if_slow_consumer(payload_size)
+        await self._msg_queue.put(js_msg)
+        self._pending_size += payload_size
+        if self._max_msgs > 0:
+            self._received += 1
+
+    async def next_msg(self, timeout: float | None = 1) -> JetStreamMsg:
+        if self._callback is not None:
+            raise SubscriptionSetupError("Callbacks are not supported for ordered consumers")
+        if self._status is SubscriptionStatus.CLOSED:
+            raise SubscriptionClosedError()
+
+        task_id = get_uuid()
+        try:
+            fut = asyncio.create_task(asyncio.wait_for(self._msg_queue.get(), timeout))
+            self._pending_next_msg_calls[task_id] = fut
+            msg = await fut
+        except asyncio.TimeoutError:
+            self._raise_if_client_closed()
+            raise MessageRetrievalTimeoutError()
+        else:
+            self._pending_size -= len(msg.payload)
+            self._msg_queue.task_done()
+            return msg
+        finally:
+            self._pending_next_msg_calls.pop(task_id, None)
+
+    async def start(self) -> None:
+        if self._status is SubscriptionStatus.OPERATING:
+            raise SubscriptionAlreadyStartedError()
+        if self._status is SubscriptionStatus.CLOSED:
+            raise SubscriptionClosedError()
+        self._message_iterator = PushSubscriptionMessageIterator(self)
+        self._status = SubscriptionStatus.OPERATING
 
 
 class PushSubscriptionMessageIterator:
