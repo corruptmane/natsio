@@ -5,11 +5,11 @@ class ClientError(NATSError):
     description = "Client error"
 
 
-class ConfigError(NATSError):
+class ConfigError(NATSError, ValueError):
     description = "Configuration error"
 
 
-class WebSocketError(ConfigError, NotImplementedError):
+class WebSocketError(ConfigError, NotImplementedError):  # TODO: remove `NotImplementedError` when WS are supported
     description = "WebSocket is not supported yet"
 
 
@@ -64,9 +64,9 @@ class MessageAlreadyAckedError(ClientError):
     description = "Message was already acknowledged"
 
 
-class BadSubjectError(ClientError):
+class BadSubjectError(ClientError, ValueError):
     description = "Invalid subject"
 
 
-class NotJetStreamMessageError(ClientError):
+class NotJetStreamMessageError(ClientError, ValueError):
     description = "Not a JetStream message"

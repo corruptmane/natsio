@@ -6,15 +6,15 @@ class SubscriptionError(ClientError):
     description = "Subscription error"
 
 
-class SubscriptionClosedError(SubscriptionError):
+class SubscriptionClosedError(SubscriptionError, RuntimeError):
     description = "Subscription is closed"
 
 
-class SubscriptionAlreadyStartedError(SubscriptionError):
+class SubscriptionAlreadyStartedError(SubscriptionError, RuntimeError):
     description = "Subscription is already started"
 
 
-class SubscriptionSetupError(SubscriptionError):
+class SubscriptionSetupError(SubscriptionError, ValueError):
     description = "Subscription setup error"
 
     def __init__(self, extra: str, description: str | None = None) -> None:
