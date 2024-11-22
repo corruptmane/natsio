@@ -82,6 +82,14 @@ class _PagedResult(Base):
 
 
 @dataclass(kw_only=True)
+class PubAck(Base):
+    stream: str
+    seq: int
+    domain: str | None = None
+    duplicate: bool | None = None
+
+
+@dataclass(kw_only=True)
 class Limits(Base):
     max_memory: int
     max_storage: int
@@ -409,33 +417,14 @@ class GetMsgRequest(Base):
     seq: int | None = None
     last_by_subj: str | None = None
     next_by_subj: str | None = None
-    batch: int | None = None
-    max_bytes: int | None = None
-    start_time: datetime | str | None = None
-    multi_last: list[str] | None = None
-    up_to_seq: int | None = None
-    up_to_time: datetime | str | None = None
 
-    def render_start_time(self) -> str | None:
-        if self.start_time is None:
-            return None
-        if isinstance(self.start_time, datetime):
-            return self.start_time.isoformat(sep="T", timespec="seconds")
-        return self.start_time
-
-    def render_up_to_time(self) -> str | None:
-        if self.up_to_time is None:
-            return None
-        if isinstance(self.up_to_time, datetime):
-            return self.up_to_time.isoformat(sep="T", timespec="seconds")
-        return self.up_to_time
-
-
-@dataclass(kw_only=True)
-class GetMsgDirectRequest(Base):
-    seq: int | None = None
-    last_by_subj: str | None = None
-    next_by_subj: str | None = None
+    def validate(self) -> None:
+        if self.seq and self.last_by_subj:
+            raise ValueError("`seq` and `last_by_subj` properties can not be combined")
+        if self.seq is None and self.last_by_subj is None:
+            raise ValueError("One of `seq` or `last_by_subj` must be specified")
+        if self.seq is None and self.next_by_subj is not None:
+            raise ValueError("`seq` must be provided when using `next_by_subj`")
 
 
 @dataclass(kw_only=True)
