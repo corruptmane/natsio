@@ -6,14 +6,14 @@ from natsio.abc.dispatcher import DispatcherProto
 from natsio.abc.protocol import ClientMessageProto
 from natsio.abc.subscription import JetStreamCallback
 from natsio.exceptions.client import MessageAlreadyAckedError
-from natsio.exceptions.jetstream import APIError, NotFoundError, ServiceUnavailableError
+from natsio.exceptions.jetstream import APIError, BucketNotFoundError, InvalidBucketNameError, KeyHistoryTooLargeError, NoStreamResponseError, NotFoundError, ServiceUnavailableError
 from natsio.exceptions.protocol import NoRespondersError
 from natsio.messages.jetstream import JetStreamMsg
 from natsio.protocol.headers import Header, StatusCode
 from natsio.protocol.operations.sub import Sub
 from natsio.protocol.parser import parse_headers
 from natsio.subscriptions.core import DEFAULT_SUB_PENDING_BYTES_LIMIT, DEFAULT_SUB_PENDING_MSGS_LIMIT
-from natsio.subscriptions.jetstream import PullSubscription, PushSubscription
+from natsio.subscriptions.jetstream import OrderedPushSubscription, PullSubscription, PushSubscription
 from natsio.utils.time import to_nanoseconds
 from natsio.utils.validation import VALID_BUCKET_RE, validate_name, validate_subject
 from .entities import (
@@ -22,9 +22,9 @@ from .entities import (
     ConsumerInfo,
     ConsumerList,
     Discard,
-    GetMsgDirectRequest,
     GetMsgRequest,
     KeyValueConfig,
+    PubAck,
     PullConsumerConfig,
     PushConsumerConfig,
     RawMsg,
@@ -69,7 +69,36 @@ class JetStream:
             self._prefix = "$JS.API"
         else:
             self._prefix = f"$JS.{domain}.API"
-        self.timeout = timeout
+        self._timeout = timeout
+
+    def new_unique_deliver_subject(self) -> str:
+        return self._nc.new_unique_deliver_subject()
+
+    async def publish(
+        self,
+        subject: str,
+        data: bytes,
+        headers: MutableMapping[str, Any] | None = None,
+        stream: str | None = None,
+        timeout: int | float | None = None,
+    ) -> PubAck:
+        if timeout is None:
+            timeout = self._timeout
+        if stream:
+            headers = headers or {}
+            headers[Header.EXPECTED_STREAM] = stream
+
+        try:
+            msg = await self._nc.request(subject, data, headers, timeout)
+        except NoRespondersError:
+            raise NoStreamResponseError()
+
+        resp = cast(Mapping[str, Any], self._nc.serializer.load(msg.payload))
+        if "error" in resp:
+            raise APIError.from_error(**resp["error"])
+
+        return PubAck.from_response(**resp)
+
 
     async def get_account_info(self) -> AccountInfo:
         resp = await self._api_request(f"{self._prefix}.INFO")
@@ -148,37 +177,23 @@ class JetStream:
         resp = await self._api_request(f"{self._prefix}.STREAM.MSG.DELETE.{stream_name}", self._nc.serializer.dump(data))
         return bool(resp["success"])
 
-    async def get_msg(self, stream_name: str, req: GetMsgRequest) -> RawMsg:
+    async def get_msg(self, stream_name: str, req: GetMsgRequest, timeout: int | float | None = None) -> RawMsg:
         validate_name(stream_name)
+        req.validate()
+        if timeout is None:
+            timeout = self._timeout
 
         data: MutableMapping[str, str | int | list[str]] = {}
-        if req.seq and req.last_by_subj:
-            raise ValueError("`seq` and `last_by_subj` properties can not be combined")
-        if req.seq is None and req.last_by_subj is None:
-            raise ValueError("One of `seq` and `last_by_subj` must be specified")
-        if req.seq is None and req.next_by_subj is not None:
-            raise ValueError("`seq` must be provided when using `next_by_subj`")
         if req.seq is not None:
             data["seq"] = req.seq
         if req.last_by_subj is not None:
             data["last_by_subj"] = req.last_by_subj
         if req.next_by_subj is not None:
             data["next_by_subj"] = req.next_by_subj
-        if req.batch is not None:
-            data["batch"] = req.batch
-        if req.max_bytes is not None:
-            data["max_bytes"] = req.max_bytes
-        if req.start_time is not None:
-            data["start_time"] = req.render_start_time()  # type: ignore[assignment]
-        if req.multi_last is not None:
-            data["multi_last"] = req.multi_last
-        if req.up_to_seq is not None:
-            data["up_to_seq"] = req.up_to_seq
-        if req.up_to_time is not None:
-            data["up_to_time"] = req.render_up_to_time()  # type: ignore[assignment]
 
         resp = await self._api_request(
-            f"{self._prefix}.STREAM.MSG.GET.{stream_name}", self._nc.serializer.dump(data)
+            subject=f"{self._prefix}.STREAM.MSG.GET.{stream_name}",
+            data=self._nc.serializer.dump(data), timeout=timeout,
         )
         if "error" in resp:
             raise APIError.from_error(**resp["error"])
@@ -194,25 +209,19 @@ class JetStream:
             headers=headers,
         )
 
-    async def get_msg_direct(self, stream_name: str, req: GetMsgDirectRequest, timeout: int | float | None = None) -> RawMsg:
+    async def get_msg_direct(self, stream_name: str, req: GetMsgRequest, timeout: int | float | None = None) -> RawMsg:
         validate_name(stream_name)
+        req.validate()
         if timeout is None:
-            timeout = self.timeout
+            timeout = self._timeout
 
         data: MutableMapping[str, str | int | list[str]] = {}
-        if req.seq and req.last_by_subj:
-            raise ValueError("`seq` and `last_by_subj` properties can not be combined")
-        if req.seq is None and req.last_by_subj is None:
-            raise ValueError("One of `seq` and `last_by_subj` must be specified")
-        if req.seq is None and req.next_by_subj is not None:
-            raise ValueError("`seq` must be provided when using `next_by_subj`")
         if req.seq is not None:
             data["seq"] = req.seq
         if req.last_by_subj is not None:
             data["last_by_subj"] = req.last_by_subj
         if req.next_by_subj is not None:
             data["next_by_subj"] = req.next_by_subj
-
 
         try:
             msg = await self._nc.request(
@@ -302,25 +311,56 @@ class JetStream:
     async def push_subscribe(
         self,
         stream_name: str,
-        consumer_name: str,
         consumer_config: PushConsumerConfig,
         callback: JetStreamCallback | None = None,
         manual_ack: bool = False,
         pending_msgs_limit: int = DEFAULT_SUB_PENDING_MSGS_LIMIT,
         pending_bytes_limit: int = DEFAULT_SUB_PENDING_BYTES_LIMIT,
     ) -> PushSubscription:
-        validate_subject(consumer_config.deliver_subject)
-        if consumer_config.deliver_group is not None:
-            validate_subject(consumer_config.deliver_group)
+        # TODO: possibly check if config values are vastly different if consumer is not created
+        if consumer_config.flow_control and not consumer_config.idle_heartbeat:
+            raise ValueError("`idle_heartbeat` property must be set for flow control")
+        elif consumer_config.idle_heartbeat and not consumer_config.flow_control:
+            consumer_config.flow_control = True
 
-        if (
-            (consumer_config.flow_control and not consumer_config.idle_heartbeat)
-            or
-            (not consumer_config.flow_control and consumer_config.idle_heartbeat)
-        ):
-            raise ValueError("Both `flow_control` and `idle_heartbeat` properties must be set for flow control")
+        if not consumer_config.name and not consumer_config.durable_name:
+            consumer_info = await self.create_or_update_consumer(stream_name, consumer_config)
+        else:
+            name = cast(str, consumer_config.durable_name or consumer_config.name)
+            try:
+                consumer_info = await self.get_consumer_info(stream_name, name)
+            except NotFoundError:
+                consumer_info = await self.create_or_update_consumer(stream_name, consumer_config)
 
-        if callback is not None and not manual_ack and consumer_config.ack_policy is not AckPolicy.none:
+        return await self.push_subscribe_bind(
+            stream_name=stream_name,
+            consumer_name=consumer_info.name,
+            deliver_subject=consumer_info.config.deliver_subject,  # type: ignore[union-attr]
+            deliver_group=consumer_info.config.deliver_group,  # type: ignore[union-attr]
+            is_flow_control=bool(consumer_info.config.flow_control),  # type: ignore[union-attr]
+            callback=callback,
+            manual_ack=manual_ack,
+            pending_msgs_limit=pending_msgs_limit,
+            pending_bytes_limit=pending_bytes_limit,
+        )
+
+    async def push_subscribe_bind(
+        self,
+        stream_name: str,
+        consumer_name: str,
+        deliver_subject: str,
+        deliver_group: str | None = None,
+        is_flow_control: bool | None = None,
+        callback: JetStreamCallback | None = None,
+        manual_ack: bool = False,
+        pending_msgs_limit: int = DEFAULT_SUB_PENDING_MSGS_LIMIT,
+        pending_bytes_limit: int = DEFAULT_SUB_PENDING_BYTES_LIMIT,
+    ) -> PushSubscription:
+        validate_subject(deliver_subject)
+        if deliver_group is not None:
+            validate_subject(deliver_group)
+
+        if callback is not None and not manual_ack:
             callback = auto_ack_wrapper(callback)
 
         sub = PushSubscription(
@@ -328,19 +368,82 @@ class JetStream:
             jetstream=self,
             stream_name=stream_name,
             consumer_name=consumer_name,
-            subject=consumer_config.deliver_subject,
-            queue=consumer_config.deliver_group,
+            subject=deliver_subject,
+            queue=deliver_group,
             callback=callback,
-            is_flow_control=bool(consumer_config.flow_control),
+            is_flow_control=bool(is_flow_control),
             pending_msgs_limit=pending_msgs_limit,
             pending_bytes_limit=pending_bytes_limit,
         )
-        await self._send_command(Sub(sid=sub.sid, subject=consumer_config.deliver_subject, queue=consumer_config.deliver_group))
+        await self._send_command(Sub(sid=sub.sid, subject=deliver_subject, queue=deliver_group))
+        self._dispatcher.add_subscription(sub)
+        await sub.start()
+        return sub
+
+    async def ordered_push_subscribe(
+        self,
+        stream_name: str,
+        consumer_config: PushConsumerConfig,
+        pending_msgs_limit: int = DEFAULT_SUB_PENDING_MSGS_LIMIT,
+        pending_bytes_limit: int = DEFAULT_SUB_PENDING_BYTES_LIMIT,
+    ) -> OrderedPushSubscription:
+        validate_subject(consumer_config.deliver_subject)
+
+        consumer_config.flow_control = True
+        if not consumer_config.idle_heartbeat:
+            consumer_config.idle_heartbeat = to_nanoseconds(5)
+        consumer_config.ack_policy = AckPolicy.none
+        consumer_config.max_deliver = 1
+        consumer_config.deliver_group = None
+
+        consumer_info = await self.create_or_update_consumer(
+            stream_name=stream_name,
+            config=consumer_config,
+        )
+        consumer_name = consumer_info.name
+
+        sub = OrderedPushSubscription(
+            client=self._nc,
+            jetstream=self,
+            consumer_config=cast(PushConsumerConfig, consumer_info.config),
+            command_sender=self._send_command,
+            dispatcher=self._dispatcher,
+            stream_name=stream_name,
+            consumer_name=consumer_name,
+            subject=consumer_config.deliver_subject,
+            pending_msgs_limit=pending_msgs_limit,
+            pending_bytes_limit=pending_bytes_limit,
+        )
+        await self._send_command(Sub(sid=sub.sid, subject=consumer_config.deliver_subject))
         self._dispatcher.add_subscription(sub)
         await sub.start()
         return sub
 
     async def pull_subscribe(
+        self,
+        stream_name: str,
+        consumer_config: PullConsumerConfig,
+        pending_msgs_limit: int = DEFAULT_SUB_PENDING_MSGS_LIMIT,
+        pending_bytes_limit: int = DEFAULT_SUB_PENDING_BYTES_LIMIT,
+    ) -> PullSubscription:
+        # TODO: possibly check if config values are vastly different if consumer is not created
+        if not consumer_config.name and not consumer_config.durable_name:
+            consumer_info = await self.create_or_update_consumer(stream_name, consumer_config)
+        else:
+            name = cast(str, consumer_config.durable_name or consumer_config.name)
+            try:
+                consumer_info = await self.get_consumer_info(stream_name, name)
+            except NotFoundError:
+                consumer_info = await self.create_or_update_consumer(stream_name, consumer_config)
+
+        return await self.pull_subscribe_bind(
+            stream_name=stream_name,
+            consumer_name=consumer_info.name,
+            pending_msgs_limit=pending_msgs_limit,
+            pending_bytes_limit=pending_bytes_limit,
+        )
+
+    async def pull_subscribe_bind(
         self,
         stream_name: str,
         consumer_name: str,
@@ -365,34 +468,34 @@ class JetStream:
 
     async def get_key_value(self, bucket_name: str) -> KeyValue:
         if not VALID_BUCKET_RE.match(bucket_name):
-            raise ValueError("Bad bucket name")  # TODO: use separate error
+            raise InvalidBucketNameError()
 
         stream_name = f"{KV_STREAM_NAME_PREFIX}{bucket_name}"
         try:
             stream_info = await self.get_stream_info(stream_name)
         except NotFoundError:
-            raise   # TODO: use separate error
+            raise BucketNotFoundError()
 
         if not stream_info.config.max_msgs_per_subject or stream_info.config.max_msgs_per_subject < 1:
-            raise ValueError("Bad bucket history value")   # TODO: use separate error
+            raise KeyHistoryTooLargeError()
 
         return KeyValue(
             bucket_name=bucket_name,
             stream_name=stream_name,
-            pre=f"{KV_API_PREFIX}.{bucket_name}.",
+            pre=f"{KV_API_PREFIX}{bucket_name}.",
             jetstream=self,
-            is_direct=bool(stream_info.config.allow_direct),
+            raw_msg_getter=self.get_msg if not stream_info.config.allow_direct else self.get_msg_direct,
         )
 
     async def create_key_value(self, config: KeyValueConfig) -> KeyValue:
         if not VALID_BUCKET_RE.match(config.bucket_name):
-            raise ValueError("Bad bucket name")  # TODO: use separate error
+            raise InvalidBucketNameError()
 
         duplicate_window_seconds = 120  # 2 minutes
         if config.ttl_seconds < duplicate_window_seconds:
             duplicate_window_seconds = config.ttl_seconds
         if config.history > 64:
-            raise ValueError("Key history is too large")  # TODO: use separate error
+            raise KeyHistoryTooLargeError()
 
         stream_name = f"{KV_STREAM_NAME_PREFIX}{config.bucket_name}"
         req = CreateStreamRequest(
@@ -421,14 +524,14 @@ class JetStream:
         return KeyValue(
             bucket_name=config.bucket_name,
             stream_name=stream_name,
-            pre=f"{KV_API_PREFIX}.{config.bucket_name}.",
+            pre=f"{KV_API_PREFIX}{config.bucket_name}.",
             jetstream=self,
-            is_direct=bool(config.allow_direct),
+            raw_msg_getter=self.get_msg if not config.allow_direct else self.get_msg_direct,
         )
 
     async def delete_key_value(self, bucket_name: str) -> bool:
         if not VALID_BUCKET_RE.match(bucket_name):
-            raise ValueError("Bad bucket name")  # TODO: use separate error
+            raise InvalidBucketNameError()
 
         stream_name = f"{KV_STREAM_NAME_PREFIX}{bucket_name}"
         return await self.delete_stream(stream_name)
@@ -446,7 +549,7 @@ class JetStream:
         self, subject: str, data: bytes = b"", timeout: int | float | None = None
     ) -> Mapping[str, Any]:
         if timeout is None:
-            timeout = self.timeout
+            timeout = self._timeout
 
         try:
             msg = await self._nc.request(subject, data, timeout=timeout)
