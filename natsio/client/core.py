@@ -434,7 +434,7 @@ class NATSCore:
         subject: str,
         data: bytes,
         headers: Mapping[str, str] | None = None,
-        timeout: float = 1,
+        timeout: float | int = 1,
     ) -> CoreMsg:
         self._raise_if_closed()
         validate_subject(subject)

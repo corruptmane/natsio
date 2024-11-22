@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from functools import cached_property
 from typing import TYPE_CHECKING, Mapping, Self, Sequence
@@ -65,7 +65,7 @@ class Metadata:
             num_delivered=int(tokens[MetadataTokensV1.num_delivered]),
             stream_seq=int(tokens[MetadataTokensV1.stream_seq]),
             consumer_seq=int(tokens[MetadataTokensV1.consumer_seq]),
-            timestamp=datetime.fromtimestamp(from_nanoseconds(int(tokens[MetadataTokensV1.timestamp]))),
+            timestamp=datetime.fromtimestamp(from_nanoseconds(int(tokens[MetadataTokensV1.timestamp])), tz=timezone.utc),
             num_pending=int(tokens[MetadataTokensV1.num_pending]),
         )
 
@@ -77,7 +77,7 @@ class Metadata:
             num_delivered=int(tokens[MetadataTokensV2.num_delivered]),
             stream_seq=int(tokens[MetadataTokensV2.stream_seq]),
             consumer_seq=int(tokens[MetadataTokensV2.consumer_seq]),
-            timestamp=datetime.fromtimestamp(from_nanoseconds(int(tokens[MetadataTokensV2.timestamp]))),
+            timestamp=datetime.fromtimestamp(from_nanoseconds(int(tokens[MetadataTokensV2.timestamp])), tz=timezone.utc),
             num_pending=int(tokens[MetadataTokensV2.num_pending]),
             domain=str(tokens[MetadataTokensV2.domain]),
             account_hash=str(tokens[MetadataTokensV2.account_hash]),

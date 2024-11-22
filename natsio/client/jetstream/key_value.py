@@ -1,9 +1,10 @@
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, MutableMapping, Self, cast
 from dataclasses import dataclass
 
 from natsio.exceptions.jetstream import APIError, KeyDeletedError, KeyNotFoundError, KeyWrongLastSequenceError, NoKeysError, NotFoundError
+from natsio.exceptions.subscription import MessageRetrievalTimeoutError
 from natsio.messages.jetstream import JetStreamMsg, Metadata
 from natsio.protocol.headers import Header, KVOperation, Rollup
 from natsio.subscriptions.jetstream import OrderedPushSubscription
@@ -23,7 +24,7 @@ class Entry:
     key: str
     value: bytes | None
     revision: int | None
-    created: datetime | None
+    created: datetime
     operation: KVOperation | None
 
 
@@ -94,7 +95,7 @@ class KeyValueWatcher:
             deliver_policy=deliver_policy,
             deliver_subject=self._js.new_unique_deliver_subject(),
             filter_subject=filter_subject,
-            inactive_threshold=to_nanoseconds(5),
+            inactive_threshold=to_nanoseconds(inactive_threshold_seconds),
             headers_only=self._meta_only,
         )
         self._sub = await self._js.ordered_push_subscribe(
@@ -110,11 +111,20 @@ class KeyValueWatcher:
         if self._ignore_deletes and entry.operation and entry.operation in (KVOperation.DEL, KVOperation.PURGE):
             return
 
-    async def next_entry(self, timeout: float | int = 5) -> Entry | None:
-        msg = await self._sub.next_msg(timeout=timeout)
-        return self._return_none_if_filtered(
-            build_entry_from_js_msg(msg, self._bucket_name, self._subject_prefix_length)
-        )
+    async def next_entry(self, timeout: float | int = 5) -> Entry:
+        entry: Entry | None = None
+
+        try:
+            async with asyncio.timeout(timeout):
+                while entry is None:
+                    msg = await self._sub.next_msg(timeout=timeout)
+                    entry = self._return_none_if_filtered(
+                        build_entry_from_js_msg(msg, self._bucket_name, self._subject_prefix_length)
+                    )
+        except asyncio.TimeoutError:
+            raise MessageRetrievalTimeoutError()
+
+        return entry
 
     def __aiter__(self) -> Self:
         return self
@@ -233,7 +243,7 @@ class KeyValue:
 
     async def watch(
         self,
-        key: str,  # TODO: maybe implement use of `filter_subjects` config option for push subscription
+        key: str,  # TODO: implement use of `filter_subjects` config option for push subscription
         include_history: bool = False,
         ignore_deletes: bool = False,
         meta_only: bool = False,
@@ -272,15 +282,18 @@ class KeyValue:
 
     async def purge_deletes(self, older_than_seconds: int = 30 * 60) -> bool:
         watcher = await self.watch_all(meta_only=True)
-        delete_markers = []
+
+        delete_markers: list[Entry] = []
         async for update in watcher:
             if update.operation in (KVOperation.DEL, KVOperation.PURGE):
                 delete_markers.append(update)
 
+        await watcher.stop()
+
         for entry in delete_markers:
             keep = 0
             subject = f"{self._pre}{entry.key}"
-            duration = datetime.now() - entry.created
+            duration = datetime.now(timezone.utc) - entry.created
             if older_than_seconds > 0 and older_than_seconds > duration.total_seconds():
                 keep = 1
             await self._js.purge_stream(self._stream_name, filter_subject=subject, keep=keep)
@@ -290,7 +303,6 @@ class KeyValue:
         watcher = await self.watch(key, include_history=True)
 
         entries: list[Entry] = []
-
         async for entry in watcher:
             entries.append(entry)
 
@@ -303,11 +315,11 @@ class KeyValue:
 
     async def keys(self, filters: list[str] | None = None) -> list[str]:
         watcher = await self.watch_all(ignore_deletes=True, meta_only=True)
-        keys: list[str] = []
 
+        keys: list[str] = []
         async for entry in watcher:
             if filters:
-                if any(entry.key in f for f in filters):
+                if any(entry.key in f for f in filters):  # TODO: rework filters
                     keys.append(entry.key)
             else:
                 keys.append(entry.key)

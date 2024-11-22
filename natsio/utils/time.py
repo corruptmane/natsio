@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 import time
 from typing import Final, TypeVar
 
@@ -16,7 +16,10 @@ def from_nanoseconds(time: Time) -> float:
 
 
 def fromisoformat(time: str) -> datetime:
-    return datetime.fromisoformat(time)
+    dt = datetime.fromisoformat(time)
+    if not dt.utcoffset:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
 
 
 def get_now_ns() -> int:

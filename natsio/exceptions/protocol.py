@@ -24,9 +24,9 @@ class UnknownProtocol(ProtocolError):
 
     def __init__(
         self,
+        description: str | None = None,
         extra: str | None = None,
         is_disconnected: bool = True,
-        description: str | None = None,
     ) -> None:
         super().__init__(description=description, is_disconnected=is_disconnected)
         self.extra = extra
@@ -34,7 +34,7 @@ class UnknownProtocol(ProtocolError):
 
     def __str__(self) -> str:
         if self.extra is not None:
-            return f"NATS: Unknown error protocol message - {self.extra}"
+            return f"NATS: {self.description} - {self.extra}"
         return super().__str__()
 
 

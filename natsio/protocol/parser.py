@@ -11,10 +11,11 @@ from natsio.exceptions.protocol import (
     UnknownProtocol,
     name_to_error,
 )
-from natsio.protocol.headers import Header
 from natsio.protocol.operations.hmsg import HMsg
 from natsio.protocol.operations.info import Info
 from natsio.protocol.operations.msg import Msg
+
+from .headers import Header
 
 WHITESPACE_RE: Final[Pattern[bytes]] = re.compile(rb"\s+")
 ERR_NAME_RE: Final[Pattern[str]] = re.compile(r"'(.*?)'")
@@ -47,10 +48,11 @@ def parse_headers(data: bytes) -> Mapping[str, str] | None:
     for line in lines:
         try:
             key, value = line.decode().split(":", 1)
-        except UnicodeDecodeError:
-            raise
+        except UnicodeDecodeError as exc:
+            exc.reason = f"Invalid header encoding in line: {line}. Reason: {exc.reason}"
+            raise exc
         except ValueError:
-            raise ValueError("Malformed header line")
+            raise ValueError(f"Malformed header line: {line}")
         key = key.strip()
         value = value.strip()
         if any(not (33 < ord(char) < 126) for char in key):
@@ -108,7 +110,10 @@ class ProtocolParser:
         )
 
     def parse_and_raise_error(self, data: bytes) -> NoReturn:
-        err_name: str = ERR_NAME_RE.findall(data.decode())[0]
+        try:
+            err_name: str = ERR_NAME_RE.findall(data.decode())[0]
+        except UnicodeDecodeError:
+            raise UnknownProtocol(description="Failed to decode -ERR message") from None
 
         try:
             error_class = name_to_error[err_name]

@@ -165,7 +165,7 @@ class JetStream:
         payload = self._nc.serializer.dump(data) if data else b""
 
         resp = await self._api_request(f"{self._prefix}.STREAM.PURGE.{stream_name}", payload)
-        return bool(resp["purged"])
+        return resp["purged"]
 
     async def delete_stream_msg(self, stream_name: str, seq: int, no_erase: bool | None = None) -> bool:
         validate_name(stream_name)

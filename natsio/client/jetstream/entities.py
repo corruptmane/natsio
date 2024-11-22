@@ -436,9 +436,7 @@ class RawMsg:
     headers: Mapping[str, str] | None
 
     @cached_property
-    def time_dt(self) -> datetime | None:
-        if self.time is None:
-            return None
+    def time_dt(self) -> datetime:
         return fromisoformat(self.time)
 
 
