@@ -2,7 +2,7 @@ from typing import Generator, cast
 import pytest
 from testcontainers.nats import NatsContainer  # type: ignore[import-untyped]
 
-from natsio.utils.json.base import JSONSerializerProto
+from natsio.abc.json import JSONSerializerProto
 from natsio.utils.json.native import JSONSerializer
 from natsio.utils.json.orjson import ORJSONSerializer
 

@@ -1,9 +1,9 @@
 import pytest
 
+from natsio.abc.json import JSONSerializerProto
 from natsio.const import CRLF
 from natsio.exceptions.protocol import UnknownProtocol
 from natsio.protocol.parser import ProtocolParser
-from natsio.utils.json.base import JSONSerializerProto
 from tests.utils import FakeStream
 
 

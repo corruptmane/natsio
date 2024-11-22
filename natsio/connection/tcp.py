@@ -5,6 +5,7 @@ from typing import Self, cast
 from natsio.abc.client import ErrorCallback
 from natsio.abc.connection import ConnectionProto, StreamProto
 from natsio.abc.dispatcher import DispatcherProto
+from natsio.abc.json import JSONSerializerProto
 from natsio.abc.protocol import ClientMessageProto
 from natsio.config import ServerInfo
 from natsio.const import CRLF
@@ -30,7 +31,6 @@ from natsio.protocol.operations.msg import MSG_OP
 from natsio.protocol.operations.ok import OK_OP
 from natsio.protocol.operations.ping_pong import PING_OP, PONG_OP, Ping, Pong
 from natsio.protocol.parser import ProtocolParser
-from natsio.utils.json.base import JSONSerializerProto
 from natsio.utils.logger import connection_logger as log
 
 from .protocol import StreamProtocol

@@ -1,6 +1,6 @@
 import json
 from typing import Any
-from .base import JSONSerializerProto
+from natsio.abc.json import JSONSerializerProto
 
 
 class JSONSerializer(JSONSerializerProto):

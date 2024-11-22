@@ -6,6 +6,7 @@ from typing import Final, Iterator, Mapping, MutableSequence, Self, Type
 from natsio.abc.client import ErrorCallback
 from natsio.abc.connection import ConnectionProto
 from natsio.abc.dispatcher import DispatcherProto
+from natsio.abc.json import JSONSerializerProto
 from natsio.abc.protocol import ClientMessageProto
 from natsio.abc.subscription import CoreCallback, SubscriptionProto
 from natsio.connection.status import ConnectionStatus
@@ -39,7 +40,6 @@ from natsio.subscriptions.core import (
     DEFAULT_SUB_PENDING_MSGS_LIMIT,
     Subscription,
 )
-from natsio.utils.json.base import JSONSerializerProto
 from natsio.utils.json.native import JSONSerializer
 from natsio.utils.logger import client_logger as log
 from natsio.utils.nuid import NUID

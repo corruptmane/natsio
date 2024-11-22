@@ -5,7 +5,6 @@ from typing import TYPE_CHECKING, AsyncIterator, Awaitable, Callable, MutableMap
 from natsio.abc.dispatcher import DispatcherProto
 from natsio.abc.protocol import ClientMessageProto
 from natsio.abc.subscription import JetStreamCallback, SubscriptionProto, SubscriptionStatus
-from natsio.client.jetstream.entities import PushConsumerConfig
 from natsio.exceptions.client import ClientClosedError, NotJetStreamMessageError
 from natsio.exceptions.jetstream import APIError
 from natsio.exceptions.subscription import MessageRetrievalTimeoutError, SubscriptionAlreadyStartedError, SubscriptionClosedError, SubscriptionSetupError
@@ -22,6 +21,7 @@ from .core import Subscription
 if TYPE_CHECKING:
     from natsio.client.core import NATSCore
     from natsio.client.jetstream import JetStream
+    from natsio.client.jetstream.entities import PushConsumerConfig
 
 DEFAULT_SUB_PENDING_MSGS_LIMIT = 512 * 1024
 DEFAULT_SUB_PENDING_BYTES_LIMIT = 256 * 1024 * 1024
@@ -231,7 +231,7 @@ class OrderedPushSubscription(PushSubscription):
         self,
         client: "NATSCore",
         jetstream: "JetStream",
-        consumer_config: PushConsumerConfig,
+        consumer_config: "PushConsumerConfig",
         command_sender: Callable[[ClientMessageProto], Awaitable[None]],
         dispatcher: DispatcherProto,
         stream_name: str,

@@ -1,5 +1,5 @@
 from typing import Any
-from .base import JSONSerializerProto
+from natsio.abc.json import JSONSerializerProto
 import orjson
 
 

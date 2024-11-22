@@ -2,6 +2,7 @@ import re
 from typing import Final, Mapping, NoReturn, Pattern
 
 from natsio.abc.connection import StreamProto
+from natsio.abc.json import JSONSerializerProto
 from natsio.const import CRLF, CRLF_SIZE
 from natsio.exceptions.client import InvalidHeaderVersion
 from natsio.exceptions.protocol import (
@@ -14,7 +15,6 @@ from natsio.protocol.headers import Header
 from natsio.protocol.operations.hmsg import HMsg
 from natsio.protocol.operations.info import Info
 from natsio.protocol.operations.msg import Msg
-from natsio.utils.json import JSONSerializerProto
 
 WHITESPACE_RE: Final[Pattern[bytes]] = re.compile(rb"\s+")
 ERR_NAME_RE: Final[Pattern[str]] = re.compile(r"'(.*?)'")

@@ -5,6 +5,7 @@ from typing import Final
 import logging
 
 import pytest
+from natsio.abc.json import JSONSerializerProto
 from natsio.client.core import NATSCore
 from natsio.config.client import ClientConfig
 from natsio.exceptions.client import BadSubjectError
@@ -16,8 +17,8 @@ log = logging.getLogger(__name__)
 
 
 @pytest.mark.asyncio()
-async def test_core_subscription_async(nats_uri: list[str]) -> None:
-    async with NATSCore(ClientConfig(servers=nats_uri)) as nc:
+async def test_core_subscription_async(nats_uri: list[str], serializer: JSONSerializerProto) -> None:
+    async with NATSCore(ClientConfig(servers=nats_uri), json_serializer=serializer) as nc:
         subject: Final[str] = "test.core.async"
         messages_count: Final[int] = 5
         received_messages: list[CoreMsg] = []
@@ -41,8 +42,8 @@ async def test_core_subscription_async(nats_uri: list[str]) -> None:
 
 
 @pytest.mark.asyncio()
-async def test_core_subscription_next(nats_uri: list[str]) -> None:
-    async with NATSCore(ClientConfig(servers=nats_uri)) as nc:
+async def test_core_subscription_next(nats_uri: list[str], serializer: JSONSerializerProto) -> None:
+    async with NATSCore(ClientConfig(servers=nats_uri), json_serializer=serializer) as nc:
         subject: Final[str] = "test.core.next"
         data: Final[bytes] = b"Hello, next"
 
@@ -56,8 +57,8 @@ async def test_core_subscription_next(nats_uri: list[str]) -> None:
 
 
 @pytest.mark.asyncio()
-async def test_core_subscription_iterator(nats_uri: list[str]) -> None:
-    async with NATSCore(ClientConfig(servers=nats_uri)) as nc:
+async def test_core_subscription_iterator(nats_uri: list[str], serializer: JSONSerializerProto) -> None:
+    async with NATSCore(ClientConfig(servers=nats_uri), json_serializer=serializer) as nc:
         subject: Final[str] = "test.core.iterator"
         messages_count: Final[int] = 5
         futures: Final[list[asyncio.Future[None]]] = [asyncio.Future() for _ in range(messages_count)]
@@ -87,8 +88,8 @@ async def test_core_subscription_iterator(nats_uri: list[str]) -> None:
 
 
 @pytest.mark.asyncio()
-async def test_core_multiple_subscriptions_async_queue(nats_uri: list[str]) -> None:
-    async with NATSCore(ClientConfig(servers=nats_uri)) as nc:
+async def test_core_multiple_subscriptions_async_queue(nats_uri: list[str], serializer: JSONSerializerProto) -> None:
+    async with NATSCore(ClientConfig(servers=nats_uri), json_serializer=serializer) as nc:
         subject: Final[str] = "test.core.async"
         queue: Final[str] = "test.core.async.queue"
         messages_count: Final[int] = 5
@@ -114,8 +115,8 @@ async def test_core_multiple_subscriptions_async_queue(nats_uri: list[str]) -> N
 
 
 @pytest.mark.asyncio()
-async def test_core_multiple_subscriptions_async_noqueue(nats_uri: list[str]) -> None:
-    async with NATSCore(ClientConfig(servers=nats_uri)) as nc:
+async def test_core_multiple_subscriptions_async_noqueue(nats_uri: list[str], serializer: JSONSerializerProto) -> None:
+    async with NATSCore(ClientConfig(servers=nats_uri), json_serializer=serializer) as nc:
         subject: Final[str] = "test.core.async"
         messages_count: Final[int] = 5
         received_messages_1: list[CoreMsg] = []
@@ -140,13 +141,13 @@ async def test_core_multiple_subscriptions_async_noqueue(nats_uri: list[str]) ->
 
 
 @pytest.mark.asyncio()
-async def test_core_subscription_pending_msgs_limit(nats_uri: list[str]) -> None:
+async def test_core_subscription_pending_msgs_limit(nats_uri: list[str], serializer: JSONSerializerProto) -> None:
     exc_future: asyncio.Future[Exception] = asyncio.Future()
 
     async def error_callback(e: Exception) -> None:
         exc_future.set_result(e)
 
-    async with NATSCore(ClientConfig(servers=nats_uri), error_callback=error_callback) as nc:
+    async with NATSCore(ClientConfig(servers=nats_uri), json_serializer=serializer, error_callback=error_callback) as nc:
         subject: Final[str] = "test.core.error.pending.msgs"
         fail_at: Final[int] = 10
         messages_count: Final[int] = fail_at * 3
@@ -161,13 +162,13 @@ async def test_core_subscription_pending_msgs_limit(nats_uri: list[str]) -> None
 
 
 @pytest.mark.asyncio()
-async def test_core_subscription_pending_bytes_limit(nats_uri: list[str]) -> None:
+async def test_core_subscription_pending_bytes_limit(nats_uri: list[str], serializer: JSONSerializerProto) -> None:
     exc_future: asyncio.Future[Exception] = asyncio.Future()
 
     async def error_callback(e: Exception) -> None:
         exc_future.set_result(e)
 
-    async with NATSCore(ClientConfig(servers=nats_uri), error_callback=error_callback) as nc:
+    async with NATSCore(ClientConfig(servers=nats_uri), json_serializer=serializer, error_callback=error_callback) as nc:
         subject: Final[str] = "test.core.error.pending.msgs"
         fail_at: Final[int] = 1024
         generate_bytes: Final[int] = fail_at * 3
@@ -183,8 +184,8 @@ async def test_core_subscription_pending_bytes_limit(nats_uri: list[str]) -> Non
 
 
 @pytest.mark.asyncio()
-async def test_core_subscription_unsub(nats_uri: list[str]) -> None:
-    async with NATSCore(ClientConfig(servers=nats_uri)) as nc:
+async def test_core_subscription_unsub(nats_uri: list[str], serializer: JSONSerializerProto) -> None:
+    async with NATSCore(ClientConfig(servers=nats_uri), json_serializer=serializer) as nc:
         subject: Final[str] = "test.core.unsub"
         message_received = asyncio.Event()
 
@@ -204,8 +205,8 @@ async def test_core_subscription_unsub(nats_uri: list[str]) -> None:
 
 
 @pytest.mark.asyncio()
-async def test_core_subscription_auto_unsub(nats_uri: list[str]) -> None:
-    async with NATSCore(ClientConfig(servers=nats_uri)) as nc:
+async def test_core_subscription_auto_unsub(nats_uri: list[str], serializer: JSONSerializerProto) -> None:
+    async with NATSCore(ClientConfig(servers=nats_uri), json_serializer=serializer) as nc:
         subject: Final[str] = "test.core.auto_unsub"
         unsub_after: Final[int] = 5
         received_messages: list[CoreMsg] = []
@@ -231,24 +232,24 @@ async def test_core_subscription_auto_unsub(nats_uri: list[str]) -> None:
 
 
 @pytest.mark.asyncio()
-async def test_core_subscription_bad_subject(nats_uri: list[str]) -> None:
-    async with NATSCore(ClientConfig(servers=nats_uri)) as nc:
+async def test_core_subscription_bad_subject(nats_uri: list[str], serializer: JSONSerializerProto) -> None:
+    async with NATSCore(ClientConfig(servers=nats_uri), json_serializer=serializer) as nc:
         subject: Final[str] = "test<core/bad subject"
         with pytest.raises(BadSubjectError):
             await nc.subscribe(subject)
 
 
 @pytest.mark.asyncio()
-async def test_core_publish_bad_subject(nats_uri: list[str]) -> None:
-    async with NATSCore(ClientConfig(servers=nats_uri)) as nc:
+async def test_core_publish_bad_subject(nats_uri: list[str], serializer: JSONSerializerProto) -> None:
+    async with NATSCore(ClientConfig(servers=nats_uri), json_serializer=serializer) as nc:
         subject: Final[str] = "test<core/bad subject"
         with pytest.raises(BadSubjectError):
             await nc.publish(subject, b"something")
 
 
 @pytest.mark.asyncio()
-async def test_core_subscription_wildcard(nats_uri: list[str]) -> None:
-    async with NATSCore(ClientConfig(servers=nats_uri)) as nc:
+async def test_core_subscription_wildcard(nats_uri: list[str], serializer: JSONSerializerProto) -> None:
+    async with NATSCore(ClientConfig(servers=nats_uri), json_serializer=serializer) as nc:
         subscription_subject: Final[str] = "test.core.wildcard.*"
         publish_subject_template: Final[str] = "test.core.wildcard.{part}"
         messages_count: Final[int] = 5

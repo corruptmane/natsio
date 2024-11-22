@@ -5,10 +5,10 @@ from typing import Protocol, Self
 from natsio.config import ServerInfo
 from natsio.connection.status import ConnectionStatus
 from natsio.protocol.operations.connect import Connect
-from natsio.utils.json.base import JSONSerializerProto
 
 from .client import ErrorCallback
 from .dispatcher import DispatcherProto
+from .json import JSONSerializerProto
 from .protocol import ClientMessageProto
 
 
