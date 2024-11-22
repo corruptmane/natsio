@@ -20,6 +20,7 @@ class Header(str, Enum):
     CONSUMER_STALLED = "Nats-Consumer-Stalled"
     STATUS = "Status"
     DESCRIPTION = "Description"
+    KV_OPERATION = "KV-Operation"
 
 
 class StatusCode(str, Enum):
@@ -28,3 +29,14 @@ class StatusCode(str, Enum):
     REQUEST_TIMEOUT = "408"
     CONFLICT = "409"
     CONTROL_MESSAGE = "100"
+
+
+class KVOperation(str, Enum):
+    PUT = "PUT"
+    DEL = "DEL"
+    PURGE = "PURGE"
+
+
+class Rollup(str, Enum):
+    SUB = "sub"
+    ALL = "all"
