@@ -1,77 +1,27 @@
-from dataclasses import Field, asdict, dataclass, fields, is_dataclass
-from datetime import datetime
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 from enum import Enum
-from functools import cached_property
-from types import UnionType
-from typing import (
-    Any,
-    ClassVar,
-    Mapping,
-    Protocol,
-    Self,
-    Type,
-    TypeVar,
-    cast,
-    get_args,
-    get_origin,
+from typing import Annotated, Any, Mapping, Self, Type
+
+from natsio._internal.serialization.converters import (
+    DATETIME_ISO,
+    TIMEDELTA_NANO,
 )
-
-from natsio.utils.time import from_nanoseconds, fromisoformat
-
-
-class DataclassInstance(Protocol):
-    __dataclass_fields__: ClassVar[dict[str, Field[Any]]]
-
-
-T = TypeVar("T", bound=DataclassInstance)
-
-
-def _map_to_dataclass(data: Mapping[str, Any], cls: Type[T]) -> T:
-    # NOTE: is a subject to change, I don't like it at all, sorry for anyone reading that
-    field_names = {field.name: field.type for field in fields(cls)}
-    filtered_data = {}
-
-    for key, value in data.items():
-        if key in field_names:
-            field_type = cast(type, field_names[key])
-            origin = get_origin(field_type)
-            args = get_args(field_type)
-            if len(args) >= 1:
-                is_optional_list_of_dataclasses = (
-                    origin in (UnionType,)
-                    and get_origin(args[0]) is list
-                    and is_dataclass(get_args(args[0])[0])
-                )
-            else:
-                is_optional_list_of_dataclasses = False
-
-            if is_dataclass(field_type):
-                filtered_data[key] = _map_to_dataclass(value, field_type)
-            elif is_optional_list_of_dataclasses:
-                new_origin = get_args(args[0])[0]  # pyright: ignore[reportGeneralTypeIssues]
-                filtered_data[key] = [_map_to_dataclass(val, new_origin) for val in value]  # type: ignore[assignment]
-            elif origin in (list,) and is_dataclass(args[0]):  # pyright: ignore[reportGeneralTypeIssues]
-                filtered_data[key] = [_map_to_dataclass(val, args[0]) for val in value]  # type: ignore[assignment,arg-type]
-            elif isinstance(field_type, type) and issubclass(field_type, Enum):
-                filtered_data[key] = field_type(value)  # type: ignore[assignment]
-            elif (
-                origin in (UnionType,) and isinstance(args[0], type) and issubclass(args[0], Enum)  # pyright: ignore[reportGeneralTypeIssues]
-            ):
-                filtered_data[key] = args[0](value)  # type: ignore[assignment]
-            else:
-                filtered_data[key] = value
-
-    return cls(**filtered_data)
+from natsio._internal.serialization.serializator import (
+    deserialize_dataclass,
+    serialize_dataclass,
+)
+from natsio._internal.serialization.types import Converter
 
 
 @dataclass(kw_only=True)
 class Base:
+    def to_dict(self) -> Mapping[str, Any]:
+        return serialize_dataclass(self)
+
     @classmethod
     def from_response(cls: Type[Self], **data: Any) -> Self:
-        return _map_to_dataclass(data, cls)
-
-    def to_dict(self) -> Mapping[str, Any]:
-        return asdict(self)
+        return deserialize_dataclass(data, cls)
 
 
 @dataclass(kw_only=True)
@@ -160,7 +110,7 @@ class Discard(str, Enum):
 @dataclass(kw_only=True)
 class Placement(Base):
     cluster: str | None = None
-    tags: list[str] | None = None
+    tags: list[str] = field(default_factory=list)
 
 
 @dataclass(kw_only=True)
@@ -175,7 +125,7 @@ class MirrorConfig(Base):
     opt_start_seq: int | None = None
     opt_start_time: str | None = None
     filter_subject: str | None = None
-    subject_transforms: list[SubjectTransform] | None = None
+    subject_transforms: list[SubjectTransform] = field(default_factory=list)
     external: External | None = None
 
 
@@ -185,7 +135,7 @@ class SourceConfig(Base):
     opt_start_seq: int | None = None
     opt_start_time: str | None = None
     filter_subject: str | None = None
-    subject_transforms: list[SubjectTransform] | None = None
+    subject_transforms: list[SubjectTransform] = field(default_factory=list)
     external: External | None = None
 
 
@@ -198,14 +148,8 @@ class Republish(Base):
 
 @dataclass(kw_only=True)
 class ConsumerLimits(Base):
-    inactive_threshold: int | None = None
+    inactive_threshold: Annotated[timedelta | None, TIMEDELTA_NANO] = None
     max_ack_pending: int | None = None
-
-    @cached_property
-    def inactive_threshold_seconds(self) -> float | None:
-        if self.inactive_threshold is None:
-            return None
-        return from_nanoseconds(self.inactive_threshold)
 
 
 @dataclass(kw_only=True)
@@ -214,12 +158,12 @@ class StreamConfig(Base):
     max_consumers: int
     max_msgs: int
     max_bytes: int
-    max_age: int
+    max_age: Annotated[timedelta, TIMEDELTA_NANO]
     storage: Storage
     num_replicas: int
     name: str | None = None
     description: str | None = None
-    subjects: list[str] | None = None
+    subjects: list[str] = field(default_factory=list)
     subject_transform: SubjectTransform | None = None
     max_msgs_per_subject: int | None = -1
     max_msg_size: int | None = -1
@@ -228,10 +172,12 @@ class StreamConfig(Base):
     no_ack: bool | None = False
     template_owner: str | None = None
     discard: Discard | None = Discard.old
-    duplicate_window: int | None = 0
+    duplicate_window: Annotated[timedelta | None, TIMEDELTA_NANO] = timedelta(
+        0
+    )
     placement: Placement | None = None
     mirror: MirrorConfig | None = None
-    sources: list[SourceConfig] | None = None
+    sources: list[SourceConfig] = field(default_factory=list)
     sealed: bool | None = False
     deny_delete: bool | None = False
     deny_purge: bool | None = False
@@ -243,20 +189,10 @@ class StreamConfig(Base):
     metadata: Mapping[str, str] | None = None
     consumer_limits: ConsumerLimits | None = None
 
-    @cached_property
-    def max_age_seconds(self) -> float:
-        return from_nanoseconds(self.max_age)
-
-    @cached_property
-    def duplicate_window_seconds(self) -> float | None:
-        if self.duplicate_window is None:
-            return None
-        return from_nanoseconds(self.duplicate_window)
-
 
 @dataclass(kw_only=True)
 class Lost(Base):
-    msgs: list[int] | None = None
+    msgs: list[int] = field(default_factory=list)
     bytes: int | None = None
 
 
@@ -267,46 +203,30 @@ class StreamState(Base):
     first_seq: int
     last_seq: int
     consumer_count: int
-    first_ts: str | None = None
-    last_ts: str | None = None
-    deleted: list[int] | None = None
+    first_ts: Annotated[datetime | None, DATETIME_ISO] = None
+    last_ts: Annotated[datetime | None, DATETIME_ISO] = None
+    deleted: list[int] = field(default_factory=list)
     subjects: Mapping[str, int] | None = None
     num_subjects: int | None = None
     num_deleted: int | None = None
     lost: Lost | None = None
-
-    @cached_property
-    def first_ts_dt(self) -> datetime | None:
-        if self.first_ts is None:
-            return None
-        return fromisoformat(self.first_ts)
-
-    @cached_property
-    def last_ts_dt(self) -> datetime | None:
-        if self.last_ts is None:
-            return None
-        return fromisoformat(self.last_ts)
 
 
 @dataclass(kw_only=True)
 class Replica(Base):
     name: str
     current: bool
-    active: int
+    active: Annotated[timedelta, TIMEDELTA_NANO]
     observer: bool | None = False
     offline: bool | None = False
     lag: int | None = None
-
-    @cached_property
-    def active_seconds(self) -> float:
-        return from_nanoseconds(self.active)
 
 
 @dataclass(kw_only=True)
 class Cluster(Base):
     name: str | None = None
     leader: str | None = None
-    replicas: list[Replica] | None = None
+    replicas: list[Replica] = field(default_factory=list)
     raft_group: str | None = None
 
 
@@ -314,28 +234,20 @@ class Cluster(Base):
 class Mirror(Base):
     name: str
     lag: int
-    active: int
+    active: Annotated[timedelta, TIMEDELTA_NANO]
     filter_subject: str | None = None
-    subject_transforms: list[SubjectTransform] | None = None
+    subject_transforms: list[SubjectTransform] = field(default_factory=list)
     external: External | None = None
-
-    @cached_property
-    def active_seconds(self) -> float:
-        return from_nanoseconds(self.active)
 
 
 @dataclass(kw_only=True)
 class Source(Base):
     name: str
     lag: int
-    active: int
+    active: Annotated[timedelta, TIMEDELTA_NANO]
     filter_subject: str | None = None
-    subject_transforms: list[SubjectTransform] | None = None
+    subject_transforms: list[SubjectTransform] = field(default_factory=list)
     external: External | None = None
-
-    @cached_property
-    def active_seconds(self) -> float:
-        return from_nanoseconds(self.active)
 
 
 @dataclass(kw_only=True)
@@ -353,17 +265,11 @@ class StreamInfo(Base):
     total: int | None = None
     offset: int | None = None
     limit: int | None = None
-    ts: str | None = None
+    ts: Annotated[datetime | None, DATETIME_ISO] = None
     cluster: Cluster | None = None
     mirror: Mirror | None = None
-    sources: list[Source] | None = None
-    alternates: list[Alternate] | None = None
-
-    @cached_property
-    def ts_dt(self) -> datetime | None:
-        if self.ts is None:
-            return None
-        return fromisoformat(self.ts)
+    sources: list[Source] = field(default_factory=list)
+    alternates: list[Alternate] = field(default_factory=list)
 
 
 @dataclass(kw_only=True)
@@ -377,12 +283,12 @@ class UpdateStreamRequest(Base):
     max_consumers: int
     max_msgs: int
     max_bytes: int
-    max_age: int
+    max_age: Annotated[timedelta, TIMEDELTA_NANO]
     storage: Storage
     num_replicas: int
     name: str | None = None
     description: str | None = None
-    subjects: list[str] | None = None
+    subjects: list[str] = field(default_factory=list)
     subject_transform: SubjectTransform | None = None
     max_msgs_per_subject: int | None = -1
     max_msg_size: int | None = -1
@@ -391,10 +297,12 @@ class UpdateStreamRequest(Base):
     no_ack: bool | None = False
     template_owner: str | None = None
     discard: Discard | None = Discard.old
-    duplicate_window: int | None = 0
+    duplicate_window: Annotated[timedelta | None, TIMEDELTA_NANO] = timedelta(
+        0
+    )
     placement: Placement | None = None
     mirror: Mirror | None = None
-    sources: list[Source] | None = None
+    sources: list[Source] = field(default_factory=list)
     sealed: bool | None = False
     deny_delete: bool | None = False
     deny_purge: bool | None = False
@@ -420,24 +328,26 @@ class GetMsgRequest(Base):
 
     def validate(self) -> None:
         if self.seq and self.last_by_subj:
-            raise ValueError("`seq` and `last_by_subj` properties can not be combined")
+            raise ValueError(
+                "`seq` and `last_by_subj` properties can not be combined"
+            )
         if self.seq is None and self.last_by_subj is None:
-            raise ValueError("One of `seq` or `last_by_subj` must be specified")
+            raise ValueError(
+                "One of `seq` or `last_by_subj` must be specified"
+            )
         if self.seq is None and self.next_by_subj is not None:
-            raise ValueError("`seq` must be provided when using `next_by_subj`")
+            raise ValueError(
+                "`seq` must be provided when using `next_by_subj`"
+            )
 
 
 @dataclass(kw_only=True)
 class RawMsg:
     subject: str
     seq: int
-    time: str
+    time: Annotated[datetime, DATETIME_ISO]
     payload: bytes | None
     headers: Mapping[str, str] | None
-
-    @cached_property
-    def time_dt(self) -> datetime:
-        return fromisoformat(self.time)
 
 
 class AckPolicy(str, Enum):
@@ -469,16 +379,18 @@ class _ConsumerConfig(Base):
     opt_start_time: int | None = None
     opt_start_seq: int | None = None
     ack_policy: AckPolicy = AckPolicy.explicit
-    ack_wait: int | None = None
+    ack_wait: Annotated[timedelta | None, TIMEDELTA_NANO] = None
     max_deliver: int | None = None
-    backoff: list[int] | None = None
+    backoff: list[Annotated[timedelta, TIMEDELTA_NANO]] = field(
+        default_factory=list
+    )
     filter_subject: str | None = None
-    filter_subjects: list[str] | None = None
+    filter_subjects: list[str] = field(default_factory=list)
     replay_policy: ReplayPolicy = ReplayPolicy.instant
     sample_freq: str | None = None
     max_ack_pending: int | None = None
     headers_only: bool | None = None
-    inactive_threshold: int | None = None
+    inactive_threshold: Annotated[timedelta | None, TIMEDELTA_NANO] = None
     num_replicas: int | None = None
     mem_storage: bool | None = None
     metadata: Mapping[str, str] | None = None
@@ -490,65 +402,24 @@ class PushConsumerConfig(_ConsumerConfig):
     deliver_subject: str
     deliver_group: str | None = None
     flow_control: bool | None = None
-    idle_heartbeat: int | None = None
+    idle_heartbeat: Annotated[timedelta | None, TIMEDELTA_NANO] = None
     rate_limit_bps: int | None = None
 
 
 @dataclass(kw_only=True)
 class PullConsumerConfig(_ConsumerConfig):
     max_batch: int | None = None
-    max_expires: int | None = None
+    max_expires: Annotated[timedelta | None, TIMEDELTA_NANO] = None
     max_bytes: int | None = None
     max_waiting: int | None = None
 
 
-@dataclass(kw_only=True)
-class SequenceInfo(Base):
-    consumer_seq: int
-    stream_seq: int
-    last_active: str | None = None
-
-    @cached_property
-    def last_active_dt(self) -> datetime | None:
-        if self.last_active is None:
-            return None
-        return fromisoformat(self.last_active)
-
-
-@dataclass(kw_only=True)
-class ConsumerInfo(Base):
-    stream_name: str
-    name: str
-    config: PushConsumerConfig | PullConsumerConfig
-    created: str
-    delivered: SequenceInfo
-    ack_floor: SequenceInfo
-    num_ack_pending: int
-    num_redelivered: int
-    num_waiting: int
-    num_pending: int
-    ts: str | None = None
-    cluster: Cluster | None = None
-    push_bound: bool | None = None
-    paused: bool | None = None
-    pause_until: str | None = None
-
-    @cached_property
-    def created_dt(self) -> datetime:
-        return fromisoformat(self.created)
-
-    @cached_property
-    def ts_dt(self) -> datetime | None:
-        if self.ts is None:
-            return None
-        return fromisoformat(self.ts)
-
-    @classmethod
-    def from_response(cls: Type[Self], **data: Any) -> Self:
-        # NOTE: is a subject to change, need more testing
-        config = data["config"]
-        is_push_consumer = any(
-            prop in config and config[prop] is not None
+class ConsumerConfigConverter(
+    Converter[PushConsumerConfig | PullConsumerConfig, Mapping[str, Any]]
+):
+    def is_push_consumer(self, data: Mapping[str, Any]) -> bool:
+        return any(
+            prop in data and data[prop] is not None
             for prop in (
                 "deliver_subject",
                 "deliver_group",
@@ -557,25 +428,54 @@ class ConsumerInfo(Base):
                 "rate_limit_bps",
             )
         )
-        tp: type[_ConsumerConfig]
-        if is_push_consumer:
-            tp = PushConsumerConfig
-        else:
-            tp = PullConsumerConfig
-        data["config"] = tp.from_response(**data["config"])
 
-        return _map_to_dataclass(data, cls)
+    def to_wire(
+        self, value: PushConsumerConfig | PullConsumerConfig
+    ) -> Mapping[str, Any]:
+        return serialize_dataclass(value)
+
+    def from_wire(
+        self, value: Mapping[str, Any]
+    ) -> PushConsumerConfig | PullConsumerConfig:
+        config_type = (
+            PushConsumerConfig
+            if self.is_push_consumer(value)
+            else PullConsumerConfig
+        )
+        return deserialize_dataclass(value, config_type)
+
+
+@dataclass(kw_only=True)
+class SequenceInfo(Base):
+    consumer_seq: int
+    stream_seq: int
+    last_active: Annotated[datetime | None, DATETIME_ISO] = None
+
+
+@dataclass(kw_only=True)
+class ConsumerInfo(Base):
+    stream_name: str
+    name: str
+    config: Annotated[
+        PushConsumerConfig | PullConsumerConfig, ConsumerConfigConverter()
+    ]
+    created: Annotated[datetime, DATETIME_ISO]
+    delivered: SequenceInfo
+    ack_floor: SequenceInfo
+    num_ack_pending: int
+    num_redelivered: int
+    num_waiting: int
+    num_pending: int
+    ts: Annotated[datetime | None, DATETIME_ISO] = None
+    cluster: Cluster | None = None
+    push_bound: bool | None = None
+    paused: bool | None = None
+    pause_until: str | None = None
 
 
 @dataclass(kw_only=True)
 class ConsumerList(_PagedResult):
     consumers: list[ConsumerInfo]
-
-    @classmethod
-    def from_response(cls: Type[Self], **data: Any) -> Self:
-        paged = _PagedResult.from_response(**data)
-        consumers = [ConsumerInfo.from_response(**consumer) for consumer in data["consumers"]]
-        return cls(total=paged.total, offset=paged.offset, limit=paged.limit, consumers=consumers)
 
 
 @dataclass(kw_only=True)

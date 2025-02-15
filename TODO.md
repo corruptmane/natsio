@@ -22,3 +22,5 @@
 - [ ] Auth (JWT, User/Pass, NKey)
 - [ ] Micro
 - [ ] Cluster support (cluster endpoints discovery, update server info on `INFO` operation message, etc.)
+- [x] Rework serialization of JS api
+- [ ] Try to use mixins for subscriptions

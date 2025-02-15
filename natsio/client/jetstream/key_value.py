@@ -1,14 +1,20 @@
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, MutableMapping, Self, cast
 from dataclasses import dataclass
 
-from natsio.exceptions.jetstream import APIError, KeyDeletedError, KeyNotFoundError, KeyWrongLastSequenceError, NoKeysError, NotFoundError
+from natsio.exceptions.jetstream import (
+    APIError,
+    KeyDeletedError,
+    KeyNotFoundError,
+    KeyWrongLastSequenceError,
+    NoKeysError,
+    NotFoundError,
+)
 from natsio.exceptions.subscription import MessageRetrievalTimeoutError
 from natsio.messages.jetstream import JetStreamMsg, Metadata
 from natsio.protocol.headers import Header, KVOperation, Rollup
 from natsio.subscriptions.jetstream import OrderedPushSubscription
-from natsio.utils.time import to_nanoseconds
 
 from .entities import DeliverPolicy, GetMsgRequest, PushConsumerConfig, RawMsg
 from .utils import RawMsgGetter
@@ -38,12 +44,14 @@ def build_entry_from_raw_msg(msg: RawMsg, bucket_name: str, key: str) -> Entry:
         key=key,
         value=msg.payload,
         revision=msg.seq,
-        created=msg.time_dt,
+        created=msg.time,
         operation=operation,
     )
 
 
-def build_entry_from_js_msg(msg: JetStreamMsg, bucket_name: str, subject_prefix_length: int) -> Entry:
+def build_entry_from_js_msg(
+    msg: JetStreamMsg, bucket_name: str, subject_prefix_length: int
+) -> Entry:
     meta = cast(Metadata, msg.metadata)
     operation = None
     if msg.headers and Header.KV_OPERATION in msg.headers:
@@ -82,20 +90,24 @@ class KeyValueWatcher:
         self._sub: OrderedPushSubscription
         self._is_last_entry: bool = False
 
-    async def start(self, filter_subject: str, inactive_threshold_seconds: int | None = None) -> None:
+    async def start(
+        self,
+        filter_subject: str,
+        inactive_threshold: timedelta | None = None,
+    ) -> None:
         if not self._include_history:
             deliver_policy = DeliverPolicy.last_per_subject
         else:
             deliver_policy = DeliverPolicy.all
 
-        if inactive_threshold_seconds is None:
-            inactive_threshold_seconds = 5 * 60
+        if inactive_threshold is None:
+            inactive_threshold = timedelta(minutes=5)
 
         config = PushConsumerConfig(
             deliver_policy=deliver_policy,
             deliver_subject=self._js.new_unique_deliver_subject(),
             filter_subject=filter_subject,
-            inactive_threshold=to_nanoseconds(inactive_threshold_seconds),
+            inactive_threshold=inactive_threshold,
             headers_only=self._meta_only,
         )
         self._sub = await self._js.ordered_push_subscribe(
@@ -108,7 +120,11 @@ class KeyValueWatcher:
         await self._sub.unsubscribe()
 
     def _return_none_if_filtered(self, entry: Entry) -> Entry | None:
-        if self._ignore_deletes and entry.operation and entry.operation in (KVOperation.DEL, KVOperation.PURGE):
+        if (
+            self._ignore_deletes
+            and entry.operation
+            and entry.operation in (KVOperation.DEL, KVOperation.PURGE)
+        ):
             return
 
     async def next_entry(self, timeout: float | int = 5) -> Entry:
@@ -119,7 +135,9 @@ class KeyValueWatcher:
                 while entry is None:
                     msg = await self._sub.next_msg(timeout=timeout)
                     entry = self._return_none_if_filtered(
-                        build_entry_from_js_msg(msg, self._bucket_name, self._subject_prefix_length)
+                        build_entry_from_js_msg(
+                            msg, self._bucket_name, self._subject_prefix_length
+                        )
                     )
         except asyncio.TimeoutError:
             raise MessageRetrievalTimeoutError()
@@ -141,7 +159,9 @@ class KeyValueWatcher:
                 self._is_last_entry = True
 
             entry = self._return_none_if_filtered(
-                build_entry_from_js_msg(msg, self._bucket_name, self._subject_prefix_length)
+                build_entry_from_js_msg(
+                    msg, self._bucket_name, self._subject_prefix_length
+                )
             )
 
         return entry
@@ -179,31 +199,42 @@ class KeyValue:
             raise KeyNotFoundError(key=key)
 
         if subject != msg.subject:
-            raise KeyNotFoundError(key=key, message=f"expected '{subject}', but got '{msg.subject}'")
+            raise KeyNotFoundError(
+                key=key,
+                message=f"expected '{subject}', but got '{msg.subject}'",
+            )
 
         entry = build_entry_from_raw_msg(msg, self._bucket_name, key)
 
         if (
             msg.headers
             and Header.KV_OPERATION in msg.headers
-            and msg.headers[Header.KV_OPERATION] in (KVOperation.DEL, KVOperation.PURGE)
+            and msg.headers[Header.KV_OPERATION]
+            in (KVOperation.DEL, KVOperation.PURGE)
         ):
             raise KeyDeletedError(entry)
 
         return entry
 
-
     async def put(self, key: str, value: bytes) -> int:
-        ack = await self._js.publish(subject=self._build_key_subject(key), data=value)
+        ack = await self._js.publish(
+            subject=self._build_key_subject(key), data=value
+        )
         return ack.seq
 
-    async def update(self, key: str, value: bytes, last: int | None = None) -> int:
+    async def update(
+        self, key: str, value: bytes, last: int | None = None
+    ) -> int:
         if not last:
             last = 0
         headers = {Header.EXPECTED_LAST_SUBJECT_SEQUENCE.value: last}
 
         try:
-            ack = await self._js.publish(subject=self._build_key_subject(key), data=value, headers=headers)
+            ack = await self._js.publish(
+                subject=self._build_key_subject(key),
+                data=value,
+                headers=headers,
+            )
         except APIError as exc:
             if exc.err_code and exc.err_code == 10071:
                 raise KeyWrongLastSequenceError(exc.description)
@@ -220,16 +251,22 @@ class KeyValue:
                 await self.get(key)
                 raise exc
             except KeyDeletedError as exc:
-                revision = await self.update(key, value, last=exc.entry.revision)
+                revision = await self.update(
+                    key, value, last=exc.entry.revision
+                )
 
         return revision
 
     async def delete(self, key: str, last: int | None = None) -> bool:
-        headers: MutableMapping[str, str | int] = {Header.KV_OPERATION.value: KVOperation.DEL.value}
+        headers: MutableMapping[str, str | int] = {
+            Header.KV_OPERATION.value: KVOperation.DEL.value
+        }
         if last is not None and last > 0:
             headers[Header.EXPECTED_LAST_SUBJECT_SEQUENCE.value] = last
 
-        await self._js.publish(subject=self._build_key_subject(key), data=b"", headers=headers)
+        await self._js.publish(
+            subject=self._build_key_subject(key), data=b"", headers=headers
+        )
         return True
 
     async def purge(self, key: str) -> bool:
@@ -238,7 +275,9 @@ class KeyValue:
             Header.ROLLUP.value: Rollup.SUB,
         }
 
-        await self._js.publish(subject=self._build_key_subject(key), data=b"", headers=headers)
+        await self._js.publish(
+            subject=self._build_key_subject(key), data=b"", headers=headers
+        )
         return True
 
     async def watch(
@@ -247,7 +286,7 @@ class KeyValue:
         include_history: bool = False,
         ignore_deletes: bool = False,
         meta_only: bool = False,
-        inactive_threshold_seconds: int | None = None,
+        inactive_threshold: timedelta | None = None,
     ) -> KeyValueWatcher:
         subject = self._build_key_subject(key)
         watcher = KeyValueWatcher(
@@ -261,7 +300,10 @@ class KeyValue:
             meta_only=meta_only,
         )
 
-        await watcher.start(filter_subject=subject, inactive_threshold_seconds=inactive_threshold_seconds)
+        await watcher.start(
+            filter_subject=subject,
+            inactive_threshold=inactive_threshold,
+        )
 
         return watcher
 
@@ -270,14 +312,14 @@ class KeyValue:
         include_history: bool = False,
         ignore_deletes: bool = False,
         meta_only: bool = False,
-        inactive_threshold_seconds: int | None = None,
+        inactive_threshold: timedelta | None = None,
     ) -> KeyValueWatcher:
         return await self.watch(
             key=">",
             include_history=include_history,
             ignore_deletes=ignore_deletes,
             meta_only=meta_only,
-            inactive_threshold_seconds=inactive_threshold_seconds,
+            inactive_threshold=inactive_threshold,
         )
 
     async def purge_deletes(self, older_than_seconds: int = 30 * 60) -> bool:
@@ -294,9 +336,14 @@ class KeyValue:
             keep = 0
             subject = f"{self._pre}{entry.key}"
             duration = datetime.now(timezone.utc) - entry.created
-            if older_than_seconds > 0 and older_than_seconds > duration.total_seconds():
+            if (
+                older_than_seconds > 0
+                and older_than_seconds > duration.total_seconds()
+            ):
                 keep = 1
-            await self._js.purge_stream(self._stream_name, filter_subject=subject, keep=keep)
+            await self._js.purge_stream(
+                self._stream_name, filter_subject=subject, keep=keep
+            )
         return True
 
     async def history(self, key: str) -> list[Entry]:
@@ -319,7 +366,9 @@ class KeyValue:
         keys: list[str] = []
         async for entry in watcher:
             if filters:
-                if any(entry.key in f for f in filters):  # TODO: rework filters
+                if any(
+                    entry.key in f for f in filters
+                ):  # TODO: rework filters
                     keys.append(entry.key)
             else:
                 keys.append(entry.key)

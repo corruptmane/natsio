@@ -1,21 +1,50 @@
 from base64 import b64decode
 from contextlib import suppress
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, Final, Mapping, MutableMapping, cast
+from datetime import timedelta
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Awaitable,
+    Callable,
+    Final,
+    Mapping,
+    MutableMapping,
+    cast,
+)
 
 from natsio.abc.dispatcher import DispatcherProto
 from natsio.abc.protocol import ClientMessageProto
 from natsio.abc.subscription import JetStreamCallback
 from natsio.exceptions.client import MessageAlreadyAckedError
-from natsio.exceptions.jetstream import APIError, BucketNotFoundError, InvalidBucketNameError, KeyHistoryTooLargeError, NoStreamResponseError, NotFoundError, ServiceUnavailableError
+from natsio.exceptions.jetstream import (
+    APIError,
+    BucketNotFoundError,
+    InvalidBucketNameError,
+    KeyHistoryTooLargeError,
+    NoStreamResponseError,
+    NotFoundError,
+    ServiceUnavailableError,
+)
 from natsio.exceptions.protocol import NoRespondersError
 from natsio.messages.jetstream import JetStreamMsg
 from natsio.protocol.headers import Header, StatusCode
 from natsio.protocol.operations.sub import Sub
 from natsio.protocol.parser import parse_headers
-from natsio.subscriptions.core import DEFAULT_SUB_PENDING_BYTES_LIMIT, DEFAULT_SUB_PENDING_MSGS_LIMIT
-from natsio.subscriptions.jetstream import OrderedPushSubscription, PullSubscription, PushSubscription
-from natsio.utils.time import to_nanoseconds
-from natsio.utils.validation import VALID_BUCKET_RE, validate_name, validate_subject
+from natsio.subscriptions.core import (
+    DEFAULT_SUB_PENDING_BYTES_LIMIT,
+    DEFAULT_SUB_PENDING_MSGS_LIMIT,
+)
+from natsio.subscriptions.jetstream import (
+    OrderedPushSubscription,
+    PullSubscription,
+    PushSubscription,
+)
+from natsio.utils.time import fromisoformat
+from natsio.utils.validation import (
+    VALID_BUCKET_RE,
+    validate_name,
+    validate_subject,
+)
 from .entities import (
     AccountInfo,
     AckPolicy,
@@ -44,7 +73,6 @@ KV_API_PREFIX: Final[str] = "$KV."
 
 
 def auto_ack_wrapper(callback: JetStreamCallback) -> JetStreamCallback:
-
     async def wrapper(msg: JetStreamMsg) -> None:
         await callback(msg)
         with suppress(MessageAlreadyAckedError):
@@ -99,16 +127,19 @@ class JetStream:
 
         return PubAck.from_response(**resp)
 
-
     async def get_account_info(self) -> AccountInfo:
         resp = await self._api_request(f"{self._prefix}.INFO")
         return AccountInfo.from_response(**resp)
 
-    async def get_stream_list(self, subject: str | None = None, offset: int = 0) -> StreamList:
+    async def get_stream_list(
+        self, subject: str | None = None, offset: int = 0
+    ) -> StreamList:
         data: MutableMapping[str, str | int] = dict(offset=offset)
         if subject is not None:
             data["subject"] = subject
-        resp = await self._api_request(f"{self._prefix}.STREAM.LIST", self._nc.serializer.dump(data))
+        resp = await self._api_request(
+            f"{self._prefix}.STREAM.LIST", self._nc.serializer.dump(data)
+        )
         return StreamList.from_response(**resp)
 
     async def get_stream_names(
@@ -117,31 +148,39 @@ class JetStream:
         data: MutableMapping[str, str | int] = dict(offset=offset)
         if subject is not None:
             data["subject"] = subject
-        resp = await self._api_request(f"{self._prefix}.STREAM.NAMES", self._nc.serializer.dump(data))
+        resp = await self._api_request(
+            f"{self._prefix}.STREAM.NAMES", self._nc.serializer.dump(data)
+        )
         return cast(list[str] | None, resp["streams"])
 
     async def create_stream(self, req: CreateStreamRequest) -> StreamInfo:
         validate_name(req.name)
         resp = await self._api_request(
-            f"{self._prefix}.STREAM.CREATE.{req.name}", self._nc.serializer.dump(req.to_dict())
+            f"{self._prefix}.STREAM.CREATE.{req.name}",
+            self._nc.serializer.dump(req.to_dict()),
         )
         return StreamInfo.from_response(**resp)
 
     async def update_stream(self, req: UpdateStreamRequest) -> StreamInfo:
         validate_name(req.name)
         resp = await self._api_request(
-            f"{self._prefix}.STREAM.UPDATE.{req.name}", self._nc.serializer.dump(req.to_dict())
+            f"{self._prefix}.STREAM.UPDATE.{req.name}",
+            self._nc.serializer.dump(req.to_dict()),
         )
         return StreamInfo.from_response(**resp)
 
     async def get_stream_info(self, stream_name: str) -> StreamInfo:
         validate_name(stream_name)
-        resp = await self._api_request(f"{self._prefix}.STREAM.INFO.{stream_name}")
+        resp = await self._api_request(
+            f"{self._prefix}.STREAM.INFO.{stream_name}"
+        )
         return StreamInfo.from_response(**resp)
 
     async def delete_stream(self, stream_name: str) -> bool:
         validate_name(stream_name)
-        resp = await self._api_request(f"{self._prefix}.STREAM.DELETE.{stream_name}")
+        resp = await self._api_request(
+            f"{self._prefix}.STREAM.DELETE.{stream_name}"
+        )
         return bool(resp["success"])
 
     async def purge_stream(
@@ -164,20 +203,32 @@ class JetStream:
             data["keep"] = keep
         payload = self._nc.serializer.dump(data) if data else b""
 
-        resp = await self._api_request(f"{self._prefix}.STREAM.PURGE.{stream_name}", payload)
+        resp = await self._api_request(
+            f"{self._prefix}.STREAM.PURGE.{stream_name}", payload
+        )
         return resp["purged"]
 
-    async def delete_stream_msg(self, stream_name: str, seq: int, no_erase: bool | None = None) -> bool:
+    async def delete_stream_msg(
+        self, stream_name: str, seq: int, no_erase: bool | None = None
+    ) -> bool:
         validate_name(stream_name)
 
         data: MutableMapping[str, int | bool] = dict(seq=seq)
         if no_erase is not None:
             data["no_erase"] = no_erase
 
-        resp = await self._api_request(f"{self._prefix}.STREAM.MSG.DELETE.{stream_name}", self._nc.serializer.dump(data))
+        resp = await self._api_request(
+            f"{self._prefix}.STREAM.MSG.DELETE.{stream_name}",
+            self._nc.serializer.dump(data),
+        )
         return bool(resp["success"])
 
-    async def get_msg(self, stream_name: str, req: GetMsgRequest, timeout: int | float | None = None) -> RawMsg:
+    async def get_msg(
+        self,
+        stream_name: str,
+        req: GetMsgRequest,
+        timeout: int | float | None = None,
+    ) -> RawMsg:
         validate_name(stream_name)
         req.validate()
         if timeout is None:
@@ -193,23 +244,31 @@ class JetStream:
 
         resp = await self._api_request(
             subject=f"{self._prefix}.STREAM.MSG.GET.{stream_name}",
-            data=self._nc.serializer.dump(data), timeout=timeout,
+            data=self._nc.serializer.dump(data),
+            timeout=timeout,
         )
         if "error" in resp:
             raise APIError.from_error(**resp["error"])
 
         msg = cast(Mapping[str, str], resp["message"])
         payload = b64decode(msg["data"]) if "data" in msg else None
-        headers = parse_headers(b64decode(msg["hdrs"])) if "hdrs" in msg else None
+        headers = (
+            parse_headers(b64decode(msg["hdrs"])) if "hdrs" in msg else None
+        )
         return RawMsg(
             subject=msg["subject"],
             seq=int(msg["seq"]),
-            time=msg["time"],
+            time=fromisoformat(msg["time"]),
             payload=payload,
             headers=headers,
         )
 
-    async def get_msg_direct(self, stream_name: str, req: GetMsgRequest, timeout: int | float | None = None) -> RawMsg:
+    async def get_msg_direct(
+        self,
+        stream_name: str,
+        req: GetMsgRequest,
+        timeout: int | float | None = None,
+    ) -> RawMsg:
         validate_name(stream_name)
         req.validate()
         if timeout is None:
@@ -226,7 +285,8 @@ class JetStream:
         try:
             msg = await self._nc.request(
                 subject=f"{self._prefix}.DIRECT.GET.{stream_name}",
-                data=self._nc.serializer.dump(data), timeout=timeout,
+                data=self._nc.serializer.dump(data),
+                timeout=timeout,
             )
         except NoRespondersError:
             raise ServiceUnavailableError()
@@ -238,7 +298,7 @@ class JetStream:
         return RawMsg(
             subject=msg.headers[Header.SUBJECT],
             seq=int(msg.headers[Header.SEQUENCE]),
-            time=msg.headers[Header.TIMESTAMP],
+            time=fromisoformat(msg.headers[Header.TIMESTAMP]),
             payload=msg.payload,
             headers=msg.headers,
         )
@@ -252,10 +312,15 @@ class JetStream:
         if config.durable_name is not None:
             validate_name(config.durable_name)
         if not config.filter_subject and not config.filter_subjects:
-            raise ValueError("One of `filter_subject` and `filter_subjects` must be specified")
+            raise ValueError(
+                "One of `filter_subject` and `filter_subjects` must be specified"
+            )
 
         current_server_version = self._nc.current_server_version
-        is_new = current_server_version.major >= 2 and current_server_version.minor >= 9
+        is_new = (
+            current_server_version.major >= 2
+            and current_server_version.minor >= 9
+        )
         if is_new and config.name:
             if config.filter_subject and config.filter_subject != ">":
                 subj = f"{self._prefix}.CONSUMER.CREATE.{stream_name}.{config.name}.{config.filter_subject}"
@@ -270,16 +335,21 @@ class JetStream:
         resp = await self._api_request(subj, self._nc.serializer.dump(data))
         return ConsumerInfo.from_response(**resp)
 
-    async def get_consumer_list(self, stream_name: str, offset: int = 0) -> ConsumerList:
+    async def get_consumer_list(
+        self, stream_name: str, offset: int = 0
+    ) -> ConsumerList:
         validate_name(stream_name)
 
         resp = await self._api_request(
-            f"{self._prefix}.CONSUMER.LIST.{stream_name}", self._nc.serializer.dump({"offset": offset})
+            f"{self._prefix}.CONSUMER.LIST.{stream_name}",
+            self._nc.serializer.dump({"offset": offset}),
         )
 
         return ConsumerList.from_response(**resp)
 
-    async def get_consumer_names(self, stream_name: str, subject: str | None = None, offset: int = 0) -> list[str]:
+    async def get_consumer_names(
+        self, stream_name: str, subject: str | None = None, offset: int = 0
+    ) -> list[str]:
         validate_name(stream_name)
 
         data: MutableMapping[str, str | int] = dict(offset=offset)
@@ -287,24 +357,33 @@ class JetStream:
             data["subject"] = subject
 
         resp = await self._api_request(
-            f"{self._prefix}.CONSUMER.NAMES.{stream_name}", self._nc.serializer.dump(data)
+            f"{self._prefix}.CONSUMER.NAMES.{stream_name}",
+            self._nc.serializer.dump(data),
         )
 
         return cast(list[str], resp["consumers"])
 
-    async def get_consumer_info(self, stream_name: str, consumer_name: str) -> ConsumerInfo:
+    async def get_consumer_info(
+        self, stream_name: str, consumer_name: str
+    ) -> ConsumerInfo:
         validate_name(stream_name)
         validate_name(consumer_name)
 
-        resp = await self._api_request(f"{self._prefix}.CONSUMER.INFO.{stream_name}.{consumer_name}")
+        resp = await self._api_request(
+            f"{self._prefix}.CONSUMER.INFO.{stream_name}.{consumer_name}"
+        )
 
         return ConsumerInfo.from_response(**resp)
 
-    async def delete_consumer(self, stream_name: str, consumer_name: str) -> bool:
+    async def delete_consumer(
+        self, stream_name: str, consumer_name: str
+    ) -> bool:
         validate_name(stream_name)
         validate_name(consumer_name)
 
-        resp = await self._api_request(f"{self._prefix}.CONSUMER.DELETE.{stream_name}.{consumer_name}")
+        resp = await self._api_request(
+            f"{self._prefix}.CONSUMER.DELETE.{stream_name}.{consumer_name}"
+        )
 
         return cast(bool, resp["success"])
 
@@ -319,18 +398,28 @@ class JetStream:
     ) -> PushSubscription:
         # TODO: possibly check if config values are vastly different if consumer is not created
         if consumer_config.flow_control and not consumer_config.idle_heartbeat:
-            raise ValueError("`idle_heartbeat` property must be set for flow control")
-        elif consumer_config.idle_heartbeat and not consumer_config.flow_control:
+            raise ValueError(
+                "`idle_heartbeat` property must be set for flow control"
+            )
+        elif (
+            consumer_config.idle_heartbeat and not consumer_config.flow_control
+        ):
             consumer_config.flow_control = True
 
         if not consumer_config.name and not consumer_config.durable_name:
-            consumer_info = await self.create_or_update_consumer(stream_name, consumer_config)
+            consumer_info = await self.create_or_update_consumer(
+                stream_name, consumer_config
+            )
         else:
-            name = cast(str, consumer_config.durable_name or consumer_config.name)
+            name = cast(
+                str, consumer_config.durable_name or consumer_config.name
+            )
             try:
                 consumer_info = await self.get_consumer_info(stream_name, name)
             except NotFoundError:
-                consumer_info = await self.create_or_update_consumer(stream_name, consumer_config)
+                consumer_info = await self.create_or_update_consumer(
+                    stream_name, consumer_config
+                )
 
         return await self.push_subscribe_bind(
             stream_name=stream_name,
@@ -375,7 +464,9 @@ class JetStream:
             pending_msgs_limit=pending_msgs_limit,
             pending_bytes_limit=pending_bytes_limit,
         )
-        await self._send_command(Sub(sid=sub.sid, subject=deliver_subject, queue=deliver_group))
+        await self._send_command(
+            Sub(sid=sub.sid, subject=deliver_subject, queue=deliver_group)
+        )
         self._dispatcher.add_subscription(sub)
         await sub.start()
         return sub
@@ -391,7 +482,7 @@ class JetStream:
 
         consumer_config.flow_control = True
         if not consumer_config.idle_heartbeat:
-            consumer_config.idle_heartbeat = to_nanoseconds(5)
+            consumer_config.idle_heartbeat = timedelta(seconds=5)
         consumer_config.ack_policy = AckPolicy.none
         consumer_config.max_deliver = 1
         consumer_config.deliver_group = None
@@ -414,7 +505,9 @@ class JetStream:
             pending_msgs_limit=pending_msgs_limit,
             pending_bytes_limit=pending_bytes_limit,
         )
-        await self._send_command(Sub(sid=sub.sid, subject=consumer_config.deliver_subject))
+        await self._send_command(
+            Sub(sid=sub.sid, subject=consumer_config.deliver_subject)
+        )
         self._dispatcher.add_subscription(sub)
         await sub.start()
         return sub
@@ -428,13 +521,19 @@ class JetStream:
     ) -> PullSubscription:
         # TODO: possibly check if config values are vastly different if consumer is not created
         if not consumer_config.name and not consumer_config.durable_name:
-            consumer_info = await self.create_or_update_consumer(stream_name, consumer_config)
+            consumer_info = await self.create_or_update_consumer(
+                stream_name, consumer_config
+            )
         else:
-            name = cast(str, consumer_config.durable_name or consumer_config.name)
+            name = cast(
+                str, consumer_config.durable_name or consumer_config.name
+            )
             try:
                 consumer_info = await self.get_consumer_info(stream_name, name)
             except NotFoundError:
-                consumer_info = await self.create_or_update_consumer(stream_name, consumer_config)
+                consumer_info = await self.create_or_update_consumer(
+                    stream_name, consumer_config
+                )
 
         return await self.pull_subscribe_bind(
             stream_name=stream_name,
@@ -476,7 +575,10 @@ class JetStream:
         except NotFoundError:
             raise BucketNotFoundError()
 
-        if not stream_info.config.max_msgs_per_subject or stream_info.config.max_msgs_per_subject < 1:
+        if (
+            not stream_info.config.max_msgs_per_subject
+            or stream_info.config.max_msgs_per_subject < 1
+        ):
             raise KeyHistoryTooLargeError()
 
         return KeyValue(
@@ -484,16 +586,19 @@ class JetStream:
             stream_name=stream_name,
             pre=f"{KV_API_PREFIX}{bucket_name}.",
             jetstream=self,
-            raw_msg_getter=self.get_msg if not stream_info.config.allow_direct else self.get_msg_direct,
+            raw_msg_getter=self.get_msg
+            if not stream_info.config.allow_direct
+            else self.get_msg_direct,
         )
 
     async def create_key_value(self, config: KeyValueConfig) -> KeyValue:
         if not VALID_BUCKET_RE.match(config.bucket_name):
             raise InvalidBucketNameError()
 
-        duplicate_window_seconds = 120  # 2 minutes
-        if config.ttl_seconds < duplicate_window_seconds:
-            duplicate_window_seconds = config.ttl_seconds
+        duplicate_window = timedelta(minutes=2)
+        ttl = timedelta(seconds=config.ttl_seconds)
+        if ttl < duplicate_window:
+            duplicate_window = ttl
         if config.history > 64:
             raise KeyHistoryTooLargeError()
 
@@ -507,8 +612,8 @@ class JetStream:
             allow_rollup_hdrs=True,
             deny_delete=True,
             discard=Discard.new,
-            duplicate_window=to_nanoseconds(duplicate_window_seconds),
-            max_age=to_nanoseconds(config.ttl_seconds),
+            duplicate_window=duplicate_window,
+            max_age=ttl,
             max_bytes=config.max_bytes if config.max_bytes else -1,
             max_consumers=-1,
             max_msg_size=config.max_value_size,
@@ -526,7 +631,9 @@ class JetStream:
             stream_name=stream_name,
             pre=f"{KV_API_PREFIX}{config.bucket_name}.",
             jetstream=self,
-            raw_msg_getter=self.get_msg if not config.allow_direct else self.get_msg_direct,
+            raw_msg_getter=self.get_msg
+            if not config.allow_direct
+            else self.get_msg_direct,
         )
 
     async def delete_key_value(self, bucket_name: str) -> bool:
@@ -546,7 +653,10 @@ class JetStream:
         pass
 
     async def _api_request(
-        self, subject: str, data: bytes = b"", timeout: int | float | None = None
+        self,
+        subject: str,
+        data: bytes = b"",
+        timeout: int | float | None = None,
     ) -> Mapping[str, Any]:
         if timeout is None:
             timeout = self._timeout
