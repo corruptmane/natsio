@@ -49,10 +49,10 @@ def parse_headers(data: bytes) -> Mapping[str, str] | None:
         try:
             key, value = line.decode().split(":", 1)
         except UnicodeDecodeError as exc:
-            exc.reason = f"Invalid header encoding in line: {line}. Reason: {exc.reason}"
+            exc.reason = f"Invalid header encoding in line: {line.decode()}. Reason: {exc.reason}"
             raise exc
         except ValueError:
-            raise ValueError(f"Malformed header line: {line}")
+            raise ValueError(f"Malformed header line: {line.decode()}")
         key = key.strip()
         value = value.strip()
         if any(not (33 < ord(char) < 126) for char in key):

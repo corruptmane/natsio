@@ -125,7 +125,8 @@ class KeyValueWatcher:
             and entry.operation
             and entry.operation in (KVOperation.DEL, KVOperation.PURGE)
         ):
-            return
+            return None
+        return entry
 
     async def next_entry(self, timeout: float | int = 5) -> Entry:
         entry: Entry | None = None
@@ -135,9 +136,7 @@ class KeyValueWatcher:
                 while entry is None:
                     msg = await self._sub.next_msg(timeout=timeout)
                     entry = self._return_none_if_filtered(
-                        build_entry_from_js_msg(
-                            msg, self._bucket_name, self._subject_prefix_length
-                        )
+                        build_entry_from_js_msg(msg, self._bucket_name, self._subject_prefix_length)
                     )
         except asyncio.TimeoutError:
             raise MessageRetrievalTimeoutError()
@@ -159,9 +158,7 @@ class KeyValueWatcher:
                 self._is_last_entry = True
 
             entry = self._return_none_if_filtered(
-                build_entry_from_js_msg(
-                    msg, self._bucket_name, self._subject_prefix_length
-                )
+                build_entry_from_js_msg(msg, self._bucket_name, self._subject_prefix_length)
             )
 
         return entry
@@ -209,22 +206,17 @@ class KeyValue:
         if (
             msg.headers
             and Header.KV_OPERATION in msg.headers
-            and msg.headers[Header.KV_OPERATION]
-            in (KVOperation.DEL, KVOperation.PURGE)
+            and msg.headers[Header.KV_OPERATION] in (KVOperation.DEL, KVOperation.PURGE)
         ):
             raise KeyDeletedError(entry)
 
         return entry
 
     async def put(self, key: str, value: bytes) -> int:
-        ack = await self._js.publish(
-            subject=self._build_key_subject(key), data=value
-        )
+        ack = await self._js.publish(subject=self._build_key_subject(key), data=value)
         return ack.seq
 
-    async def update(
-        self, key: str, value: bytes, last: int | None = None
-    ) -> int:
+    async def update(self, key: str, value: bytes, last: int | None = None) -> int:
         if not last:
             last = 0
         headers = {Header.EXPECTED_LAST_SUBJECT_SEQUENCE.value: last}
@@ -251,22 +243,16 @@ class KeyValue:
                 await self.get(key)
                 raise exc
             except KeyDeletedError as exc:
-                revision = await self.update(
-                    key, value, last=exc.entry.revision
-                )
+                revision = await self.update(key, value, last=exc.entry.revision)
 
         return revision
 
     async def delete(self, key: str, last: int | None = None) -> bool:
-        headers: MutableMapping[str, str | int] = {
-            Header.KV_OPERATION.value: KVOperation.DEL.value
-        }
+        headers: MutableMapping[str, str | int] = {Header.KV_OPERATION.value: KVOperation.DEL.value}
         if last is not None and last > 0:
             headers[Header.EXPECTED_LAST_SUBJECT_SEQUENCE.value] = last
 
-        await self._js.publish(
-            subject=self._build_key_subject(key), data=b"", headers=headers
-        )
+        await self._js.publish(subject=self._build_key_subject(key), data=b"", headers=headers)
         return True
 
     async def purge(self, key: str) -> bool:
@@ -275,9 +261,7 @@ class KeyValue:
             Header.ROLLUP.value: Rollup.SUB,
         }
 
-        await self._js.publish(
-            subject=self._build_key_subject(key), data=b"", headers=headers
-        )
+        await self._js.publish(subject=self._build_key_subject(key), data=b"", headers=headers)
         return True
 
     async def watch(
@@ -336,14 +320,9 @@ class KeyValue:
             keep = 0
             subject = f"{self._pre}{entry.key}"
             duration = datetime.now(timezone.utc) - entry.created
-            if (
-                older_than_seconds > 0
-                and older_than_seconds > duration.total_seconds()
-            ):
+            if older_than_seconds > 0 and older_than_seconds > duration.total_seconds():
                 keep = 1
-            await self._js.purge_stream(
-                self._stream_name, filter_subject=subject, keep=keep
-            )
+            await self._js.purge_stream(self._stream_name, filter_subject=subject, keep=keep)
         return True
 
     async def history(self, key: str) -> list[Entry]:
@@ -366,9 +345,7 @@ class KeyValue:
         keys: list[str] = []
         async for entry in watcher:
             if filters:
-                if any(
-                    entry.key in f for f in filters
-                ):  # TODO: rework filters
+                if any(entry.key in f for f in filters):  # TODO: rework filters
                     keys.append(entry.key)
             else:
                 keys.append(entry.key)

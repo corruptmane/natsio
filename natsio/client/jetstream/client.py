@@ -131,9 +131,7 @@ class JetStream:
         resp = await self._api_request(f"{self._prefix}.INFO")
         return AccountInfo.from_response(**resp)
 
-    async def get_stream_list(
-        self, subject: str | None = None, offset: int = 0
-    ) -> StreamList:
+    async def get_stream_list(self, subject: str | None = None, offset: int = 0) -> StreamList:
         data: MutableMapping[str, str | int] = dict(offset=offset)
         if subject is not None:
             data["subject"] = subject
@@ -171,16 +169,12 @@ class JetStream:
 
     async def get_stream_info(self, stream_name: str) -> StreamInfo:
         validate_name(stream_name)
-        resp = await self._api_request(
-            f"{self._prefix}.STREAM.INFO.{stream_name}"
-        )
+        resp = await self._api_request(f"{self._prefix}.STREAM.INFO.{stream_name}")
         return StreamInfo.from_response(**resp)
 
     async def delete_stream(self, stream_name: str) -> bool:
         validate_name(stream_name)
-        resp = await self._api_request(
-            f"{self._prefix}.STREAM.DELETE.{stream_name}"
-        )
+        resp = await self._api_request(f"{self._prefix}.STREAM.DELETE.{stream_name}")
         return bool(resp["success"])
 
     async def purge_stream(
@@ -203,10 +197,8 @@ class JetStream:
             data["keep"] = keep
         payload = self._nc.serializer.dump(data) if data else b""
 
-        resp = await self._api_request(
-            f"{self._prefix}.STREAM.PURGE.{stream_name}", payload
-        )
-        return resp["purged"]
+        resp = await self._api_request(f"{self._prefix}.STREAM.PURGE.{stream_name}", payload)
+        return cast(int, resp["purged"])
 
     async def delete_stream_msg(
         self, stream_name: str, seq: int, no_erase: bool | None = None
@@ -252,9 +244,7 @@ class JetStream:
 
         msg = cast(Mapping[str, str], resp["message"])
         payload = b64decode(msg["data"]) if "data" in msg else None
-        headers = (
-            parse_headers(b64decode(msg["hdrs"])) if "hdrs" in msg else None
-        )
+        headers = parse_headers(b64decode(msg["hdrs"])) if "hdrs" in msg else None
         return RawMsg(
             subject=msg["subject"],
             seq=int(msg["seq"]),
@@ -312,15 +302,10 @@ class JetStream:
         if config.durable_name is not None:
             validate_name(config.durable_name)
         if not config.filter_subject and not config.filter_subjects:
-            raise ValueError(
-                "One of `filter_subject` and `filter_subjects` must be specified"
-            )
+            raise ValueError("One of `filter_subject` and `filter_subjects` must be specified")
 
         current_server_version = self._nc.current_server_version
-        is_new = (
-            current_server_version.major >= 2
-            and current_server_version.minor >= 9
-        )
+        is_new = current_server_version.major >= 2 and current_server_version.minor >= 9
         if is_new and config.name:
             if config.filter_subject and config.filter_subject != ">":
                 subj = f"{self._prefix}.CONSUMER.CREATE.{stream_name}.{config.name}.{config.filter_subject}"
@@ -335,9 +320,7 @@ class JetStream:
         resp = await self._api_request(subj, self._nc.serializer.dump(data))
         return ConsumerInfo.from_response(**resp)
 
-    async def get_consumer_list(
-        self, stream_name: str, offset: int = 0
-    ) -> ConsumerList:
+    async def get_consumer_list(self, stream_name: str, offset: int = 0) -> ConsumerList:
         validate_name(stream_name)
 
         resp = await self._api_request(
@@ -363,9 +346,7 @@ class JetStream:
 
         return cast(list[str], resp["consumers"])
 
-    async def get_consumer_info(
-        self, stream_name: str, consumer_name: str
-    ) -> ConsumerInfo:
+    async def get_consumer_info(self, stream_name: str, consumer_name: str) -> ConsumerInfo:
         validate_name(stream_name)
         validate_name(consumer_name)
 
@@ -375,9 +356,7 @@ class JetStream:
 
         return ConsumerInfo.from_response(**resp)
 
-    async def delete_consumer(
-        self, stream_name: str, consumer_name: str
-    ) -> bool:
+    async def delete_consumer(self, stream_name: str, consumer_name: str) -> bool:
         validate_name(stream_name)
         validate_name(consumer_name)
 
@@ -398,28 +377,18 @@ class JetStream:
     ) -> PushSubscription:
         # TODO: possibly check if config values are vastly different if consumer is not created
         if consumer_config.flow_control and not consumer_config.idle_heartbeat:
-            raise ValueError(
-                "`idle_heartbeat` property must be set for flow control"
-            )
-        elif (
-            consumer_config.idle_heartbeat and not consumer_config.flow_control
-        ):
+            raise ValueError("`idle_heartbeat` property must be set for flow control")
+        elif consumer_config.idle_heartbeat and not consumer_config.flow_control:
             consumer_config.flow_control = True
 
         if not consumer_config.name and not consumer_config.durable_name:
-            consumer_info = await self.create_or_update_consumer(
-                stream_name, consumer_config
-            )
+            consumer_info = await self.create_or_update_consumer(stream_name, consumer_config)
         else:
-            name = cast(
-                str, consumer_config.durable_name or consumer_config.name
-            )
+            name = cast(str, consumer_config.durable_name or consumer_config.name)
             try:
                 consumer_info = await self.get_consumer_info(stream_name, name)
             except NotFoundError:
-                consumer_info = await self.create_or_update_consumer(
-                    stream_name, consumer_config
-                )
+                consumer_info = await self.create_or_update_consumer(stream_name, consumer_config)
 
         return await self.push_subscribe_bind(
             stream_name=stream_name,
@@ -464,9 +433,7 @@ class JetStream:
             pending_msgs_limit=pending_msgs_limit,
             pending_bytes_limit=pending_bytes_limit,
         )
-        await self._send_command(
-            Sub(sid=sub.sid, subject=deliver_subject, queue=deliver_group)
-        )
+        await self._send_command(Sub(sid=sub.sid, subject=deliver_subject, queue=deliver_group))
         self._dispatcher.add_subscription(sub)
         await sub.start()
         return sub
@@ -505,9 +472,7 @@ class JetStream:
             pending_msgs_limit=pending_msgs_limit,
             pending_bytes_limit=pending_bytes_limit,
         )
-        await self._send_command(
-            Sub(sid=sub.sid, subject=consumer_config.deliver_subject)
-        )
+        await self._send_command(Sub(sid=sub.sid, subject=consumer_config.deliver_subject))
         self._dispatcher.add_subscription(sub)
         await sub.start()
         return sub
@@ -521,19 +486,13 @@ class JetStream:
     ) -> PullSubscription:
         # TODO: possibly check if config values are vastly different if consumer is not created
         if not consumer_config.name and not consumer_config.durable_name:
-            consumer_info = await self.create_or_update_consumer(
-                stream_name, consumer_config
-            )
+            consumer_info = await self.create_or_update_consumer(stream_name, consumer_config)
         else:
-            name = cast(
-                str, consumer_config.durable_name or consumer_config.name
-            )
+            name = cast(str, consumer_config.durable_name or consumer_config.name)
             try:
                 consumer_info = await self.get_consumer_info(stream_name, name)
             except NotFoundError:
-                consumer_info = await self.create_or_update_consumer(
-                    stream_name, consumer_config
-                )
+                consumer_info = await self.create_or_update_consumer(stream_name, consumer_config)
 
         return await self.pull_subscribe_bind(
             stream_name=stream_name,
@@ -631,9 +590,7 @@ class JetStream:
             stream_name=stream_name,
             pre=f"{KV_API_PREFIX}{config.bucket_name}.",
             jetstream=self,
-            raw_msg_getter=self.get_msg
-            if not config.allow_direct
-            else self.get_msg_direct,
+            raw_msg_getter=self.get_msg if not config.allow_direct else self.get_msg_direct,
         )
 
     async def delete_key_value(self, bucket_name: str) -> bool:

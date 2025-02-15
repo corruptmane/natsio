@@ -172,9 +172,7 @@ class StreamConfig(Base):
     no_ack: bool | None = False
     template_owner: str | None = None
     discard: Discard | None = Discard.old
-    duplicate_window: Annotated[timedelta | None, TIMEDELTA_NANO] = timedelta(
-        0
-    )
+    duplicate_window: Annotated[timedelta | None, TIMEDELTA_NANO] = timedelta(0)
     placement: Placement | None = None
     mirror: MirrorConfig | None = None
     sources: list[SourceConfig] = field(default_factory=list)
@@ -297,9 +295,7 @@ class UpdateStreamRequest(Base):
     no_ack: bool | None = False
     template_owner: str | None = None
     discard: Discard | None = Discard.old
-    duplicate_window: Annotated[timedelta | None, TIMEDELTA_NANO] = timedelta(
-        0
-    )
+    duplicate_window: Annotated[timedelta | None, TIMEDELTA_NANO] = timedelta(0)
     placement: Placement | None = None
     mirror: Mirror | None = None
     sources: list[Source] = field(default_factory=list)
@@ -328,17 +324,11 @@ class GetMsgRequest(Base):
 
     def validate(self) -> None:
         if self.seq and self.last_by_subj:
-            raise ValueError(
-                "`seq` and `last_by_subj` properties can not be combined"
-            )
+            raise ValueError("`seq` and `last_by_subj` properties can not be combined")
         if self.seq is None and self.last_by_subj is None:
-            raise ValueError(
-                "One of `seq` or `last_by_subj` must be specified"
-            )
+            raise ValueError("One of `seq` or `last_by_subj` must be specified")
         if self.seq is None and self.next_by_subj is not None:
-            raise ValueError(
-                "`seq` must be provided when using `next_by_subj`"
-            )
+            raise ValueError("`seq` must be provided when using `next_by_subj`")
 
 
 @dataclass(kw_only=True)
@@ -381,9 +371,7 @@ class _ConsumerConfig(Base):
     ack_policy: AckPolicy = AckPolicy.explicit
     ack_wait: Annotated[timedelta | None, TIMEDELTA_NANO] = None
     max_deliver: int | None = None
-    backoff: list[Annotated[timedelta, TIMEDELTA_NANO]] = field(
-        default_factory=list
-    )
+    backoff: list[Annotated[timedelta, TIMEDELTA_NANO]] = field(default_factory=list)
     filter_subject: str | None = None
     filter_subjects: list[str] = field(default_factory=list)
     replay_policy: ReplayPolicy = ReplayPolicy.instant
@@ -429,18 +417,12 @@ class ConsumerConfigConverter(
             )
         )
 
-    def to_wire(
-        self, value: PushConsumerConfig | PullConsumerConfig
-    ) -> Mapping[str, Any]:
+    def to_wire(self, value: PushConsumerConfig | PullConsumerConfig) -> Mapping[str, Any]:
         return serialize_dataclass(value)
 
-    def from_wire(
-        self, value: Mapping[str, Any]
-    ) -> PushConsumerConfig | PullConsumerConfig:
-        config_type = (
-            PushConsumerConfig
-            if self.is_push_consumer(value)
-            else PullConsumerConfig
+    def from_wire(self, value: Mapping[str, Any]) -> PushConsumerConfig | PullConsumerConfig:
+        config_type: type[PushConsumerConfig] | type[PullConsumerConfig] = (
+            PushConsumerConfig if self.is_push_consumer(value) else PullConsumerConfig
         )
         return deserialize_dataclass(value, config_type)
 
@@ -456,9 +438,7 @@ class SequenceInfo(Base):
 class ConsumerInfo(Base):
     stream_name: str
     name: str
-    config: Annotated[
-        PushConsumerConfig | PullConsumerConfig, ConsumerConfigConverter()
-    ]
+    config: Annotated[PushConsumerConfig | PullConsumerConfig, ConsumerConfigConverter()]
     created: Annotated[datetime, DATETIME_ISO]
     delivered: SequenceInfo
     ack_floor: SequenceInfo

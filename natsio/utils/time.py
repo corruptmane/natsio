@@ -17,7 +17,7 @@ def from_nanoseconds(time: Time) -> float:
 
 def fromisoformat(time: str) -> datetime:
     dt = datetime.fromisoformat(time)
-    if not dt.utcoffset:
+    if dt.utcoffset is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt
 

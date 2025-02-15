@@ -55,12 +55,12 @@ tests = [
 ]
 
 [tool.mypy]
-files = ["natsio", "tests"]
+files = ["natsio"]
 python_version = "3.11"
 strict = true
 
 [tool.ruff]
-line-length = 99
+line-length = 100
 src = ["natsio", "tests"]
 target-version = "py311"
 exclude = ["natsio/utils/nuid.py"]

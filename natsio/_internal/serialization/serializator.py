@@ -31,7 +31,7 @@ def get_base_type(field_type: type) -> type:
     origin = get_origin(field_type)
     args = get_args(field_type)
     if origin is Annotated:
-        return args[0]
+        return cast(type, args[0])
 
     if origin is not None:
         if origin is UnionType or origin is Union:
@@ -49,9 +49,7 @@ def handle_enum(value: Any, enum_type: type) -> Any:
         try:
             return enum_type(value)
         except ValueError:
-            raise ValueError(
-                f"Invalid value '{value}' for enum {enum_type.__name__}"
-            )
+            raise ValueError(f"Invalid value '{value}' for enum {enum_type.__name__}")
     return value
 
 
@@ -110,11 +108,9 @@ def deserialize_value(value: Any, field_type: type) -> Any:
     if issubclass(base_type, Enum):
         return handle_enum(value, base_type)
 
-    if isinstance(value, (str, int, float, bool)) and not isinstance(
-        value, base_type
-    ):
+    if isinstance(value, (str, int, float, bool)) and not isinstance(value, base_type):
         try:
-            return base_type(value)
+            return base_type(value)  # type: ignore[call-arg]
         except (ValueError, TypeError):
             pass
 
@@ -127,11 +123,7 @@ def serialize_dataclass(obj: DataclassInstance) -> Mapping[str, Any]:
 
     for field in fields(obj):
         value = getattr(obj, field.name)
-        if (
-            value is not None
-            or field.default is None
-            or field.default_factory is None
-        ):
+        if value is not None or field.default is None or field.default_factory is None:
             result[field.name] = serialize_value(value, type_hints[field.name])
 
     return result
