@@ -1,0 +1,284 @@
+"""End-to-end Key-Value tests against a real nats-server with -js."""
+
+import asyncio
+from datetime import timedelta
+
+import pytest
+
+import natsio
+from natsio.jetstream import WrongLastSequenceError
+from natsio.kv import (
+    BucketNotFoundError,
+    KeyDeletedError,
+    KeyExistsError,
+    KeyNotFoundError,
+    KeyValueConfig,
+    KvEntry,
+    Operation,
+)
+from server import NatsServerProcess, require_server_binary
+
+
+@pytest.fixture
+async def server():
+    binary = require_server_binary()
+    process = NatsServerProcess(binary, jetstream=True)
+    await process.start()
+    yield process
+    await process.stop()
+
+
+@pytest.fixture
+async def nc(server: NatsServerProcess):
+    client = await natsio.connect(server.url, connect_timeout=5.0, request_timeout=5.0)
+    yield client
+    await client.close()
+
+
+@pytest.fixture
+async def kv(nc: natsio.Client):
+    js = nc.jetstream()
+    return await js.create_key_value(KeyValueConfig(bucket="TEST", history=5))
+
+
+class TestBucketLifecycle:
+    async def test_create_bind_delete(self, nc: natsio.Client) -> None:
+        js = nc.jetstream()
+        created = await js.create_key_value(KeyValueConfig(bucket="LIFE"))
+        assert created.bucket == "LIFE"
+
+        bound = await js.key_value("LIFE")
+        assert bound.bucket == "LIFE"
+
+        status = await bound.status()
+        assert status.bucket == "LIFE"
+        assert status.values == 0
+        assert status.history == 1
+        assert status.ttl is None  # never expires by default
+
+        await js.delete_key_value("LIFE")
+        with pytest.raises(BucketNotFoundError):
+            await js.key_value("LIFE")
+
+    async def test_no_default_expiry_regression(self, nc: natsio.Client) -> None:
+        """The old codebase defaulted buckets to a 120s TTL — data vanished."""
+        js = nc.jetstream()
+        kv = await js.create_key_value(KeyValueConfig(bucket="NOTTL"))
+        info = kv._stream.cached_info
+        # The server echoes 0 for "never expires"; either form is fine, a
+        # positive default (the old 120s bug) is not.
+        assert not info.config.max_age
+
+
+class TestCrud:
+    async def test_put_get_roundtrip(self, kv) -> None:
+        revision = await kv.put("theme", b"dark")
+        assert revision == 1
+        entry = await kv.get("theme")
+        assert isinstance(entry, KvEntry)
+        assert (entry.key, entry.value, entry.revision) == ("theme", b"dark", 1)
+        assert entry.operation is Operation.PUT
+        assert entry.created is not None
+
+    async def test_get_missing_key(self, kv) -> None:
+        with pytest.raises(KeyNotFoundError):
+            await kv.get("nope")
+
+    async def test_get_by_revision(self, kv) -> None:
+        await kv.put("k", b"one")
+        await kv.put("k", b"two")
+        assert (await kv.get("k", revision=1)).value == b"one"
+        assert (await kv.get("k")).value == b"two"
+
+    async def test_get_revision_of_other_key_rejected(self, kv) -> None:
+        await kv.put("a", b"1")
+        await kv.put("b", b"2")
+        with pytest.raises(KeyNotFoundError):
+            await kv.get("a", revision=2)  # revision 2 belongs to "b"
+
+    async def test_update_compare_and_set(self, kv) -> None:
+        first = await kv.put("cas", b"v1")
+        second = await kv.update("cas", b"v2", last=first)
+        assert second == first + 1
+        with pytest.raises(WrongLastSequenceError):
+            await kv.update("cas", b"v3", last=first)
+
+    async def test_create_semantics(self, kv) -> None:
+        revision = await kv.create("fresh", b"x")
+        assert revision >= 1
+        with pytest.raises(KeyExistsError) as excinfo:
+            await kv.create("fresh", b"y")
+        assert excinfo.value.revision == revision
+
+    async def test_create_after_delete_succeeds(self, kv) -> None:
+        """The classic bug: create() must CAS against the MARKER's revision."""
+        await kv.put("reborn", b"first-life")
+        await kv.delete("reborn")
+        revision = await kv.create("reborn", b"second-life")
+        assert (await kv.get("reborn")).value == b"second-life"
+        assert revision > 2
+
+    async def test_delete_preserves_history(self, kv) -> None:
+        await kv.put("d", b"v1")
+        await kv.put("d", b"v2")
+        await kv.delete("d")
+        with pytest.raises(KeyDeletedError) as excinfo:
+            await kv.get("d")
+        assert excinfo.value.revision == 3
+        # History still holds the values plus the marker.
+        entries = await kv.history("d")
+        assert [e.operation for e in entries] == [Operation.PUT, Operation.PUT, Operation.DELETE]
+        assert entries[0].value == b"v1"
+
+    async def test_delete_with_last_cas(self, kv) -> None:
+        revision = await kv.put("dc", b"v")
+        with pytest.raises(WrongLastSequenceError):
+            await kv.delete("dc", last=revision + 5)
+        await kv.delete("dc", last=revision)
+
+    async def test_purge_removes_history(self, kv) -> None:
+        await kv.put("p", b"v1")
+        await kv.put("p", b"v2")
+        await kv.purge("p")
+        with pytest.raises(KeyDeletedError):
+            await kv.get("p")
+        entries = await kv.history("p")
+        assert len(entries) == 1  # only the purge marker survives
+        assert entries[0].operation is Operation.PURGE
+
+    async def test_history_limit_enforced(self, kv) -> None:
+        for i in range(8):
+            await kv.put("h", b"%d" % i)
+        entries = await kv.history("h")
+        assert len(entries) == 5  # bucket history=5
+        assert entries[-1].value == b"7"
+
+    async def test_string_values_accepted(self, kv) -> None:
+        await kv.put("s", "text-value")
+        assert (await kv.get("s")).value == b"text-value"
+
+
+class TestKeys:
+    async def test_keys_lists_live_keys_only(self, kv) -> None:
+        await kv.put("alive", b"1")
+        await kv.put("dead", b"1")
+        await kv.delete("dead")
+        keys = await kv.keys()
+        assert keys == ["alive"]
+
+    async def test_keys_on_empty_bucket_returns_promptly(self, kv) -> None:
+        """The old codebase deadlocked forever here."""
+        async with asyncio.timeout(5):
+            assert await kv.keys() == []
+
+
+class TestWatch:
+    async def test_initial_state_then_updates(self, kv) -> None:
+        await kv.put("w1", b"a")
+        await kv.put("w2", b"b")
+
+        seen: list[KvEntry | None] = []
+        async with kv.watch() as watcher:
+            iterator = aiter(watcher)
+            async with asyncio.timeout(5):
+                while True:
+                    item = await anext(iterator)
+                    seen.append(item)
+                    if item is None:
+                        break
+            assert {e.key for e in seen if e is not None} == {"w1", "w2"}
+
+            await kv.put("w3", b"c")
+            async with asyncio.timeout(5):
+                live = await anext(iterator)
+            assert live is not None
+            assert (live.key, live.value) == ("w3", b"c")
+
+    async def test_empty_bucket_yields_marker_immediately(self, kv) -> None:
+        async with kv.watch() as watcher:
+            async with asyncio.timeout(5):
+                first = await anext(aiter(watcher))
+            assert first is None
+
+    async def test_updates_only_skips_existing(self, kv) -> None:
+        await kv.put("old", b"x")
+        async with kv.watch(updates_only=True) as watcher:
+            iterator = aiter(watcher)
+            async with asyncio.timeout(5):
+                assert await anext(iterator) is None  # immediately caught up
+            await kv.put("new", b"y")
+            async with asyncio.timeout(5):
+                entry = await anext(iterator)
+            assert entry is not None
+            assert entry.key == "new"
+
+    async def test_watch_single_key_sees_deletes(self, kv) -> None:
+        await kv.put("target", b"v")
+        async with kv.watch("target") as watcher:
+            iterator = aiter(watcher)
+            async with asyncio.timeout(5):
+                first = await anext(iterator)
+            assert first is not None
+            assert first.key == "target"
+            assert await anext(iterator) is None
+
+            await kv.delete("target")
+            async with asyncio.timeout(5):
+                marker = await anext(iterator)
+            assert marker is not None
+            assert marker.operation is Operation.DELETE
+
+
+class TestCodecs:
+    async def test_value_codec_round_trip(self, nc: natsio.Client) -> None:
+        import zlib
+
+        class Zlib:
+            def encode(self, value: bytes) -> bytes:
+                return zlib.compress(value)
+
+            def decode(self, value: bytes) -> bytes:
+                return zlib.decompress(value)
+
+        js = nc.jetstream()
+        await js.create_key_value(KeyValueConfig(bucket="CODEC"))
+        kv = await js.key_value("CODEC", value_codec=Zlib())
+        payload = b"compress me " * 100
+        await kv.put("big", payload)
+        assert (await kv.get("big")).value == payload
+
+        # The stored bytes really are transformed (a codec-less handle sees them).
+        raw = await js.key_value("CODEC")
+        stored = (await raw._get_any("big")).value
+        assert stored != payload
+        assert len(stored) < len(payload)
+
+    async def test_key_codec_round_trip(self, nc: natsio.Client) -> None:
+        class Prefixed:
+            def encode(self, key: str) -> str:
+                return f"enc.{key}"
+
+            def decode(self, key: str) -> str:
+                return key.removeprefix("enc.")
+
+        js = nc.jetstream()
+        await js.create_key_value(KeyValueConfig(bucket="KCODEC"))
+        kv = await js.key_value("KCODEC", key_codec=Prefixed())
+        await kv.put("name", b"v")
+        assert (await kv.get("name")).value == b"v"
+        assert await kv.keys() == ["name"]
+
+        raw = await js.key_value("KCODEC")
+        assert await raw.keys() == ["enc.name"]
+
+
+class TestPerKeyTTL:
+    async def test_purge_marker_with_ttl_self_expires(self, nc: natsio.Client) -> None:
+        """ADR-48: a purge marker carrying a TTL cleans itself up."""
+        js = nc.jetstream()
+        kv = await js.create_key_value(KeyValueConfig(bucket="MARKERS", limit_marker_ttl=timedelta(seconds=30)))
+        await kv.put("gone", b"v")
+        await kv.purge("gone", ttl=1)
+        assert (await kv.status()).values == 1  # the marker
+        await asyncio.sleep(2.0)
+        assert (await kv.status()).values == 0  # marker expired away

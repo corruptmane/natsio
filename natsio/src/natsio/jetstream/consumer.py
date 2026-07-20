@@ -536,6 +536,18 @@ class OrderedConsumer:
     async def __aexit__(self, *exc_info: object) -> None:
         await self.stop()
 
+    async def start(self) -> ConsumerInfo:
+        """Eagerly create the underlying ephemeral consumer.
+
+        Iteration does this lazily; starting explicitly is useful when the
+        caller needs the initial :class:`ConsumerInfo` (e.g. ``num_pending``
+        to detect an initially-empty stream) before blocking on messages.
+        """
+        if self._session is None:
+            await self._start_session(500, 30.0, None)
+        assert self._consumer is not None
+        return self._consumer.cached_info
+
     async def stop(self) -> None:
         """Deterministically stop the session and delete the ephemeral consumer."""
         await self._teardown()

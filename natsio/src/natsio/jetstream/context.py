@@ -14,9 +14,13 @@ if TYPE_CHECKING:
     from natsio.client import Client
 
 from . import headers as js_headers
-from .entities import AccountInfo, PubAck, StreamConfig, StreamInfo
+from .entities import AccountInfo, DiscardPolicy, PubAck, StreamConfig, StreamInfo
 from .errors import APIError, JetStreamNotEnabledError, NoStreamResponseError
 from .stream import Stream
+
+if TYPE_CHECKING:
+    from natsio.kv.bucket import KeyValue
+    from natsio.kv.entities import KeyCodec, KeyValueConfig, ValueCodec
 
 __all__ = ["JetStreamContext"]
 
@@ -162,6 +166,63 @@ class JetStreamContext:
             if offset >= int(data.get("total", 0)) or not infos:
                 return
 
+    # -- key-value -----------------------------------------------------------
+
+    async def create_key_value(
+        self,
+        config: "KeyValueConfig",
+        *,
+        key_codec: "KeyCodec | None" = None,
+        value_codec: "ValueCodec | None" = None,
+    ) -> "KeyValue":
+        """Create (or idempotently assert) a Key-Value bucket."""
+        from natsio.kv.bucket import SUBJECT_PREFIX, KeyValue
+
+        stream_config = _kv_stream_config(config)
+        stream = await self.create_stream(stream_config)
+        del SUBJECT_PREFIX  # (referenced for clarity; config builder owns it)
+        return KeyValue(
+            self,
+            config.bucket,
+            stream,
+            key_codec=key_codec,
+            value_codec=value_codec,
+        )
+
+    async def key_value(
+        self,
+        bucket: str,
+        *,
+        key_codec: "KeyCodec | None" = None,
+        value_codec: "ValueCodec | None" = None,
+    ) -> "KeyValue":
+        """A handle to an existing Key-Value bucket."""
+        from natsio.kv.bucket import STREAM_PREFIX, KeyValue
+        from natsio.kv.entities import validate_bucket_name
+        from natsio.kv.errors import BucketNotFoundError
+
+        validate_bucket_name(bucket)
+        from .errors import StreamNotFoundError
+
+        try:
+            stream = await self.stream(f"{STREAM_PREFIX}{bucket}")
+        except StreamNotFoundError:
+            raise BucketNotFoundError(f"no Key-Value bucket named {bucket!r}") from None
+        return KeyValue(self, bucket, stream, key_codec=key_codec, value_codec=value_codec)
+
+    async def delete_key_value(self, bucket: str) -> None:
+        from natsio.kv.bucket import STREAM_PREFIX
+        from natsio.kv.entities import validate_bucket_name
+        from natsio.kv.errors import BucketNotFoundError
+
+        validate_bucket_name(bucket)
+        from .errors import StreamNotFoundError
+
+        try:
+            await self.delete_stream(f"{STREAM_PREFIX}{bucket}")
+        except StreamNotFoundError:
+            raise BucketNotFoundError(f"no Key-Value bucket named {bucket!r}") from None
+
     # -- publish -------------------------------------------------------------
 
     async def publish(
@@ -238,3 +299,37 @@ def _parse_pub_ack(msg: Msg) -> PubAck:
     if "error" in data:
         raise APIError.from_error(data["error"])
     return PubAck.from_wire(data)
+
+
+def _kv_stream_config(config: "KeyValueConfig") -> StreamConfig:
+    """Map a bucket config onto its ADR-8 backing stream."""
+    from datetime import timedelta
+
+    from natsio.jetstream.entities import StorageCompression
+    from natsio.kv.bucket import STREAM_PREFIX, SUBJECT_PREFIX
+
+    duplicate_window = timedelta(minutes=2)
+    if config.ttl is not None and timedelta(0) < config.ttl < duplicate_window:
+        duplicate_window = config.ttl
+    return StreamConfig(
+        name=f"{STREAM_PREFIX}{config.bucket}",
+        description=config.description,
+        subjects=[f"{SUBJECT_PREFIX}.{config.bucket}.>"],
+        max_msgs_per_subject=config.history,
+        max_bytes=config.max_bytes,
+        max_age=config.ttl if config.ttl and config.ttl > timedelta(0) else None,
+        max_msg_size=config.max_value_size,
+        storage=config.storage,
+        num_replicas=config.replicas,
+        placement=config.placement,
+        republish=config.republish,
+        discard=DiscardPolicy.NEW,
+        duplicate_window=duplicate_window,
+        allow_rollup_hdrs=True,
+        deny_delete=True,
+        allow_direct=True,
+        compression=StorageCompression.S2 if config.compression else None,
+        metadata=config.metadata,
+        allow_msg_ttl=True if config.limit_marker_ttl is not None else None,
+        subject_delete_marker_ttl=config.limit_marker_ttl,
+    )
