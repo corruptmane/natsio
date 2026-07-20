@@ -3,7 +3,7 @@
 import os
 import ssl as ssl_module
 from dataclasses import dataclass, field, replace
-from typing import Any, Self
+from typing import Any, Self, TypedDict
 
 from natsio._internal.auth import (
     Authenticator,
@@ -14,8 +14,9 @@ from natsio._internal.auth import (
 )
 from natsio._internal.auth.authenticators import StrSource
 from natsio.errors import ConfigError
+from natsio.instrumentation import Instrumentation
 
-__all__ = ["ConnectOptions", "TLSConfig"]
+__all__ = ["ConnectKwargs", "ConnectOptions", "TLSConfig"]
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -78,7 +79,7 @@ class ConnectOptions:
     max_control_line: int = 4096
 
     # -- observability --
-    instrumentation: Any = field(default=None, repr=False)  # Instrumentation | None
+    instrumentation: "Instrumentation | None" = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         if not self.servers:
@@ -134,3 +135,44 @@ class ConnectOptions:
         if self.credentials is not None:
             return CredsFileAuth(path=self.credentials)
         return None
+
+
+class ConnectKwargs(TypedDict, total=False):
+    """Keyword arguments accepted by :func:`natsio.connect`.
+
+    A typed mirror of :class:`ConnectOptions` — kept in sync by a unit test —
+    so ``connect(..., ping_interval=30)`` type-checks instead of being ``Any``.
+    """
+
+    servers: tuple[str, ...]
+    name: str | None
+    connect_timeout: float
+    verbose: bool
+    pedantic: bool
+    echo: bool
+    tls: TLSConfig | None
+    user: StrSource | None
+    password: StrSource | None
+    token: StrSource | None
+    nkey_seed: str | None
+    credentials: str | os.PathLike[str] | None
+    authenticator: Authenticator | None
+    allow_reconnect: bool
+    max_reconnect_attempts: int
+    reconnect_time_wait: float
+    reconnect_time_wait_max: float
+    reconnect_jitter: float
+    reconnect_jitter_tls: float
+    no_randomize: bool
+    ignore_discovered_servers: bool
+    ping_interval: float
+    max_outstanding_pings: int
+    max_pending_size: int
+    flush_timeout: float
+    drain_timeout: float
+    request_timeout: float
+    inbox_prefix: str
+    pending_msgs_limit: int
+    pending_bytes_limit: int
+    max_control_line: int
+    instrumentation: Instrumentation | None

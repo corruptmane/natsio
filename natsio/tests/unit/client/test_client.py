@@ -8,6 +8,7 @@ from natsio import Client, ConnectOptions, Msg, PendingLimitPolicy
 from natsio._internal.lifecycle import ConnectionState, Reconnected
 from natsio.errors import (
     ConfigError,
+    MaxPayloadExceededError,
     NoReplySubjectError,
     NoRespondersError,
     SlowConsumerError,
@@ -114,7 +115,7 @@ class TestPublish:
         env.info["max_payload"] = 16
         client = await connected_client(env)
         try:
-            with pytest.raises(ConfigError, match="exceeds"):
+            with pytest.raises(MaxPayloadExceededError, match="exceeds"):
                 await client.publish("foo", b"x" * 17)
         finally:
             await client.close()
@@ -534,17 +535,20 @@ class TestEvents:
 class TestConnectFactory:
     async def test_connect_helper_merges_kwargs(self) -> None:
         env = FakeEnv()
-        options = make_options()
-        client = Client(options.replace(name="svc-a"), _transport_factory=env.factory)
-        await client.connect()
+        client = await natsio.connect(
+            "nats://s1.example:4222",
+            options=make_options(),
+            name="svc-a",
+            ping_interval=45.0,
+            _transport_factory=env.factory,
+        )
         try:
+            assert client.is_connected
             assert client._options.name == "svc-a"
+            assert client._options.ping_interval == 45.0
+            assert client._options.servers == ("nats://s1.example:4222",)
         finally:
             await client.close()
-
-    def test_public_api_surface(self) -> None:
-        for name in ("connect", "Client", "Msg", "Headers", "Subscription", "ConnectOptions"):
-            assert hasattr(natsio, name)
 
 
 def _extract_reply(written: bytes, inbox_prefix: str) -> str:

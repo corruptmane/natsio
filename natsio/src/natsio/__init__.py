@@ -23,7 +23,17 @@ from natsio._internal.lifecycle import (
     Reconnected,
     ServersDiscovered,
 )
-from natsio._internal.protocol import Headers, InlineStatus, StatusCode
+from natsio._internal.protocol import Headers, HeadersInput, InlineStatus, StatusCode
+from natsio.auth import (
+    Authenticator,
+    AuthResult,
+    CallbackAuth,
+    CredsAuth,
+    CredsFileAuth,
+    NKeyAuth,
+    TokenAuth,
+    UserPasswordAuth,
+)
 from natsio.client import Client, ClientStatistics, connect
 from natsio.errors import (
     AuthenticationExpiredError,
@@ -50,27 +60,35 @@ from natsio.errors import (
 )
 from natsio.instrumentation import Instrumentation, NoopInstrumentation
 from natsio.message import Msg
-from natsio.options import ConnectOptions, TLSConfig
-from natsio.subscription import PendingLimitPolicy, Subscription
+from natsio.options import ConnectKwargs, ConnectOptions, TLSConfig
+from natsio.subscription import Callback, PendingLimitPolicy, Subscription
 
 __version__ = _version("natsio")
 
 __all__ = [
+    "AuthResult",
     "AuthenticationExpiredError",
+    "Authenticator",
     "AuthorizationViolationError",
     "BadHeadersError",
+    "Callback",
+    "CallbackAuth",
     "Client",
     "ClientStatistics",
     "Closed",
     "ConfigError",
+    "ConnectKwargs",
     "ConnectOptions",
     "Connected",
     "ConnectionClosedError",
     "ConnectionEvent",
     "ConnectionState",
+    "CredsAuth",
+    "CredsFileAuth",
     "Disconnected",
     "ErrorOccurred",
     "Headers",
+    "HeadersInput",
     "InlineStatus",
     "Instrumentation",
     "LameDuck",
@@ -80,6 +98,7 @@ __all__ = [
     "MissingDependencyError",
     "Msg",
     "NATSError",
+    "NKeyAuth",
     "NoReplySubjectError",
     "NoRespondersError",
     "NoServersAvailableError",
@@ -98,6 +117,8 @@ __all__ = [
     "SubscriptionClosedError",
     "TLSConfig",
     "TimeoutError",
+    "TokenAuth",
+    "UserPasswordAuth",
     "__version__",
     "connect",
 ]

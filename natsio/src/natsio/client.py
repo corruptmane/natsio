@@ -7,7 +7,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import suppress
 from dataclasses import dataclass
 from types import TracebackType
-from typing import Any, Self
+from typing import Any, Self, Unpack
 
 from natsio._internal.connection import Connection, TransportFactory
 from natsio._internal.lifecycle import (
@@ -30,10 +30,15 @@ from natsio._internal.protocol import (
     encode_pub,
 )
 from natsio._internal.validation import validate_queue_group, validate_subject
-from natsio.errors import ConfigError, NATSError, NoRespondersError, SlowConsumerError
+from natsio.errors import (
+    MaxPayloadExceededError,
+    NATSError,
+    NoRespondersError,
+    SlowConsumerError,
+)
 from natsio.errors import TimeoutError as NATSTimeoutError
 from natsio.message import Msg
-from natsio.options import ConnectOptions
+from natsio.options import ConnectKwargs, ConnectOptions
 from natsio.subscription import Callback, PendingLimitPolicy, Subscription
 
 __all__ = ["Client", "ClientStatistics", "connect"]
@@ -101,6 +106,10 @@ class Client:
         self._subscriptions: dict[int, Subscription] = {}
         self._tasks: set[asyncio.Task[Any]] = set()
         self._event_streams: set[asyncio.Queue[ConnectionEvent | None]] = set()
+        # sids currently applying BLOCK backpressure; the transport-wide pause
+        # is held while this is non-empty (a plain bool would let one drained
+        # subscription resume the socket out from under a still-full one).
+        self._pausing_sids: set[int] = set()
         self._unsubscribe_bus: Callable[[], None] | None = None
 
         # Muxed request inbox: one wildcard subscription, replies routed by token.
@@ -137,15 +146,22 @@ class Client:
         self._event_streams.clear()
 
     async def drain(self) -> None:
-        """Unsubscribe everything, let queued messages be handled, then close."""
+        """Unsubscribe everything, let queued messages be handled, then close.
+
+        Bounded by ``drain_timeout``; the client is closed no matter what.
+        """
         subs = list(self._subscriptions.values())
         try:
             async with asyncio.timeout(self._options.drain_timeout):
                 for sub in subs:
-                    await sub.drain()
+                    try:
+                        await sub.drain()
+                    except NATSError as exc:
+                        log.debug("draining %r failed: %s", sub.subject, exc)
         except builtins.TimeoutError:
             log.warning("drain timed out after %ss; closing anyway", self._options.drain_timeout)
-        await self.close()
+        finally:
+            await self.close()
 
     async def __aenter__(self) -> Self:
         if self.status is ConnectionState.DISCONNECTED:
@@ -193,7 +209,7 @@ class Client:
 
     async def events(self) -> AsyncIterator[ConnectionEvent]:
         """Stream connection lifecycle events (connected, disconnected, errors...)."""
-        stream: asyncio.Queue[ConnectionEvent | None] = asyncio.Queue()
+        stream: asyncio.Queue[ConnectionEvent | None] = asyncio.Queue(maxsize=1024)
         self._event_streams.add(stream)
         try:
             while True:
@@ -221,7 +237,7 @@ class Client:
             validate_subject(reply, argument="reply subject")
         limit = self.max_payload
         if len(data) > limit:
-            raise ConfigError(f"payload of {len(data)} bytes exceeds the server maximum of {limit}")
+            raise MaxPayloadExceededError(f"payload of {len(data)} bytes exceeds the server maximum of {limit}")
         frame = (
             encode_pub(subject, reply, data)
             if headers is None
@@ -230,6 +246,7 @@ class Client:
         await self._conn.publish_frame(frame)
         self._stats["out_msgs"] += 1
         self._stats["out_bytes"] += len(data)
+        self._conn.instrumentation.on_message_published(subject, len(data))
 
     async def flush(self, timeout: float | None = None) -> None:  # noqa: ASYNC109
         """Round-trip a PING and wait for the PONG."""
@@ -276,6 +293,7 @@ class Client:
             ),
             policy=policy,
         )
+        entry.on_complete = subscription._complete_local
         self._subscriptions[entry.sid] = subscription
         if cb is not None:
             subscription._start_callback_reader()
@@ -298,12 +316,16 @@ class Client:
         sink = _RequestSink(many=False)
         self._sinks[token] = sink
         try:
+            # Outside the timeout-catch: a publish failure (e.g. the write
+            # buffer's own TimeoutError) must surface as itself, not be
+            # relabeled as "no reply within deadline".
             await self.publish(subject, payload, reply=f"{self._inbox_prefix}.{token}", headers=headers)
-            async with asyncio.timeout(deadline):
-                assert sink.future is not None
-                msg = await sink.future
-        except builtins.TimeoutError:
-            raise NATSTimeoutError(f"no reply to {subject!r} within {deadline}s") from None
+            try:
+                async with asyncio.timeout(deadline):
+                    assert sink.future is not None
+                    msg = await sink.future
+            except builtins.TimeoutError:
+                raise NATSTimeoutError(f"no reply to {subject!r} within {deadline}s") from None
         finally:
             self._sinks.pop(token, None)
         if msg.status is not None and msg.status.code == StatusCode.NO_RESPONDERS:
@@ -326,7 +348,9 @@ class Client:
         ``stall`` seconds between replies, or the overall ``timeout``. A
         no-responders status ends the stream without yielding.
         """
-        deadline = timeout if timeout is not None else self._options.request_timeout
+        overall = timeout if timeout is not None else self._options.request_timeout
+        loop = asyncio.get_running_loop()
+        deadline_at = loop.time() + overall
         self._ensure_mux()
         token = next_nuid()
         sink = _RequestSink(many=True)
@@ -335,23 +359,28 @@ class Client:
         received = 0
         try:
             await self.publish(subject, payload, reply=f"{self._inbox_prefix}.{token}", headers=headers)
-            async with asyncio.timeout(deadline):
-                while True:
-                    try:
-                        async with asyncio.timeout(stall):
-                            msg = await sink.queue.get()
-                    except builtins.TimeoutError:
-                        return  # stall timer expired: treat as complete
-                    if msg is None:
-                        return
-                    if msg.status is not None and msg.status.code == StatusCode.NO_RESPONDERS:
-                        return
-                    yield msg
-                    received += 1
-                    if max_msgs is not None and received >= max_msgs:
-                        return
-        except builtins.TimeoutError:
-            return  # overall deadline: complete with what we produced
+            while True:
+                # The deadline is armed ONLY around the queue wait. Arming it
+                # across the `yield` would tie the timer to the consumer's
+                # task while it is outside this generator, so an expiry would
+                # cancel arbitrary caller code instead of ending the stream.
+                remaining = deadline_at - loop.time()
+                if remaining <= 0:
+                    return
+                window = remaining if stall is None else min(stall, remaining)
+                try:
+                    async with asyncio.timeout(window):
+                        msg = await sink.queue.get()
+                except builtins.TimeoutError:
+                    return  # stall gap or overall deadline: complete with what we have
+                if msg is None:
+                    return
+                if msg.status is not None and msg.status.code == StatusCode.NO_RESPONDERS:
+                    return
+                yield msg
+                received += 1
+                if max_msgs is not None and received >= max_msgs:
+                    return
         finally:
             self._sinks.pop(token, None)
 
@@ -406,16 +435,29 @@ class Client:
         task.add_done_callback(self._tasks.discard)
         return task
 
-    def _pause_reading(self) -> None:
-        self._conn.pause_reading()
+    def _pause_reading(self, sid: int) -> None:
+        if not self._pausing_sids:
+            self._conn.pause_reading()
+        self._pausing_sids.add(sid)
 
-    def _resume_reading(self) -> None:
-        self._conn.resume_reading()
+    def _resume_reading(self, sid: int) -> None:
+        self._pausing_sids.discard(sid)
+        if not self._pausing_sids:
+            self._conn.resume_reading()
 
     def _on_slow_consumer(self, sub: Subscription, dropped: int) -> None:
+        self._conn.instrumentation.on_slow_consumer(sub.subject, sub.sid)
+        # Coalesced: this fires on the read path once per dropped message, and
+        # each report spawns an error-callback task and fans out to every
+        # events() stream — unthrottled, a message flood becomes a task flood.
+        now = asyncio.get_running_loop().time()
+        last = sub._last_drop_report
+        if last is not None and now - last < 1.0:
+            return
+        sub._last_drop_report = now
         self._conn.background_error(
             SlowConsumerError(
-                f"dropped {dropped} message(s) on {sub.subject!r} (pending limits exceeded)",
+                f"dropped {sub.dropped} message(s) so far on {sub.subject!r} (pending limits exceeded)",
                 subject=sub.subject,
                 sid=sub.sid,
                 dropped=sub.dropped,
@@ -432,6 +474,10 @@ class Client:
         match event:
             case Reconnected():
                 self._stats["reconnects"] += 1
+                if self._pausing_sids:
+                    # The new transport starts un-paused; re-assert the
+                    # backpressure still owed by saturated BLOCK subscriptions.
+                    self._conn.pause_reading()
             case ErrorOccurred(error=error):
                 self._stats["errors"] += 1
                 if self._error_cb is not None:
@@ -439,10 +485,22 @@ class Client:
             case Disconnected() | Closed():
                 pass
         for stream in list(self._event_streams):
-            stream.put_nowait(event)
+            self._offer_event(stream, event)
         if isinstance(event, Closed):
             for stream in list(self._event_streams):
-                stream.put_nowait(None)
+                self._offer_event(stream, None)
+
+    @staticmethod
+    def _offer_event(stream: "asyncio.Queue[ConnectionEvent | None]", event: "ConnectionEvent | None") -> None:
+        # Bounded with drop-oldest: a consumer slower than the event rate loses
+        # the oldest events instead of growing the queue without bound.
+        while True:
+            try:
+                stream.put_nowait(event)
+                return
+            except asyncio.QueueFull:
+                with suppress(asyncio.QueueEmpty):  # pragma: no cover - single-threaded
+                    stream.get_nowait()
 
     async def _invoke_error_cb(self, error: Exception) -> None:
         if self._error_cb is None:
@@ -464,9 +522,14 @@ class Client:
         tasks = [t for t in self._tasks if not t.done()]
         for task in tasks:
             task.cancel()
+        if tasks:
+            # asyncio.wait does not swallow OUR cancellation and does not raise
+            # the children's exceptions; retrieve those explicitly below so no
+            # "exception was never retrieved" warnings fire at GC time.
+            await asyncio.wait(tasks)
         for task in tasks:
-            with suppress(asyncio.CancelledError, Exception):
-                await task
+            if not task.cancelled() and task.exception() is not None:
+                log.debug("background task %r failed during close", task.get_name(), exc_info=task.exception())
         self._tasks.clear()
 
 
@@ -474,7 +537,8 @@ async def connect(
     *servers: str,
     error_cb: ErrorCallback | None = None,
     options: ConnectOptions | None = None,
-    **kwargs: Any,
+    _transport_factory: TransportFactory | None = None,
+    **kwargs: Unpack[ConnectKwargs],
 ) -> Client:
     """Connect to NATS and return a ready :class:`Client`.
 
@@ -486,6 +550,6 @@ async def connect(
     if servers:
         kwargs["servers"] = tuple(servers)
     resolved = base.replace(**kwargs) if kwargs else base
-    client = Client(resolved, error_cb=error_cb)
+    client = Client(resolved, error_cb=error_cb, _transport_factory=_transport_factory)
     await client.connect()
     return client

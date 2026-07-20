@@ -29,6 +29,9 @@ class SubscriptionEntry:
     handler: MessageHandler
     max_msgs: int | None = None  # server-side auto-unsub threshold, if armed
     delivered: int = field(default=0, repr=False)
+    # Fired (synchronously, on the read path — must not block) when an armed
+    # auto-unsubscribe retires this entry, so the owner can finish consumers.
+    on_complete: Callable[[], None] | None = field(default=None, repr=False)
 
     @property
     def remaining(self) -> int | None:
@@ -75,9 +78,15 @@ class Dispatcher:
         if entry is None:
             return  # already unsubscribed; late in-flight delivery
         entry.delivered += 1
-        if entry.max_msgs is not None and entry.delivered >= entry.max_msgs:
+        retired = entry.max_msgs is not None and entry.delivered >= entry.max_msgs
+        if retired:
             self.remove(entry.sid)
         try:
             entry.handler(event)
         except Exception:
             log.exception("subscription handler for sid %d (%s) failed", entry.sid, entry.subject)
+        if retired and entry.on_complete is not None:
+            try:
+                entry.on_complete()
+            except Exception:
+                log.exception("auto-unsub completion for sid %d (%s) failed", entry.sid, entry.subject)

@@ -2,10 +2,21 @@
 
 A subscription is fed synchronously from the connection's read path, so
 delivery must never block there. Everything that can block — user callbacks,
-async iteration — happens in the consumer's own task, pulling from a bounded
-queue. When the queue is full the configured :class:`PendingLimitPolicy`
+async iteration — happens in the consumer's own task, pulling from the queue.
+When the pending limits are exceeded the configured :class:`PendingLimitPolicy`
 decides what gives, and every policy is loud: drops are counted and reported
 through the client's error callback.
+
+Termination design: closure is signalled by an :class:`asyncio.Event` latch,
+never by an in-band queue sentinel. A sentinel can be dropped when the queue is
+full, is consumed by only one of several waiters, and blocks the closer when
+nobody is reading — an Event has none of those failure modes. The queue itself
+is unbounded; the configured limits are enforced by explicit counters, which
+lets the BLOCK policy admit the in-flight burst instead of dropping it.
+
+Cancellation is never suppressed here. ``Client.drain()`` bounds the whole
+drain with ``asyncio.timeout``, which works by cancelling this task — eating
+that cancellation would make the deadline unenforceable.
 """
 
 import asyncio
@@ -17,7 +28,7 @@ from types import TracebackType
 from typing import TYPE_CHECKING, Self
 
 from natsio._internal.dispatcher import SubscriptionEntry
-from natsio.errors import SlowConsumerError, SubscriptionClosedError
+from natsio.errors import NATSError, SlowConsumerError, SubscriptionClosedError
 from natsio.errors import TimeoutError as NATSTimeoutError
 from natsio.message import Msg
 
@@ -30,19 +41,22 @@ type Callback = Callable[[Msg], Awaitable[None] | None]
 
 
 class PendingLimitPolicy(Enum):
-    """What to do when a subscription's pending queue is full."""
+    """What to do when a subscription's pending limits are exceeded."""
 
     DROP_NEW = "drop_new"
     """Discard the arriving message (default). Counted and reported."""
 
     DROP_OLD = "drop_old"
-    """Discard the oldest queued message to make room (last-value-wins)."""
+    """Discard the oldest queued messages to make room (last-value-wins)."""
 
     BLOCK = "block"
     """Stop reading from the socket until the consumer catches up.
 
-    Applies connection-wide backpressure — the server will eventually declare
-    this client a slow consumer rather than any message being lost.
+    Nothing is dropped: messages already parsed from the in-flight segment are
+    admitted beyond the limit (memory may briefly exceed it by one read burst),
+    and the socket stays paused until the consumer drains below the limits.
+    Under sustained pressure the *server* eventually declares this client a
+    slow consumer instead of the client silently losing messages.
     """
 
     ERROR = "error"
@@ -60,14 +74,19 @@ class Subscription:
 
     __slots__ = (
         "_callback",
+        "_callback_active",
         "_client",
         "_closed",
+        "_closed_event",
         "_dropped",
         "_entry",
         "_failure",
+        "_idle",
+        "_last_drop_report",
         "_pending_bytes",
         "_pending_bytes_limit",
         "_pending_msgs",
+        "_pending_msgs_limit",
         "_policy",
         "_queue",
         "_reader",
@@ -87,15 +106,22 @@ class Subscription:
         self._client = client
         self._entry = entry
         self._callback = callback
+        self._callback_active = False
         self._policy = policy
+        self._pending_msgs_limit = pending_msgs_limit
         self._pending_bytes_limit = pending_bytes_limit
         self._pending_bytes = 0
         self._pending_msgs = 0
         self._dropped = 0
+        self._last_drop_report: float | None = None
         self._closed = False
         self._failure: Exception | None = None
         self._reading_paused = False
-        self._queue: asyncio.Queue[Msg | None] = asyncio.Queue(maxsize=pending_msgs_limit)
+        # Unbounded on purpose: limits are enforced by the counters above.
+        self._queue: asyncio.Queue[Msg] = asyncio.Queue()
+        self._closed_event = asyncio.Event()
+        self._idle = asyncio.Event()  # set <=> queue empty and no callback in flight
+        self._idle.set()
         self._reader: asyncio.Task[None] | None = None
 
     # -- identity / stats ----------------------------------------------------
@@ -143,47 +169,60 @@ class Subscription:
     # -- delivery (called synchronously from the read path) ------------------
 
     def _deliver(self, msg: Msg) -> None:
-        if self._closed:
+        if self._closed or self._failure is not None:
             return
         size = len(msg.payload)
-        over_bytes = self._pending_bytes_limit > 0 and self._pending_bytes + size > self._pending_bytes_limit
-        if over_bytes or self._queue.full():
-            self._overflow(msg)
+        if self._policy is PendingLimitPolicy.BLOCK:
+            # Admit unconditionally (the burst is already parsed), then pause
+            # the socket so no further bytes arrive until we drain.
+            self._enqueue(msg, size)
+            if self._at_limit():
+                self._pause_reading()
             return
+        if self._would_exceed(size):
+            self._overflow(msg, size)
+            return
+        self._enqueue(msg, size)
+
+    def _enqueue(self, msg: Msg, size: int) -> None:
         self._queue.put_nowait(msg)
         self._pending_bytes += size
         self._pending_msgs += 1
-        if self._policy is PendingLimitPolicy.BLOCK and self._at_high_water():
-            self._pause_reading()
+        self._idle.clear()
 
-    def _overflow(self, msg: Msg) -> None:
+    def _would_exceed(self, size: int) -> bool:
+        if self._pending_msgs_limit > 0 and self._pending_msgs >= self._pending_msgs_limit:
+            return True
+        return self._pending_bytes_limit > 0 and self._pending_bytes + size > self._pending_bytes_limit
+
+    def _at_limit(self) -> bool:
+        if self._pending_msgs_limit > 0 and self._pending_msgs >= self._pending_msgs_limit:
+            return True
+        return self._pending_bytes_limit > 0 and self._pending_bytes >= self._pending_bytes_limit
+
+    def _overflow(self, msg: Msg, size: int) -> None:
         match self._policy:
             case PendingLimitPolicy.DROP_NEW:
                 self._record_drop(1)
             case PendingLimitPolicy.DROP_OLD:
+                if self._pending_bytes_limit > 0 and size > self._pending_bytes_limit:
+                    # The arriving message alone exceeds the byte budget:
+                    # admitting it would leave the subscription permanently
+                    # over limit. Drop it, keep what is queued.
+                    self._record_drop(1)
+                    return
                 evicted = 0
-                while True:
+                while self._would_exceed(size):
                     try:
                         old = self._queue.get_nowait()
                     except asyncio.QueueEmpty:
                         break
                     self._queue.task_done()
-                    if old is not None:
-                        self._pending_bytes -= len(old.payload)
-                        self._pending_msgs -= 1
+                    self._pending_bytes -= len(old.payload)
+                    self._pending_msgs -= 1
                     evicted += 1
-                    if not self._queue.full() and not self._over_byte_limit(len(msg.payload)):
-                        break
                 self._record_drop(evicted)
-                if not self._queue.full():
-                    self._queue.put_nowait(msg)
-                    self._pending_bytes += len(msg.payload)
-                    self._pending_msgs += 1
-            case PendingLimitPolicy.BLOCK:
-                # The queue is full and reading is paused; the connection stops
-                # draining the socket rather than dropping anything.
-                self._pause_reading()
-                self._record_drop(1)
+                self._enqueue(msg, size)
             case PendingLimitPolicy.ERROR:
                 self._record_drop(1)
                 self._fail(
@@ -194,14 +233,8 @@ class Subscription:
                         dropped=self._dropped,
                     )
                 )
-
-    def _over_byte_limit(self, size: int) -> bool:
-        return self._pending_bytes_limit > 0 and self._pending_bytes + size > self._pending_bytes_limit
-
-    def _at_high_water(self) -> bool:
-        if self._queue.maxsize and self._pending_msgs >= self._queue.maxsize:
-            return True
-        return self._over_byte_limit(0)
+            case PendingLimitPolicy.BLOCK:  # pragma: no cover - BLOCK never routes here
+                self._enqueue(msg, size)
 
     def _record_drop(self, count: int) -> None:
         if count <= 0:
@@ -212,21 +245,24 @@ class Subscription:
     def _fail(self, error: Exception) -> None:
         if self._failure is None:
             self._failure = error
-        self._wake_consumers()
+        self._closed_event.set()
 
-    def _wake_consumers(self) -> None:
-        with suppress(asyncio.QueueFull):
-            self._queue.put_nowait(None)  # sentinel: stop iteration / reader
+    # -- backpressure --------------------------------------------------------
 
     def _pause_reading(self) -> None:
         if not self._reading_paused:
             self._reading_paused = True
-            self._client._pause_reading()
+            self._client._pause_reading(self.sid)
 
     def _resume_reading_if_drained(self) -> None:
-        if self._reading_paused and not self._at_high_water():
+        if self._reading_paused and not self._at_limit():
             self._reading_paused = False
-            self._client._resume_reading()
+            self._client._resume_reading(self.sid)
+
+    def _release_pause(self) -> None:
+        if self._reading_paused:
+            self._reading_paused = False
+            self._client._resume_reading(self.sid)
 
     # -- consumption ---------------------------------------------------------
 
@@ -239,6 +275,7 @@ class Subscription:
             msg = await self._next_or_none()
             if msg is None:
                 return
+            self._callback_active = True
             try:
                 result = self._callback(msg)
                 if result is not None:
@@ -247,16 +284,46 @@ class Subscription:
                 raise
             except Exception as exc:
                 self._client._on_callback_error(self, exc)
+            finally:
+                self._callback_active = False
+                self._maybe_idle()
 
     async def _next_or_none(self) -> Msg | None:
-        msg = await self._queue.get()
-        self._queue.task_done()
-        if msg is None:
-            return None
-        self._pending_bytes -= len(msg.payload)
-        self._pending_msgs -= 1
-        self._resume_reading_if_drained()
-        return msg
+        """Next queued message, or None once the subscription is finished.
+
+        Queued messages are always served first — closure only ends the stream
+        after the backlog (e.g. the tail of an auto-unsubscribe) is consumed.
+        Waiting is a race between the queue and the closed latch, so any number
+        of concurrent consumers all wake on closure and none can be stranded.
+        """
+        while True:
+            try:
+                msg = self._queue.get_nowait()
+            except asyncio.QueueEmpty:
+                if self._closed or self._failure is not None:
+                    return None
+                getter = asyncio.ensure_future(self._queue.get())
+                closer = asyncio.ensure_future(self._closed_event.wait())
+                try:
+                    done, _ = await asyncio.wait((getter, closer), return_when=asyncio.FIRST_COMPLETED)
+                finally:
+                    getter.cancel()
+                    closer.cancel()
+                if getter in done and not getter.cancelled():
+                    msg = getter.result()
+                else:
+                    continue  # woken by closure; re-check the queue for a backlog
+            self._queue.task_done()
+            self._pending_bytes -= len(msg.payload)
+            self._pending_msgs -= 1
+            if not self._callback_active:
+                self._maybe_idle()
+            self._resume_reading_if_drained()
+            return msg
+
+    def _maybe_idle(self) -> None:
+        if self._pending_msgs == 0 and not self._callback_active:
+            self._idle.set()
 
     def __aiter__(self) -> AsyncIterator[Msg]:
         if self._callback is not None:
@@ -267,8 +334,6 @@ class Subscription:
         while True:
             if self._failure is not None:
                 raise self._failure
-            if self._closed and self._queue.empty():
-                return
             msg = await self._next_or_none()
             if msg is None:
                 if self._failure is not None:
@@ -280,8 +345,6 @@ class Subscription:
         """Await the next message. Raises :class:`~natsio.errors.TimeoutError` on expiry."""
         if self._failure is not None:
             raise self._failure
-        if self._closed and self._queue.empty():
-            raise SubscriptionClosedError(f"subscription on {self.subject!r} is closed")
         try:
             async with asyncio.timeout(timeout):
                 msg = await self._next_or_none()
@@ -301,13 +364,17 @@ class Subscription:
             return
         self._closed = True
         self._client._remove_subscription(self, max_msgs=None)
-        await self._shutdown()
+        self._discard_backlog()
+        self._closed_event.set()
+        await self._finalize(cancel_reader=True)
 
     async def unsubscribe_after(self, max_msgs: int) -> None:
         """Ask the server to stop delivery after ``max_msgs`` total messages.
 
-        The count is total deliveries since the subscription was created, which
-        is what the server's ``UNSUB <sid> <max>`` contract means.
+        The count is total deliveries since the subscription was created (the
+        server's ``UNSUB <sid> <max>`` contract). When the limit is reached the
+        subscription closes itself: iterators finish, ``next_msg`` raises
+        :class:`~natsio.errors.SubscriptionClosedError`.
         """
         if self._closed:
             return
@@ -317,39 +384,57 @@ class Subscription:
         self._client._remove_subscription(self, max_msgs=max_msgs)
 
     async def drain(self) -> None:
-        """Stop new delivery, let queued messages be handled, then close."""
+        """Stop new delivery, wait for the backlog to be handled, then close.
+
+        Unbounded by itself — bound it with :meth:`Client.drain`'s
+        ``drain_timeout`` or your own ``asyncio.timeout``; cancellation is
+        honored, never swallowed.
+        """
         if self._closed:
             return
         self._client._remove_subscription(self, max_msgs=None)
+        # Suppressed: when not connected there is nothing in flight to wait for.
+        with suppress(NATSError):
+            await self._client.flush()  # make sure the UNSUB reached the server
+        await self._idle.wait()
         self._closed = True
-        await self._client.flush()  # make sure the UNSUB reached the server
-        reader = self._reader
-        if reader is not None:
-            # Queue the stop sentinel BEHIND the messages already queued, then
-            # wait for the reader to work through them and exit on its own.
-            # Cancelling here instead would abandon the in-flight callback.
-            self._reader = None
-            await self._queue.put(None)
-            with suppress(asyncio.CancelledError, Exception):
-                await reader
-        await self._shutdown()
+        self._closed_event.set()
+        await self._finalize(cancel_reader=False)
 
-    async def _shutdown(self) -> None:
-        self._wake_consumers()
-        if self._reading_paused:
-            self._reading_paused = False
-            self._client._resume_reading()
+    async def _finalize(self, *, cancel_reader: bool) -> None:
+        self._release_pause()
         reader = self._reader
         self._reader = None
         if reader is not None and not reader.done():
-            reader.cancel()
-            with suppress(asyncio.CancelledError, Exception):
-                await reader
+            if cancel_reader:
+                reader.cancel()
+            # asyncio.wait neither raises the reader's exception nor swallows
+            # OUR cancellation — a drain deadline still cuts this short.
+            await asyncio.wait((reader,))
+
+    def _discard_backlog(self) -> None:
+        while True:
+            try:
+                msg = self._queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            self._queue.task_done()
+            self._pending_bytes -= len(msg.payload)
+            self._pending_msgs -= 1
+        self._maybe_idle()
 
     def _close_local(self) -> None:
-        """Mark closed without talking to the server (auto-unsub completed, client closing)."""
+        """Mark closed without talking to the server (client shutting down)."""
         self._closed = True
-        self._wake_consumers()
+        self._closed_event.set()
+        self._release_pause()
+
+    def _complete_local(self) -> None:
+        """Auto-unsubscribe retired server-side: finish after the backlog drains."""
+        self._closed = True
+        self._closed_event.set()
+        self._release_pause()
+        self._client._subscriptions.pop(self.sid, None)
 
     async def __aenter__(self) -> Self:
         return self
