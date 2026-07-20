@@ -35,6 +35,46 @@ Ground-up rewrite. The previous implementation is retired to the `legacy` branch
   `StrEnum`, `None` omitted (never `null`), and unknown server fields captured
   and round-tripped so newer-server configs are never destroyed.
 
+### Key-Value (ADR-8)
+
+- `natsio.kv`: buckets over `KV_<bucket>` streams — `get`/`put`/`create`/
+  `update` (CAS)/`delete`/`purge`, `history`, `keys`/`iter_keys` (streaming),
+  and self-healing `watch()` with a single `None` initial-state marker and
+  snapshot dedup (an ordered-consumer heal mid-snapshot can never duplicate
+  keys or resurrect stale values).
+- No default TTL: buckets never expire data unless asked (the legacy client
+  defaulted to 120s and silently lost data). Client-side floor at the
+  server's 100ms `max_age` minimum.
+- Direct Get reads (ADR-31), ADR-48 limit markers (read as purge-class, like
+  other clients), per-key TTL purge markers (`purge(key, ttl=...)` with
+  `allow_msg_ttl`), `limit_marker_ttl`.
+- `create()` resolves marker churn by CAS-ing against the marker's revision —
+  correct for brand-new, deleted, and concurrently-recreated keys.
+- `KeyCodec`/`ValueCodec` protocol seam (identity by default) so codec packs
+  (ADR-54 path notation, encryption) plug in without breaking changes;
+  wildcard watches refuse a key codec loudly instead of matching nothing.
+- Typed errors: `BucketNotFoundError`, `BucketExistsError`,
+  `KeyNotFoundError` / `KeyDeletedError(revision)`, `KeyExistsError(revision)`.
+
+### Object Store (ADR-20)
+
+- `natsio.objectstore`: chunked blobs over `OBJ_<bucket>` streams — `put`
+  (bytes or async iterables, re-chunked to 128KiB by default, streaming
+  SHA-256), `get` (async iterator with link resolution and mandatory
+  digest+size verification — a completed read is a verified read),
+  `get_bytes`, `info`, `delete`, `list`/`watch`, object and bucket links,
+  `seal`, `status`.
+- Every metadata write is CAS-gated on the meta subject (probe-confirmed
+  necessity): a put that loses a concurrent same-name race purges its own
+  chunks instead of leaking them forever, and a delete racing a put can never
+  report success while leaving data live.
+- Failed puts purge their published chunks (cancellation-safe, best-effort);
+  replacing an object purges the replaced revision's chunks; reads of
+  truncated objects fail with a bounded timeout instead of hanging.
+- Wire-compatible with nats.go/nats.py (padded-base64url names and digests,
+  rollup metas, `mtime` emission, object-level `headers`, delete-marker
+  shape) — verified bidirectionally against hand-crafted foreign metas.
+
 ### Extensions
 
 - Extension distributions now import as `natsio.<name>` (pkgutil-style shared

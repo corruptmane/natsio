@@ -94,10 +94,10 @@ class KeyValueConfig:
         validate_bucket_name(self.bucket)
         if not 1 <= self.history <= 64:
             raise InvalidBucketNameError("history must be between 1 and 64")
-        if self.ttl is not None and timedelta(0) < self.ttl < timedelta(milliseconds=100):
+        if self.ttl is not None and self.ttl != timedelta(0) and self.ttl < timedelta(milliseconds=100):
             from natsio.errors import ConfigError
 
-            raise ConfigError("ttl must be at least 100ms (server-enforced max_age floor)")
+            raise ConfigError("ttl must be at least 100ms (server-enforced max_age floor) or 0/None for never")
 
 
 @dataclass(frozen=True, slots=True)

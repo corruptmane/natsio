@@ -21,6 +21,8 @@ from .stream import Stream
 if TYPE_CHECKING:
     from natsio.kv.bucket import KeyValue
     from natsio.kv.entities import KeyCodec, KeyValueConfig, ValueCodec
+    from natsio.objectstore.entities import ObjectStoreConfig
+    from natsio.objectstore.store import ObjectStore
 
 __all__ = ["JetStreamContext"]
 
@@ -232,6 +234,55 @@ class JetStreamContext:
         except StreamNotFoundError:
             raise BucketNotFoundError(f"no Key-Value bucket named {bucket!r}") from None
 
+    # -- object store --------------------------------------------------------
+
+    async def create_object_store(self, config: "ObjectStoreConfig") -> "ObjectStore":
+        """Create an Object Store bucket.
+
+        Re-creating with an identical configuration is idempotent; an existing
+        bucket with a DIFFERENT configuration raises
+        :class:`~natsio.objectstore.BucketExistsError`.
+        """
+        from natsio.objectstore.errors import BucketExistsError
+        from natsio.objectstore.store import ObjectStore
+
+        from .errors import StreamNameInUseError
+
+        try:
+            stream = await self.create_stream(_obj_stream_config(config))
+        except StreamNameInUseError:
+            raise BucketExistsError(f"bucket {config.bucket!r} already exists with a different configuration") from None
+        return ObjectStore(self, config.bucket, stream)
+
+    async def object_store(self, bucket: str) -> "ObjectStore":
+        """A handle to an existing Object Store bucket."""
+        from natsio.objectstore.entities import validate_bucket_name
+        from natsio.objectstore.errors import BucketNotFoundError
+        from natsio.objectstore.store import STREAM_PREFIX as OBJ_STREAM_PREFIX
+        from natsio.objectstore.store import ObjectStore
+
+        validate_bucket_name(bucket)
+        from .errors import StreamNotFoundError
+
+        try:
+            stream = await self.stream(f"{OBJ_STREAM_PREFIX}{bucket}")
+        except StreamNotFoundError:
+            raise BucketNotFoundError(f"no Object Store bucket named {bucket!r}") from None
+        return ObjectStore(self, bucket, stream)
+
+    async def delete_object_store(self, bucket: str) -> None:
+        from natsio.objectstore.entities import validate_bucket_name
+        from natsio.objectstore.errors import BucketNotFoundError
+        from natsio.objectstore.store import STREAM_PREFIX as OBJ_STREAM_PREFIX
+
+        validate_bucket_name(bucket)
+        from .errors import StreamNotFoundError
+
+        try:
+            await self.delete_stream(f"{OBJ_STREAM_PREFIX}{bucket}")
+        except StreamNotFoundError:
+            raise BucketNotFoundError(f"no Object Store bucket named {bucket!r}") from None
+
     # -- publish -------------------------------------------------------------
 
     async def publish(
@@ -341,4 +392,35 @@ def _kv_stream_config(config: "KeyValueConfig") -> StreamConfig:
         metadata=config.metadata,
         allow_msg_ttl=True if (config.allow_msg_ttl or config.limit_marker_ttl is not None) else None,
         subject_delete_marker_ttl=config.limit_marker_ttl,
+    )
+
+
+def _obj_stream_config(config: "ObjectStoreConfig") -> StreamConfig:
+    """Map a bucket config onto its ADR-20 backing stream."""
+    from datetime import timedelta
+
+    from natsio.jetstream.entities import StorageCompression
+    from natsio.objectstore.store import STREAM_PREFIX, SUBJECT_PREFIX
+
+    duplicate_window = timedelta(minutes=2)
+    if config.ttl is not None and timedelta(0) < config.ttl < duplicate_window:
+        duplicate_window = config.ttl
+    return StreamConfig(
+        name=f"{STREAM_PREFIX}{config.bucket}",
+        description=config.description,
+        subjects=[
+            f"{SUBJECT_PREFIX}.{config.bucket}.C.>",
+            f"{SUBJECT_PREFIX}.{config.bucket}.M.>",
+        ],
+        max_bytes=config.max_bytes,
+        max_age=config.ttl if config.ttl and config.ttl > timedelta(0) else None,
+        storage=config.storage,
+        num_replicas=config.replicas,
+        placement=config.placement,
+        discard=DiscardPolicy.NEW,
+        duplicate_window=duplicate_window,
+        allow_rollup_hdrs=True,
+        allow_direct=True,
+        compression=StorageCompression.S2 if config.compression else None,
+        metadata=config.metadata,
     )
