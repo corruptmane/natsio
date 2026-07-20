@@ -7,7 +7,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import suppress
 from dataclasses import dataclass
 from types import TracebackType
-from typing import Any, Self, Unpack
+from typing import TYPE_CHECKING, Any, Self, Unpack
 
 from natsio._internal.connection import Connection, TransportFactory
 from natsio._internal.lifecycle import (
@@ -40,6 +40,9 @@ from natsio.errors import TimeoutError as NATSTimeoutError
 from natsio.message import Msg
 from natsio.options import ConnectKwargs, ConnectOptions
 from natsio.subscription import Callback, PendingLimitPolicy, Subscription
+
+if TYPE_CHECKING:
+    from natsio.jetstream import JetStreamContext
 
 __all__ = ["Client", "ClientStatistics", "connect"]
 
@@ -206,6 +209,22 @@ class Client:
     @property
     def inbox_prefix(self) -> str:
         return self._inbox_prefix
+
+    def jetstream(
+        self,
+        *,
+        domain: str | None = None,
+        api_prefix: str | None = None,
+        timeout: float = 5.0,
+    ) -> "JetStreamContext":
+        """A JetStream context over this connection.
+
+        ``domain`` routes the control plane through ``$JS.<domain>.API`` (leaf
+        nodes); ``api_prefix`` overrides the prefix entirely (exports).
+        """
+        from natsio.jetstream import JetStreamContext
+
+        return JetStreamContext(self, domain=domain, api_prefix=api_prefix, timeout=timeout)
 
     async def events(self) -> AsyncIterator[ConnectionEvent]:
         """Stream connection lifecycle events (connected, disconnected, errors...)."""

@@ -7,6 +7,42 @@ Extension packages under `extensions/` keep their own changelogs.
 
 Ground-up rewrite. The previous implementation is retired to the `legacy` branch.
 
+### JetStream (ADR-37 simplified API)
+
+- `nc.jetstream()` → `JetStreamContext` with domain/api-prefix routing; typed
+  `$JS.API` plumbing mapping `{code, err_code, description}` errors onto an
+  extensible `err_code`-keyed exception registry.
+- Stream CRUD, purge, paged listings; stored-message reads over Direct Get
+  (when the stream allows it) or `STREAM.MSG.GET`; message delete.
+- JetStream publish with PubAck, `Nats-Msg-Id` dedup, `Nats-Expected-*`
+  expectations, per-message TTL (ADR-43), and brief 503 retry per ADR-22
+  before `NoStreamResponseError`.
+- Pull consumers only: `fetch()` (bounded single pull with precise
+  404/408/409/423 status classification), `next()`, and `consume()` — a
+  continuous session with token-correlated overlapping pulls, threshold
+  refills, ADR-9 idle-heartbeat stall recovery, and reconnect re-pull.
+- Ordered consumer (ADR-17): ephemeral, `ack_policy=none`, judged on consumer
+  sequence contiguity; self-heals from gaps, stalls, and consumer deletion by
+  recreating at the next unseen stream sequence
+  (`deliver_policy=by_start_sequence` always paired with `opt_start_seq`).
+- Full ack surface: `ack`, `ack_sync` (double-ack, un-marks on failure so it
+  can be retried), `nak(delay=...)`, `term(reason)`, `in_progress`; v1/v2
+  ack-reply metadata parsing.
+- Consumer pause/resume (2.11+), API-level introspection
+  (`js.api_level()` — 3 on 2.14).
+- Entities are slotted dataclasses over a zero-dependency Annotated-converter
+  JSON model: `timedelta` ↔ nanoseconds, aware `datetime` ↔ RFC 3339, enums as
+  `StrEnum`, `None` omitted (never `null`), and unknown server fields captured
+  and round-tripped so newer-server configs are never destroyed.
+
+### Extensions
+
+- Extension distributions now import as `natsio.<name>` (pkgutil-style shared
+  namespace; wheels ship only their subpackage). First extension:
+  `natsio-testing` — the real-server process manager (start/stop, configs,
+  free ports, readiness probing, JetStream store dirs, SIGKILL fault
+  injection) used by natsio's own integration suite.
+
 ### Project
 
 - uv workspace: `natsio/` (core client), `extensions/natsio-*` (orbit-style

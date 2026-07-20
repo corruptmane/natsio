@@ -39,11 +39,15 @@ class NatsServerProcess:
         port: int | None = None,
         config: str | None = None,
         jetstream: bool = False,
+        store_dir: str | os.PathLike[str] | None = None,
     ) -> None:
         self.binary = binary
         self.port = port if port is not None else free_port()
         self.config = config
         self.jetstream = jetstream
+        # An explicit store_dir survives this instance — restart a "new" server
+        # on the same directory to simulate a server bounce that keeps its data.
+        self.store_dir = Path(store_dir) if store_dir is not None else None
         self.process: asyncio.subprocess.Process | None = None
         self._tmpdir: tempfile.TemporaryDirectory[str] | None = None
 
@@ -59,7 +63,7 @@ class NatsServerProcess:
     async def start(self, *, ready_timeout: float = 10.0) -> Self:
         args = [self.binary, "-a", "127.0.0.1", "-p", str(self.port)]
         if self.jetstream:
-            store = self._workdir() / "jetstream"
+            store = self.store_dir if self.store_dir is not None else self._workdir() / "jetstream"
             args += ["-js", "-sd", str(store)]
         if self.config is not None:
             config_path = self._workdir() / "server.conf"
