@@ -10,6 +10,11 @@ natsio = { workspace = true }
 [dependency-groups]
 dev = [
     "natsio",
+    # Ed25519 backends: both are exercised, and the official `nkeys` package is
+    # used to differential-test our own NKey codec against the reference.
+    "pynacl>=1.6.2",
+    "cryptography>=49",
+    "nkeys>=0.2.1",
     "pytest>=8.3",
     "pytest-asyncio>=1.0",
     "hypothesis>=6.100",

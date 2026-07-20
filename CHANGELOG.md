@@ -55,7 +55,11 @@ Ground-up rewrite. The previous implementation is retired to the `legacy` branch
   pinger run under a `TaskGroup` that collapses on connection loss.
 - Auth: pluggable `Authenticator` re-invoked on every (re)connect —
   user/password, token, NKey, `.creds` (re-read for rotation), and callback.
-  Ed25519 nonce signing uses a vendored pure-Python RFC 8032 implementation, so
-  NKey/JWT auth works with zero dependencies.
+  Ed25519 is delegated to an external backend (`natsio[nkeys]` → PyNaCl, or
+  `natsio[cryptography]`); natsio ships no cryptography of its own. Configuring
+  NKey/JWT auth without a backend fails at construction with an actionable
+  error rather than mid-handshake. The NKey codec (base32 + CRC-16 + role
+  prefixes) is ours and is differential-tested against the reference `nkeys`
+  package across every role.
 - Zero-dependency instrumentation seam (`Instrumentation` protocol, no-op by
   default) for metrics/tracing exporters shipped outside the core.

@@ -4,13 +4,6 @@ import asyncio
 import ssl
 
 import pytest
-from server import (
-    NatsServerProcess,
-    free_port,
-    generate_self_signed_cert,
-    openssl_available,
-    require_server_binary,
-)
 
 from natsio._internal.auth import NKeyAuth, nkeys
 from natsio._internal.connection import Connection
@@ -18,6 +11,13 @@ from natsio._internal.lifecycle import ConnectionState, Reconnected
 from natsio._internal.protocol import HMsgEvent, MsgEvent, encode_pub
 from natsio.errors import AuthorizationViolationError, NoServersAvailableError
 from natsio.options import ConnectOptions, TLSConfig
+from server import (
+    NatsServerProcess,
+    free_port,
+    generate_self_signed_cert,
+    openssl_available,
+    require_server_binary,
+)
 
 
 def options_for(server: NatsServerProcess, **overrides) -> ConnectOptions:
@@ -113,7 +113,7 @@ class TestAuth:
             await process.stop()
 
     async def test_nkey_auth_end_to_end(self) -> None:
-        """The server verifies our vendored-ed25519 nonce signature."""
+        """The server verifies a nonce signature produced through our signer seam."""
         binary = require_server_binary()
         seed = nkeys.encode_seed(nkeys.Role.USER, bytes(range(32)))
         public = nkeys.from_seed(seed).public_key

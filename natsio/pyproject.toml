@@ -33,6 +33,12 @@ classifiers = [
 ]
 dependencies = []
 
+[project.optional-dependencies]
+# NKey/JWT auth needs Ed25519; natsio ships no cryptography of its own.
+# The extra is named `nkeys` to match nats-py and nats-core muscle memory.
+nkeys = ["pynacl>=1.5.0"]
+cryptography = ["cryptography>=41.0.0"]
+
 [project.urls]
 Homepage = "https://github.com/corruptmane/natsio"
 Repository = "https://github.com/corruptmane/natsio"

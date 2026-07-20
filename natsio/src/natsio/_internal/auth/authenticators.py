@@ -16,7 +16,7 @@ from typing import Protocol
 
 from natsio.errors import ConfigError
 
-from . import nkeys
+from . import nkeys, signer
 from .creds import parse_creds
 
 __all__ = [
@@ -83,6 +83,9 @@ class TokenAuth:
 class NKeyAuth:
     seed: StrSource = field(repr=False)
 
+    def __post_init__(self) -> None:
+        signer.require_backend()
+
     async def authenticate(self, nonce: bytes | None) -> AuthResult:
         if nonce is None:
             raise ConfigError("server did not send a nonce; NKey auth is not supported here")
@@ -97,6 +100,9 @@ class CredsAuth:
     jwt: StrSource = field(repr=False)
     seed: StrSource = field(repr=False)
 
+    def __post_init__(self) -> None:
+        signer.require_backend()
+
     async def authenticate(self, nonce: bytes | None) -> AuthResult:
         if nonce is None:
             raise ConfigError("server did not send a nonce; JWT auth is not supported here")
@@ -109,6 +115,9 @@ class CredsFileAuth:
     """Decorated .creds file, re-read on every (re)connect to pick up rotation."""
 
     path: str | os.PathLike[str]
+
+    def __post_init__(self) -> None:
+        signer.require_backend()
 
     async def authenticate(self, nonce: bytes | None) -> AuthResult:
         content = await asyncio.to_thread(Path(self.path).read_text, encoding="utf-8")

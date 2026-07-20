@@ -2,7 +2,7 @@ import base64
 
 import pytest
 
-from natsio._internal.auth import ed25519, nkeys
+from natsio._internal.auth import nkeys, signer
 from natsio.errors import ConfigError
 
 
@@ -20,7 +20,7 @@ def test_round_trip_seed_encode_decode() -> None:
     assert decoded == raw
 
 
-def test_public_key_derivation_matches_ed25519() -> None:
+def test_public_key_derivation_matches_backend() -> None:
     raw = bytes(range(32))
     pair = nkeys.from_seed(make_seed(nkeys.Role.USER, raw))
     assert pair.public_key.startswith("U")
@@ -28,7 +28,7 @@ def test_public_key_derivation_matches_ed25519() -> None:
     padding = "=" * (-len(pair.public_key) % 8)
     decoded = base64.b32decode(pair.public_key + padding)
     assert decoded[0] == nkeys.Role.USER.value
-    assert decoded[1:33] == ed25519.public_key(raw)
+    assert decoded[1:33] == signer.public_key(raw)
 
 
 def test_sign_nonce_b64_is_urlsafe_unpadded() -> None:

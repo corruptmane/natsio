@@ -9,8 +9,8 @@ Python 3.13+ and NATS server 2.14+.
 
 ## Design
 
-- **Zero runtime dependencies** — stdlib only, including NKey/JWT auth (vendored pure-Python
-  ed25519, upgradeable via an extra).
+- **Zero runtime dependencies** — stdlib only. NKey/JWT auth is the single exception and
+  delegates Ed25519 to an audited external backend (see below); natsio ships no crypto.
 - **Sans-io protocol core** — a buffer-fed pull parser with no asyncio imports, fuzz- and
   property-tested for chunk-boundary correctness, reusable under future transports (WebSocket).
 - **Structured concurrency** — TaskGroup-supervised connection lifecycle; no silent task death.
@@ -18,6 +18,21 @@ Python 3.13+ and NATS server 2.14+.
   `consume()`, ordered consumers). No deprecated push/pull-subscribe workflow.
 - **Loud backpressure** — bounded queues with configurable policies; nothing is dropped silently.
 - **Fully typed** — PEP 695 generics, `py.typed`, checked with `ty`.
+
+## Dependencies
+
+The core client has **no runtime dependencies**. The one exception is NKey and
+JWT (`.creds`) authentication, which needs Ed25519 — natsio deliberately ships
+no cryptography of its own:
+
+```bash
+pip install 'natsio[nkeys]'         # PyNaCl (recommended)
+pip install 'natsio[cryptography]'  # if you already depend on `cryptography`
+```
+
+Either backend works; they are verified to produce identical keys and
+signatures. If your keys live in a KMS or HSM, you need neither — supply your
+own signer via `CallbackAuth` and natsio stays dependency-free.
 
 ## Workspace layout
 

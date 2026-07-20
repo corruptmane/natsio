@@ -5,6 +5,11 @@ An NKey is a base32-encoded (RFC 4648 alphabet, no padding) byte string:
 Seeds carry two prefix bytes — the seed marker with the role folded in —
 and decode to the Ed25519 *private seed*; public keys carry one role prefix
 byte and hold the Ed25519 public key.
+
+This is a checksummed encoding, not cryptography: no package publishes it
+standalone, and owning it buys ``str`` in/out, typed errors, and independence
+from a thinly-maintained wrapper. The Ed25519 math it needs is delegated to
+:mod:`natsio._internal.auth.signer`.
 """
 
 import base64
@@ -13,7 +18,7 @@ from enum import IntEnum
 
 from natsio.errors import ConfigError
 
-from . import ed25519
+from . import signer
 
 __all__ = ["KeyPair", "Role", "decode_seed", "encode_seed", "from_seed"]
 
@@ -99,7 +104,7 @@ class KeyPair:
     _seed: bytes = field(repr=False)
 
     def sign(self, data: bytes) -> bytes:
-        return ed25519.sign(self._seed, data)
+        return signer.sign(self._seed, data)
 
     def sign_nonce_b64(self, nonce: bytes) -> str:
         """Signature encoded the way CONNECT's ``sig`` field expects: raw base64url, no padding."""
@@ -108,5 +113,5 @@ class KeyPair:
 
 def from_seed(seed: str) -> KeyPair:
     role, raw_seed = decode_seed(seed)
-    public = ed25519.public_key(raw_seed)
+    public = signer.public_key(raw_seed)
     return KeyPair(role=role, public_key=_encode_public(role, public), _seed=raw_seed)
