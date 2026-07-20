@@ -1,0 +1,464 @@
+import asyncio
+
+import pytest
+from fake import EventRecorder, FakeEnv, connect_payload, frames_written
+
+from natsio._internal.connection import Connection
+from natsio._internal.lifecycle import (
+    Closed,
+    Connected,
+    ConnectionState,
+    Disconnected,
+    ErrorOccurred,
+    LameDuck,
+    Reconnected,
+    ServersDiscovered,
+)
+from natsio._internal.protocol import HMsgEvent, MsgEvent
+from natsio.errors import (
+    AuthorizationViolationError,
+    ConfigError,
+    ConnectionClosedError,
+    NoServersAvailableError,
+    PermissionsViolationError,
+    StaleConnectionError,
+    TimeoutError,
+)
+from natsio.options import ConnectOptions
+
+
+def make_options(**overrides) -> ConnectOptions:
+    defaults: dict = {
+        "servers": ("nats://s1.example:4222",),
+        "connect_timeout": 1.0,
+        "reconnect_time_wait": 0.01,
+        "reconnect_time_wait_max": 0.02,
+        "reconnect_jitter": 0.001,
+        "reconnect_jitter_tls": 0.001,
+        "no_randomize": True,
+        "ping_interval": 60.0,
+        "flush_timeout": 1.0,
+        "drain_timeout": 1.0,
+    }
+    defaults.update(overrides)
+    return ConnectOptions(**defaults)
+
+
+async def connected_conn(env: FakeEnv, recorder: EventRecorder | None = None, **overrides):
+    conn = Connection(make_options(**overrides), transport_factory=env.factory)
+    if recorder is not None:
+        conn.bus.subscribe(recorder.hook)
+    await conn.connect()
+    return conn
+
+
+class TestHandshake:
+    async def test_connect_success(self) -> None:
+        env = FakeEnv()
+        recorder = EventRecorder()
+        conn = await connected_conn(env, recorder)
+        try:
+            assert conn.state is ConnectionState.CONNECTED
+            assert recorder.count(Connected) == 1
+            payload = connect_payload(env.current)
+            assert payload["protocol"] == 1
+            assert payload["headers"] is True
+            assert payload["no_responders"] is True
+            assert payload["lang"] == "natsio"
+        finally:
+            await conn.close(flush=False)
+
+    async def test_connect_applies_server_max_payload(self) -> None:
+        env = FakeEnv()
+        env.info["max_payload"] = 512
+        conn = await connected_conn(env)
+        try:
+            assert conn.server_info["max_payload"] == 512
+        finally:
+            await conn.close(flush=False)
+
+    async def test_auth_error_during_handshake_surfaces_as_cause(self) -> None:
+        env = FakeEnv()
+        env.auto_pong = False
+        env.auto_info = True
+
+        real_on_write = env.on_client_write
+
+        def on_write(transport, data):
+            if b"CONNECT" in data:
+                asyncio.get_running_loop().call_soon(transport.deliver, b"-ERR 'Authorization Violation'\r\n")
+            real_on_write(transport, data)
+
+        env.on_client_write = on_write
+        conn = Connection(make_options(), transport_factory=env.factory)
+        with pytest.raises(NoServersAvailableError) as excinfo:
+            await conn.connect()
+        assert isinstance(excinfo.value.__cause__, AuthorizationViolationError)
+        assert conn.state is ConnectionState.CLOSED
+
+    async def test_initial_connect_all_servers_down(self) -> None:
+        env = FakeEnv()
+        env.refuse_next(2)
+        conn = Connection(
+            make_options(servers=("nats://a:4222", "nats://b:4222")),
+            transport_factory=env.factory,
+        )
+        with pytest.raises(NoServersAvailableError):
+            await conn.connect()
+        assert env.attempts == 2
+        assert conn.state is ConnectionState.CLOSED
+
+    async def test_url_userinfo_password_auth(self) -> None:
+        env = FakeEnv()
+        conn = await connected_conn(env, servers=("nats://alice:secret@s1:4222",))
+        try:
+            payload = connect_payload(env.current)
+            assert payload["user"] == "alice"
+            assert payload["pass"] == "secret"
+        finally:
+            await conn.close(flush=False)
+
+    async def test_url_userinfo_token_auth(self) -> None:
+        env = FakeEnv()
+        conn = await connected_conn(env, servers=("nats://s3cr3t@s1:4222",))
+        try:
+            assert connect_payload(env.current)["auth_token"] == "s3cr3t"
+        finally:
+            await conn.close(flush=False)
+
+
+class TestMessaging:
+    async def test_subscribe_and_dispatch(self) -> None:
+        env = FakeEnv()
+        conn = await connected_conn(env)
+        received: list[MsgEvent | HMsgEvent] = []
+        try:
+            entry = conn.subscribe("foo.*", None, received.append)
+            await conn.flush()
+            assert f"SUB foo.* {entry.sid}\r\n".encode() in frames_written(env.current)
+            env.current.deliver(f"MSG foo.bar {entry.sid} 5\r\nhello\r\n".encode())
+            assert len(received) == 1
+            assert received[0].subject == "foo.bar"
+            assert received[0].payload == b"hello"
+        finally:
+            await conn.close(flush=False)
+
+    async def test_publish_frames_are_coalesced(self) -> None:
+        env = FakeEnv()
+        conn = await connected_conn(env)
+        try:
+            baseline = len(env.current.writes)
+            for i in range(10):
+                await conn.publish_frame(f"PUB t.{i} 2\r\nhi\r\n".encode())
+            await conn.flush()
+            # All 10 PUBs (plus the flush PING) must have left in far fewer writes.
+            writes_used = len(env.current.writes) - baseline
+            assert writes_used <= 2
+            assert frames_written(env.current).count(b"PUB t.") == 10
+        finally:
+            await conn.close(flush=False)
+
+    async def test_auto_unsubscribe_bookkeeping(self) -> None:
+        env = FakeEnv()
+        conn = await connected_conn(env)
+        received: list[MsgEvent | HMsgEvent] = []
+        try:
+            entry = conn.subscribe("n.*", None, received.append)
+            conn.unsubscribe(entry.sid, max_msgs=2)
+            for i in range(4):
+                env.current.deliver(f"MSG n.{i} {entry.sid} 1\r\nx\r\n".encode())
+            assert len(received) == 2
+            assert conn.dispatcher.get(entry.sid) is None
+        finally:
+            await conn.close(flush=False)
+
+    async def test_server_ping_gets_ponged(self) -> None:
+        env = FakeEnv()
+        conn = await connected_conn(env)
+        try:
+            baseline = frames_written(env.current).count(b"PONG\r\n")
+            env.current.deliver(b"PING\r\n")
+            await conn.flush()
+            assert frames_written(env.current).count(b"PONG\r\n") == baseline + 1
+        finally:
+            await conn.close(flush=False)
+
+    async def test_backpressure_timeout(self) -> None:
+        env = FakeEnv()
+        conn = await connected_conn(env, max_pending_size=64, flush_timeout=0.05)
+        try:
+            env.current.block_writes()
+            # Park a frame in the buffer so the next send exceeds the watermark.
+            await conn.publish_frame(b"PUB a 40\r\n" + b"x" * 40 + b"\r\n")
+            with pytest.raises(TimeoutError):
+                await conn.publish_frame(b"PUB b 40\r\n" + b"y" * 40 + b"\r\n")
+        finally:
+            env.current.unblock_writes()
+            await conn.close(flush=False)
+
+
+class TestServerErrors:
+    async def test_benign_err_keeps_connection(self) -> None:
+        env = FakeEnv()
+        recorder = EventRecorder()
+        conn = await connected_conn(env, recorder)
+        try:
+            env.current.deliver(b"-ERR 'Permissions Violation for Publish to \"x\"'\r\n")
+            event = await recorder.wait_for(ErrorOccurred)
+            assert isinstance(event, ErrorOccurred)
+            assert isinstance(event.error, PermissionsViolationError)
+            assert conn.state is ConnectionState.CONNECTED
+        finally:
+            await conn.close(flush=False)
+
+    async def test_fatal_err_triggers_reconnect(self) -> None:
+        env = FakeEnv()
+        recorder = EventRecorder()
+        conn = await connected_conn(env, recorder)
+        try:
+            env.current.deliver(b"-ERR 'Stale Connection'\r\n")
+            disconnected = await recorder.wait_for(Disconnected)
+            assert isinstance(disconnected, Disconnected)
+            assert isinstance(disconnected.error, StaleConnectionError)
+            await recorder.wait_for(Reconnected)
+            assert conn.state is ConnectionState.CONNECTED
+            assert len(env.transports) == 2
+        finally:
+            await conn.close(flush=False)
+
+
+class TestReconnect:
+    async def test_drop_reconnects_and_replays_subscriptions(self) -> None:
+        env = FakeEnv()
+        recorder = EventRecorder()
+        conn = await connected_conn(env, recorder)
+        received: list[MsgEvent | HMsgEvent] = []
+        try:
+            entry = conn.subscribe("orders.>", "workers", received.append)
+            await conn.flush()
+            env.current.drop(ConnectionResetError("boom"))
+            await recorder.wait_for(Reconnected)
+            await conn.flush()  # barrier: replayed frames precede the flush PING
+            replayed = frames_written(env.current)
+            assert f"SUB orders.> workers {entry.sid}\r\n".encode() in replayed
+            env.current.deliver(f"MSG orders.1 {entry.sid} 2\r\nok\r\n".encode())
+            assert len(received) == 1
+        finally:
+            await conn.close(flush=False)
+
+    async def test_auto_unsub_remaining_replayed(self) -> None:
+        env = FakeEnv()
+        recorder = EventRecorder()
+        conn = await connected_conn(env, recorder)
+        received: list[MsgEvent | HMsgEvent] = []
+        try:
+            entry = conn.subscribe("m.*", None, received.append)
+            conn.unsubscribe(entry.sid, max_msgs=5)
+            for i in range(2):
+                env.current.deliver(f"MSG m.{i} {entry.sid} 1\r\nx\r\n".encode())
+            env.current.drop()
+            await recorder.wait_for(Reconnected)
+            await conn.flush()  # barrier: replayed frames precede the flush PING
+            assert f"UNSUB {entry.sid} 3\r\n".encode() in frames_written(env.current)
+        finally:
+            await conn.close(flush=False)
+
+    async def test_publish_while_reconnecting_is_buffered(self) -> None:
+        env = FakeEnv()
+        recorder = EventRecorder()
+        conn = await connected_conn(env, recorder)
+        try:
+            env.refuse_next(1)  # force one failed attempt to widen the reconnect window
+            env.current.drop()
+            await recorder.wait_for(Disconnected)
+            frame = b"PUB buffered 3\r\nyes\r\n"
+            await conn.publish_frame(frame)
+            await recorder.wait_for(Reconnected)
+            await conn.flush()
+            assert frame in frames_written(env.current)
+        finally:
+            await conn.close(flush=False)
+
+    async def test_reconnect_disabled_closes(self) -> None:
+        env = FakeEnv()
+        recorder = EventRecorder()
+        conn = await connected_conn(env, recorder, allow_reconnect=False)
+        env.current.drop()
+        await recorder.wait_for(Closed)
+        assert conn.state is ConnectionState.CLOSED
+        with pytest.raises(ConnectionClosedError):
+            await conn.publish_frame(b"PUB x 0\r\n\r\n")
+
+    async def test_pool_exhaustion_closes(self) -> None:
+        env = FakeEnv()
+        recorder = EventRecorder()
+        conn = await connected_conn(env, recorder, max_reconnect_attempts=2)
+        env.refuse_next(10)
+        env.current.drop()
+        await recorder.wait_for(Closed, timeout=5.0)
+        assert conn.state is ConnectionState.CLOSED
+        # 1 initial + 2 failed reconnect attempts against the single server.
+        assert env.attempts == 3
+
+
+class TestAsyncInfo:
+    async def test_connect_urls_discovered(self) -> None:
+        env = FakeEnv()
+        recorder = EventRecorder()
+        conn = await connected_conn(env, recorder)
+        try:
+            env.current.deliver(b'INFO {"connect_urls":["10.0.0.7:4222","10.0.0.8:4223"]}\r\n')
+            event = await recorder.wait_for(ServersDiscovered)
+            assert isinstance(event, ServersDiscovered)
+            assert len(event.urls) == 2
+        finally:
+            await conn.close(flush=False)
+
+    async def test_lame_duck_triggers_migration(self) -> None:
+        env = FakeEnv()
+        recorder = EventRecorder()
+        conn = await connected_conn(env, recorder)
+        try:
+            env.current.deliver(b'INFO {"ldm":true}\r\n')
+            await recorder.wait_for(LameDuck)
+            await recorder.wait_for(Reconnected)
+            assert len(env.transports) == 2
+        finally:
+            await conn.close(flush=False)
+
+
+class TestLiveness:
+    async def test_stale_connection_on_missed_pongs(self) -> None:
+        env = FakeEnv()
+        recorder = EventRecorder()
+        conn = await connected_conn(env, recorder, ping_interval=0.02, max_outstanding_pings=1, allow_reconnect=False)
+        env.auto_pong = False
+        await recorder.wait_for(Closed, timeout=5.0)
+        assert conn.state is ConnectionState.CLOSED
+        disconnected = next(e for e in recorder.events if isinstance(e, Disconnected))
+        assert isinstance(disconnected.error, StaleConnectionError)
+
+    async def test_flush_timeout_without_pong(self) -> None:
+        env = FakeEnv()
+        conn = await connected_conn(env)
+        try:
+            env.auto_pong = False
+            with pytest.raises(TimeoutError):
+                await conn.flush(timeout=0.05)
+        finally:
+            await conn.close(flush=False)
+
+
+class TestClose:
+    async def test_close_is_idempotent_and_emits_closed_once(self) -> None:
+        env = FakeEnv()
+        recorder = EventRecorder()
+        conn = await connected_conn(env, recorder)
+        await conn.close()
+        await conn.close()
+        assert recorder.count(Closed) == 1
+        assert conn.state is ConnectionState.CLOSED
+
+    async def test_close_flushes_pending_writes(self) -> None:
+        env = FakeEnv()
+        conn = await connected_conn(env)
+        frame = b"PUB last.words 3\r\nbye\r\n"
+        await conn.publish_frame(frame)
+        await conn.close(flush=True)
+        assert frame in frames_written(env.current)
+
+    async def test_subscribe_after_close_raises(self) -> None:
+        env = FakeEnv()
+        conn = await connected_conn(env)
+        await conn.close(flush=False)
+        with pytest.raises(ConnectionClosedError):
+            conn.subscribe("x", None, lambda event: None)
+
+
+class TestPendingCarryover:
+    async def test_unflushed_publishes_survive_reconnect(self) -> None:
+        env = FakeEnv()
+        recorder = EventRecorder()
+        conn = await connected_conn(env, recorder)
+        try:
+            first = env.current
+            first.block_writes()  # flusher stalls; frames stay in session.pending
+            frame = b"PUB carried 4\r\nover\r\n"
+            await conn.publish_frame(frame)
+            assert frame not in frames_written(first)
+            first.drop()
+            await recorder.wait_for(Reconnected)
+            await conn.flush()
+            assert frame in frames_written(env.current)
+        finally:
+            await conn.close(flush=False)
+
+    async def test_control_frames_do_not_carry_over(self) -> None:
+        env = FakeEnv()
+        recorder = EventRecorder()
+        conn = await connected_conn(env, recorder)
+        try:
+            first = env.current
+            first.block_writes()
+            entry = conn.subscribe("dup.check", None, lambda e: None)
+            first.drop()
+            await recorder.wait_for(Reconnected)
+            await conn.flush()
+            # Replay sends the SUB exactly once; the unflushed original must not duplicate it.
+            assert frames_written(env.current).count(f"SUB dup.check {entry.sid}\r\n".encode()) == 1
+        finally:
+            await conn.close(flush=False)
+
+
+class TestCloseRaces:
+    async def test_close_during_stalled_initial_connect(self) -> None:
+        env = FakeEnv()
+        env.auto_info = False  # handshake stalls awaiting INFO
+        conn = Connection(make_options(connect_timeout=0.3), transport_factory=env.factory)
+        connect_task = asyncio.create_task(conn.connect())
+        await asyncio.sleep(0.05)  # let the handshake start and stall
+        await asyncio.wait_for(conn.close(flush=False), timeout=2)
+        with pytest.raises((NoServersAvailableError, ConnectionClosedError)):
+            await asyncio.wait_for(connect_task, timeout=2)
+        assert conn.state is ConnectionState.CLOSED
+
+
+class TestReconnectPolicy:
+    async def test_flapping_server_is_rate_limited(self) -> None:
+        """A server that completes the handshake then immediately drops must not
+        be retried in a tight loop: the failure counter resets on handshake, so
+        the floor between attempts to the same server is what bounds it."""
+        env = FakeEnv()
+        conn = await connected_conn(env, reconnect_time_wait=0.25)
+        try:
+            for _ in range(3):
+                env.current.drop()
+                await asyncio.sleep(0.05)
+            # Without the per-server floor this loops at ~200 attempts/second.
+            assert env.attempts <= 2
+        finally:
+            await conn.close(flush=False)
+
+    async def test_initial_info_seeds_cluster_topology(self) -> None:
+        env = FakeEnv()
+        recorder = EventRecorder()
+        env.info["connect_urls"] = ["10.0.0.9:4222", "10.0.0.10:4222"]
+        conn = await connected_conn(env, recorder)
+        try:
+            event = await recorder.wait_for(ServersDiscovered)
+            assert isinstance(event, ServersDiscovered)
+            assert len(event.urls) == 2
+            # The seed plus both discovered peers are now failover candidates.
+            assert len(conn._pool.candidates()) == 3
+        finally:
+            await conn.close(flush=False)
+
+
+class TestOptionsValidation:
+    def test_max_reconnect_attempts_zero_rejected(self) -> None:
+        with pytest.raises(ConfigError, match="allow_reconnect=False"):
+            make_options(max_reconnect_attempts=0)
+
+    def test_unlimited_and_positive_accepted(self) -> None:
+        assert make_options(max_reconnect_attempts=-1).max_reconnect_attempts == -1
+        assert make_options(max_reconnect_attempts=1).max_reconnect_attempts == 1

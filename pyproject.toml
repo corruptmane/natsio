@@ -1,44 +1,49 @@
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+# Workspace root: shared tooling configuration only. The published packages
+# live in the workspace members (natsio/, extensions/natsio-*, tools/*).
 
-[project]
-name = "natsio"
-description = "NATS client for Python"
-requires-python = ">=3.9"
-license = "MIT"
-readme = "README.md"
-authors = [{ name = "Corrupt Mane", email = "corruptmane@gmail.com" }]
-maintainers = [{ name = "Corrupt Mane", email = "corruptmane@gmail.com" }]
-keywords = [
-    "nats",
-    "nats.io",
-    "nats-python",
-    "nats-client",
-    "asyncio",
-    "client",
+[tool.uv.workspace]
+members = ["natsio", "extensions/natsio-*", "tools/natsio-*"]
+
+[tool.uv.sources]
+natsio = { workspace = true }
+
+[dependency-groups]
+dev = [
+    "natsio",
+    "pytest>=8.3",
+    "pytest-asyncio>=1.0",
+    "hypothesis>=6.100",
+    "ruff>=0.12",
+    "ty",
 ]
-classifiers = [
-    "License :: OSI Approved :: MIT License",
-    "Development Status :: 1 - Planning",
-    "Environment :: Console",
-    "Framework :: AsyncIO",
-    "Intended Audience :: Developers",
-    "Intended Audience :: Information Technology",
-    "Intended Audience :: System Administrators",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
-    "Programming Language :: Python :: Implementation :: CPython",
-    "Typing :: Typed",
+
+[tool.ruff]
+target-version = "py313"
+line-length = 120
+src = ["natsio/src", "natsio/tests"]
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # pyflakes
+    "I",      # isort
+    "N",      # pep8-naming
+    "UP",     # pyupgrade
+    "B",      # flake8-bugbear
+    "C4",     # flake8-comprehensions
+    "SIM",    # flake8-simplify
+    "PIE",    # flake8-pie
+    "RET",    # flake8-return
+    "ASYNC",  # flake8-async
+    "PERF",   # perflint
+    "RUF",    # ruff-specific
 ]
-dynamic = ["version"]
 
-[project.urls]
-Homepage = "https://github.com/corruptmane/natsio"
-Repository = "https://github.com/corruptmane/natsio"
+[tool.ty.environment]
+python-version = "3.13"
 
-[tool.hatch.version]
-path = "natsio/__init__.py"
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["natsio/tests"]

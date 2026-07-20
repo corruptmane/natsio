@@ -1,0 +1,39 @@
+[build-system]
+requires = ["uv_build>=0.10,<0.11"]
+build-backend = "uv_build"
+
+[project]
+name = "natsio"
+version = "0.1.0.dev0"
+description = "Zero-dependency asyncio NATS client for modern Python"
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+requires-python = ">=3.13"
+authors = [{ name = "Corrupt Mane", email = "corruptmane@gmail.com" }]
+keywords = [
+    "nats",
+    "nats.io",
+    "jetstream",
+    "asyncio",
+    "client",
+    "messaging",
+    "pubsub",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Framework :: AsyncIO",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Typing :: Typed",
+]
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/corruptmane/natsio"
+Repository = "https://github.com/corruptmane/natsio"
+Changelog = "https://github.com/corruptmane/natsio/blob/main/CHANGELOG.md"

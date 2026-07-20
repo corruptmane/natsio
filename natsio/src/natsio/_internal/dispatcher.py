@@ -1,0 +1,83 @@
+"""Subscription registry and inbound message routing.
+
+Routing is by sid — an int the client allocates and the server echoes. The
+handler attached to each subscription is a *synchronous, non-blocking*
+callable (the public Subscription API layers queues/iterators on top).
+Auto-unsubscribe bookkeeping mirrors the server's ``UNSUB <sid> <max>``
+contract: the count is total deliveries since SUB, not since UNSUB.
+"""
+
+import logging
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from itertools import count
+
+from .protocol import HMsgEvent, MsgEvent
+
+__all__ = ["Dispatcher", "SubscriptionEntry"]
+
+log = logging.getLogger("natsio.dispatcher")
+
+type MessageHandler = Callable[[MsgEvent | HMsgEvent], None]
+
+
+@dataclass(slots=True)
+class SubscriptionEntry:
+    sid: int
+    subject: str
+    queue: str | None
+    handler: MessageHandler
+    max_msgs: int | None = None  # server-side auto-unsub threshold, if armed
+    delivered: int = field(default=0, repr=False)
+
+    @property
+    def remaining(self) -> int | None:
+        if self.max_msgs is None:
+            return None
+        return max(0, self.max_msgs - self.delivered)
+
+
+class Dispatcher:
+    __slots__ = ("_sids", "_subs")
+
+    def __init__(self) -> None:
+        self._subs: dict[int, SubscriptionEntry] = {}
+        self._sids = count(1)
+
+    def add(
+        self,
+        subject: str,
+        queue: str | None,
+        handler: MessageHandler,
+    ) -> SubscriptionEntry:
+        entry = SubscriptionEntry(sid=next(self._sids), subject=subject, queue=queue, handler=handler)
+        self._subs[entry.sid] = entry
+        return entry
+
+    def remove(self, sid: int) -> None:
+        self._subs.pop(sid, None)
+
+    def arm_auto_unsub(self, sid: int, max_msgs: int) -> None:
+        entry = self._subs.get(sid)
+        if entry is not None:
+            entry.max_msgs = max_msgs
+            if entry.remaining == 0:
+                self.remove(sid)
+
+    def get(self, sid: int) -> SubscriptionEntry | None:
+        return self._subs.get(sid)
+
+    def entries(self) -> list[SubscriptionEntry]:
+        return list(self._subs.values())
+
+    def dispatch(self, event: MsgEvent | HMsgEvent) -> None:
+        entry = self._subs.get(event.sid)
+        if entry is None:
+            return  # already unsubscribed; late in-flight delivery
+        entry.delivered += 1
+        if entry.max_msgs is not None and entry.delivered >= entry.max_msgs:
+            self.remove(entry.sid)
+        try:
+            entry.handler(event)
+        except Exception:
+            log.exception("subscription handler for sid %d (%s) failed", entry.sid, entry.subject)
