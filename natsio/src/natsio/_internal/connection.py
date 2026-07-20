@@ -76,6 +76,28 @@ log = logging.getLogger("natsio.connection")
 type TransportFactory = Callable[..., Transport]
 
 
+class _SafeInstrumentation:
+    """Wraps user instrumentation so a broken metrics backend cannot kill the
+    connection. Hooks fire on the read path, where an escaping exception would
+    reach ``data_received`` and make asyncio abort the socket."""
+
+    __slots__ = ("_inner",)
+
+    def __init__(self, inner: Instrumentation) -> None:
+        self._inner = inner
+
+    def __getattr__(self, name: str) -> Callable[..., None]:
+        hook = getattr(self._inner, name)
+
+        def guarded(*args: Any, **kwargs: Any) -> None:
+            try:
+                hook(*args, **kwargs)
+            except Exception:
+                log.exception("instrumentation hook %r failed", name)
+
+        return guarded
+
+
 class _SessionLostError(Exception):
     """Internal: collapses the session TaskGroup. Carries the loss reason."""
 
@@ -134,10 +156,16 @@ class _Session:
         self._conn.instrumentation.on_bytes_received(len(data))
         try:
             self.parser.receive_data(data)
-            while (event := self.parser.next_event()) is not NEED_DATA:
-                self._handle(event)
+            while True:
                 if self.lost_future.done():
+                    # Real transports still deliver buffered data after close();
+                    # dispatching from an abandoned session would duplicate
+                    # messages that the next session is about to replay.
                     return
+                event = self.parser.next_event()
+                if event is NEED_DATA:
+                    return
+                self._handle(event)
         except ParserError as exc:
             self.mark_lost(exc)
 
@@ -187,10 +215,30 @@ class _Session:
         self.pending_size += len(frame)
         self._flush_event.set()
 
+    def enqueue_many(self, frames: list[bytes]) -> None:
+        """Append frames individually.
+
+        They must NOT be concatenated first: ``take_unsent_user_frames``
+        classifies each element by its leading opcode, and a joined blob would
+        be judged by whichever frame happens to be first — carrying control
+        frames across a reconnect (duplicate SUBs) or discarding publishes.
+        """
+        if not frames:
+            return
+        self.pending.extend(frames)
+        self.pending_size += sum(len(f) for f in frames)
+        self._flush_event.set()
+
     async def send(self, frame: bytes) -> None:
         """User-path append with high-water-mark backpressure."""
         max_pending = self._conn.options.max_pending_size
-        if self.pending_size + len(frame) > max_pending:
+        # Loop rather than test-once: _wake_drain_waiters releases every waiter
+        # at once, and if each appended unconditionally the buffer would
+        # overshoot the limit by roughly the number of blocked publishers.
+        while self.pending_size + len(frame) > max_pending:
+            if self.lost_future.done():
+                # The flusher is gone; nobody would ever resolve a new waiter.
+                raise ConnectionClosedError("connection lost while waiting for the write buffer")
             waiter: asyncio.Future[None] = asyncio.get_running_loop().create_future()
             self._drain_waiters.append(waiter)
             self._flush_event.set()
@@ -202,7 +250,9 @@ class _Session:
         self.enqueue(frame)
 
     def send_ping(self, waiter: asyncio.Future[None] | None) -> None:
-        self.outstanding_pings += 1
+        # Deliberately does NOT touch outstanding_pings: that counter is the
+        # pinger's liveness budget, and counting user flush() pings against it
+        # would let a few concurrent flushes declare a healthy connection stale.
         self.ping_waiters.append(waiter)
         self.enqueue(PING_FRAME)
 
@@ -227,6 +277,11 @@ class _Session:
             try:
                 transport.write(data)
             except Exception as exc:
+                # Put them back before tearing down: _carry_over_unsent runs
+                # against `pending`, so frames dropped here would be lost on
+                # exactly the path that exists to preserve them.
+                self.pending[:0] = frames
+                self.pending_size += len(data)
                 self.mark_lost(exc if isinstance(exc, NATSError) else ConnectionClosedError(str(exc)))
                 return
             self._conn.instrumentation.on_bytes_sent(len(data))
@@ -247,6 +302,7 @@ class _Session:
                 self.mark_lost(StaleConnectionError("no PONG for outstanding PINGs"))
                 return
             self.send_ping(None)
+            self.outstanding_pings += 1
 
     async def final_flush(self) -> None:
         """Best-effort write of whatever is pending (used during graceful close)."""
@@ -310,7 +366,7 @@ class Connection:
         transport_factory: TransportFactory | None = None,
     ) -> None:
         self.options = options
-        self.instrumentation: Instrumentation = options.instrumentation or NoopInstrumentation()
+        self.instrumentation: Any = _SafeInstrumentation(options.instrumentation or NoopInstrumentation())
         self.dispatcher = Dispatcher()
         self.bus = EventBus()
         self._authenticator = options.resolve_authenticator()
@@ -323,6 +379,9 @@ class Connection:
         )
         self._state = ConnectionState.DISCONNECTED
         self._session: _Session | None = None
+        # Published while _establish runs, so close() can interrupt a handshake
+        # that is parked waiting for INFO instead of blocking for connect_timeout.
+        self._establishing: _Session | None = None
         self._supervisor: asyncio.Task[None] | None = None
         self._closing = False
         self._closed_event = asyncio.Event()
@@ -352,8 +411,10 @@ class Connection:
         return None
 
     async def connect(self) -> None:
-        if self._supervisor is not None:
-            raise ConfigError("connect() called twice")
+        # Guarding on the supervisor alone is not enough: _supervise clears it
+        # on exit, so a post-close() connect() would slip through.
+        if self._state is not ConnectionState.DISCONNECTED:
+            raise ConfigError(f"connect() is not valid while {self._state.name}")
         self._state = ConnectionState.CONNECTING
         loop = asyncio.get_running_loop()
         self._first_connect = loop.create_future()
@@ -369,6 +430,11 @@ class Connection:
             return
         self._closing = True
         self._closed_event.set()
+        # Unblock a handshake parked on INFO/PONG so we do not wait out
+        # connect_timeout before the supervisor can notice we are closing.
+        establishing = self._establishing
+        if establishing is not None:
+            establishing.mark_lost(None)
         session = self._session
         if session is not None and flush and self.is_connected:
             try:
@@ -376,7 +442,8 @@ class Connection:
                     await self.flush()
             except Exception:
                 log.debug("flush during close failed", exc_info=True)
-        self._state = ConnectionState.DRAINING
+        if self._state is not ConnectionState.CLOSED:
+            self._state = ConnectionState.DRAINING
         if session is not None:
             await session.final_flush()
             session.mark_lost(None)
@@ -384,6 +451,10 @@ class Connection:
         if supervisor is not None and asyncio.current_task() is not supervisor:
             try:
                 await supervisor
+            except asyncio.CancelledError:
+                # The supervisor was cancelled, not our caller — do not let that
+                # surface as if close() itself had been cancelled.
+                log.debug("supervisor was cancelled during close")
             except Exception:
                 log.debug("supervisor ended with error during close", exc_info=True)
         self._finalize_closed()
@@ -429,7 +500,7 @@ class Connection:
         if self._state in (ConnectionState.CLOSED, ConnectionState.DRAINING):
             raise ConnectionClosedError("connection is closed")
         entry = self.dispatcher.add(subject, queue, handler)
-        self._send_or_buffer(encode_sub(subject, entry.sid, queue))
+        self._send_control(encode_sub(subject, entry.sid, queue))
         return entry
 
     def unsubscribe(self, sid: int, max_msgs: int | None = None) -> None:
@@ -437,10 +508,10 @@ class Connection:
             return
         if max_msgs is None or max_msgs <= 0:
             self.dispatcher.remove(sid)
-            self._send_or_buffer(encode_unsub(sid))
+            self._send_control(encode_unsub(sid))
         else:
             self.dispatcher.arm_auto_unsub(sid, max_msgs)
-            self._send_or_buffer(encode_unsub(sid, max_msgs))
+            self._send_control(encode_unsub(sid, max_msgs))
 
     # -- supervisor ----------------------------------------------------------
 
@@ -466,9 +537,8 @@ class Connection:
                     assert self._first_connect is not None
                     if not self._first_connect.done():
                         self._first_connect.set_result(None)
-                    # Frames issued while still CONNECTING were buffered, not sent.
-                    # (Subscriptions are NOT replayed here: their SUB frames are
-                    # already in that buffer, and replaying would duplicate them.)
+                    # Anything registered or published while still CONNECTING.
+                    self._replay_subscriptions(session)
                     self._flush_reconnect_buffer(session)
                     self.instrumentation.on_connect(session.server.url)
                     self._emit(Connected(session.server.url))
@@ -483,12 +553,16 @@ class Connection:
                 if self._closing:
                     break
                 self._carry_over_unsent(session)
+                # Move out of CONNECTED *before* notifying: a hook that calls
+                # back in must not observe state=CONNECTED with no session.
+                self._state = (
+                    ConnectionState.RECONNECTING if self.options.allow_reconnect else ConnectionState.DISCONNECTED
+                )
                 self.instrumentation.on_disconnect(error)
                 self._emit(Disconnected(error))
                 if not self.options.allow_reconnect:
                     last_error = error
                     break
-                self._state = ConnectionState.RECONNECTING
         finally:
             if self._first_connect is not None and not self._first_connect.done():
                 self._first_connect.set_exception(
@@ -573,6 +647,7 @@ class Connection:
         options = self.options
         server.last_attempt = asyncio.get_running_loop().time()
         session = _Session(self, server)
+        self._establishing = session
         transport = self._transport_factory(on_bytes=session.feed, on_close=session.mark_lost)
         session.transport = transport
 
@@ -624,6 +699,14 @@ class Connection:
                 session.mark_lost(None)
                 transport.abort()
                 raise
+            finally:
+                self._establishing = None
+        # Finding 10: a fatal -ERR arriving in the same segment as the handshake
+        # PONG resolves handshake_pong first and only marks the session lost, so
+        # without this check we would publish a corpse as CONNECTED.
+        if session.lost_future.done():
+            error = session.lost_future.result()
+            raise error if error is not None else ConnectionClosedError("connection lost during handshake")
         session.running = True
         return session
 
@@ -643,19 +726,18 @@ class Connection:
     # -- reconnect plumbing --------------------------------------------------
 
     def _replay_subscriptions(self, session: _Session) -> None:
-        frames = bytearray()
+        frames: list[bytes] = []
         for entry in self.dispatcher.entries():
-            frames += encode_sub(entry.subject, entry.sid, entry.queue)
+            frames.append(encode_sub(entry.subject, entry.sid, entry.queue))
             remaining = entry.remaining
             if remaining is not None:
-                frames += encode_unsub(entry.sid, remaining)
-        if frames:
-            session.enqueue(bytes(frames))
+                frames.append(encode_unsub(entry.sid, remaining))
+        session.enqueue_many(frames)
 
     def _flush_reconnect_buffer(self, session: _Session) -> None:
         if not self._reconnect_buffer:
             return
-        session.enqueue(b"".join(self._reconnect_buffer))
+        session.enqueue_many(list(self._reconnect_buffer))
         self._reconnect_buffer.clear()
         self._reconnect_buffer_size = 0
 
@@ -678,12 +760,18 @@ class Connection:
             self._reconnect_buffer.insert(position, frame)
             self._reconnect_buffer_size += len(frame)
 
-    def _send_or_buffer(self, frame: bytes) -> None:
+    def _send_control(self, frame: bytes) -> None:
+        """Send a SUB/UNSUB now, or rely on replay if we are not connected.
+
+        Control frames are deliberately NOT buffered: the dispatcher is the
+        source of truth for subscription state and _replay_subscriptions emits
+        it on every (re)connect. Buffering as well would send the same SUB
+        twice, and a duplicate sid means every matching message is delivered
+        twice for the life of the session.
+        """
         if self._state is ConnectionState.CONNECTED and self._session is not None:
             self._session.enqueue(frame)
-        elif self._state in (ConnectionState.CONNECTING, ConnectionState.RECONNECTING):
-            self._buffer_for_reconnect(frame)
-        else:
+        elif self._state in (ConnectionState.CLOSED, ConnectionState.DRAINING):
             raise ConnectionClosedError(f"cannot send while {self._state.name}")
 
     # -- inbound hooks -------------------------------------------------------
@@ -699,8 +787,11 @@ class Connection:
         if info.get("ldm"):
             self._emit(LameDuck(session.server.url))
             if self.options.allow_reconnect and not self._closing:
-                # Migrate before the server evicts us.
-                session.mark_lost(None)
+                # Migrate before the server evicts us — but on the NEXT loop
+                # iteration, so messages the server packed into this same
+                # segment after the INFO are still delivered. Lame duck is a
+                # graceful drain; truncating it mid-segment loses data.
+                asyncio.get_running_loop().call_soon(session.mark_lost, None)
 
     def _merge_connect_urls(self, info: dict[str, Any]) -> None:
         urls = info.get("connect_urls")
