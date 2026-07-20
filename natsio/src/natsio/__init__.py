@@ -11,6 +11,14 @@ async with await natsio.connect("nats://localhost:4222") as nc:
 """
 
 from importlib.metadata import version as _version
+from pkgutil import extend_path
+
+# natsio is a regular package (this file gives it the flat top-level API), but
+# extension distributions — natsio-<name>, imported as natsio.<name> — install
+# additional subpackages into the natsio namespace. extend_path lets those
+# subpackages be found even when an extension lands on a different sys.path
+# root than the core (editable installs, split site-packages).
+__path__ = extend_path(__path__, __name__)
 
 from natsio._internal.lifecycle import (
     Closed,

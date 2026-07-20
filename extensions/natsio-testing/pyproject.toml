@@ -1,0 +1,30 @@
+[build-system]
+requires = ["uv_build>=0.10,<0.11"]
+build-backend = "uv_build"
+
+[project]
+name = "natsio-testing"
+version = "0.1.0.dev0"
+description = "nats-server process management for tests — start, stop, and fault-inject real servers"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.13"
+authors = [{ name = "Corrupt Mane", email = "corruptmane@gmail.com" }]
+keywords = ["nats", "nats.io", "testing", "pytest", "nats-server"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Framework :: AsyncIO",
+    "Framework :: Pytest",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.13",
+    "Typing :: Typed",
+]
+dependencies = ["natsio"]
+
+[tool.uv.sources]
+natsio = { workspace = true }
+
+[tool.uv.build-backend]
+module-name = "natsio.testing"
+namespace = true

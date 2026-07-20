@@ -5,6 +5,7 @@ requires-python = ">=3.13"
 [manifest]
 members = [
     "natsio",
+    "natsio-testing",
 ]
 
 [manifest.dependency-groups]
@@ -12,6 +13,7 @@ dev = [
     { name = "cryptography", specifier = ">=49" },
     { name = "hypothesis", specifier = ">=6.100" },
     { name = "natsio", editable = "natsio" },
+    { name = "natsio-testing", editable = "extensions/natsio-testing" },
     { name = "nkeys", specifier = ">=0.2.1" },
     { name = "pynacl", specifier = ">=1.6.2" },
     { name = "pytest", specifier = ">=8.3" },
@@ -222,6 +224,17 @@ requires-dist = [
     { name = "pynacl", marker = "extra == 'nkeys'", specifier = ">=1.5.0" },
 ]
 provides-extras = ["nkeys", "cryptography"]
+
+[[package]]
+name = "natsio-testing"
+version = "0.1.0.dev0"
+source = { editable = "extensions/natsio-testing" }
+dependencies = [
+    { name = "natsio" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "natsio", editable = "natsio" }]
 
 [[package]]
 name = "nkeys"
