@@ -414,6 +414,17 @@ class Connection:
             return
         raise ConnectionClosedError(f"cannot send while {self._state.name}")
 
+    def pause_reading(self) -> None:
+        """Stop draining the socket (connection-wide backpressure)."""
+        session = self._session
+        if session is not None and session.transport is not None:
+            session.transport.pause_reading()
+
+    def resume_reading(self) -> None:
+        session = self._session
+        if session is not None and session.transport is not None:
+            session.transport.resume_reading()
+
     def subscribe(self, subject: str, queue: str | None, handler: MessageHandler) -> SubscriptionEntry:
         if self._state in (ConnectionState.CLOSED, ConnectionState.DRAINING):
             raise ConnectionClosedError("connection is closed")

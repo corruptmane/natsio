@@ -16,13 +16,18 @@ __all__ = [
     "MaxControlLineExceededError",
     "MaxPayloadExceededError",
     "MaxSubscriptionsExceededError",
+    "MissingDependencyError",
     "NATSError",
+    "NoReplySubjectError",
+    "NoRespondersError",
     "NoServersAvailableError",
     "ParserError",
     "PermissionsViolationError",
     "ProtocolError",
     "ServerError",
+    "SlowConsumerError",
     "StaleConnectionError",
+    "SubscriptionClosedError",
     "TimeoutError",
 ]
 
@@ -72,6 +77,32 @@ class MaxControlLineExceededError(ParserError):
 
 class MaxPayloadExceededError(ProtocolError):
     """A message payload exceeded the maximum payload size."""
+
+
+class NoReplySubjectError(NATSError):
+    """Attempted to respond to a message that carries no reply subject."""
+
+
+class NoRespondersError(NATSError):
+    """No subscriber is listening on the requested subject (server status 503)."""
+
+
+class SubscriptionClosedError(NATSError):
+    """The subscription has been unsubscribed or drained."""
+
+
+class SlowConsumerError(NATSError):
+    """A subscription exceeded its pending limits; messages were dropped."""
+
+    def __init__(self, description: str = "", *, subject: str = "", sid: int = 0, dropped: int = 0) -> None:
+        super().__init__(description)
+        self.subject = subject
+        self.sid = sid
+        self.dropped = dropped
+
+
+class MissingDependencyError(NATSError, ImportError):
+    """An optional dependency is required for the requested feature."""
 
 
 class BadHeadersError(NATSError):
