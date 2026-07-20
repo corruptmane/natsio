@@ -129,11 +129,14 @@ class Parser:
         return event
 
     def _dispatch_control(self, line: bytes) -> ParserOutput:
-        if line == b"PING":
+        # nats.go's OP_PING/OP_PONG/OP_PLUS_OK states accept any bytes between
+        # the token and the terminating \n, so "PING  ", "PONG x", "+OKay" are
+        # all valid. Match on the leading token, not exact equality.
+        if line.startswith(b"PING"):
             return PING_EVENT
-        if line == b"PONG":
+        if line.startswith(b"PONG"):
             return PONG_EVENT
-        if line == b"+OK":
+        if line.startswith(b"+OK"):
             return OK_EVENT
         if line.startswith(b"MSG "):
             return self._parse_msg_args(line)
@@ -142,9 +145,9 @@ class Parser:
         if line.startswith(b"INFO "):
             return InfoEvent(raw=line[5:].strip())
         if line.startswith(b"-ERR"):
-            message = line[4:].strip()
-            if message.startswith(b"'") and message.endswith(b"'") and len(message) >= 2:
-                message = message[1:-1]
+            # normalizeErr: trim surrounding whitespace, then strip any leading
+            # and trailing single quotes independently (charset strip).
+            message = line[4:].strip().strip(b"'")
             return ErrEvent(message=message.decode("utf-8", "replace"))
         # The protocol is case-insensitive in principle; real servers send
         # uppercase. Normalize ONLY the operation token — arguments (subjects,

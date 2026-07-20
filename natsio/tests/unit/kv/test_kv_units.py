@@ -27,14 +27,27 @@ class TestValidation:
     def test_valid_keys(self, key: str) -> None:
         validate_key(key)
 
-    @pytest.mark.parametrize("key", ["", ".leading", "trailing.", "sp ace", "st*ar", "g>t", "ключ"])
+    @pytest.mark.parametrize(
+        "key",
+        ["", ".leading", "trailing.", "sp ace", "st*ar", "g>t", "ключ", "foo..bar", "a..b.c"],
+    )
     def test_invalid_keys(self, key: str) -> None:
         with pytest.raises(InvalidKeyError):
             validate_key(key)
 
-    @pytest.mark.parametrize("key", ["a.*", "a.>", ">", "*.b"])
+    @pytest.mark.parametrize("key", ["a.*", "a.>", ">", "*.b", "a.*.b", "foo.*.bar.>"])
     def test_wildcards_allowed_for_watch(self, key: str) -> None:
         validate_key(key, wildcards=True)
+
+    @pytest.mark.parametrize(
+        "key",
+        ["", "foo..bar", "a..b.c", "a.>.b", "foo.", ".foo", "foo.bar>baz", ">.a", "a.>b"],
+    )
+    def test_invalid_wildcard_watchers(self, key: str) -> None:
+        """Mirror nats.go TestKeyValueWatch invalid watchers: consecutive dots
+        and a non-terminal ``>`` must be rejected even with wildcards."""
+        with pytest.raises(InvalidKeyError):
+            validate_key(key, wildcards=True)
 
     def test_history_bounds(self) -> None:
         KeyValueConfig(bucket="b", history=64)

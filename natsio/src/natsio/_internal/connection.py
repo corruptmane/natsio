@@ -22,6 +22,8 @@ from collections.abc import Callable
 from typing import Any
 
 from natsio.errors import (
+    AuthenticationExpiredError,
+    AuthorizationViolationError,
     ConfigError,
     ConnectionClosedError,
     NATSError,
@@ -108,6 +110,17 @@ class _SessionLostError(Exception):
 
 class _ClosingError(Exception):
     """Internal: the user requested close while we were between sessions."""
+
+
+class _ConfigClassError(Exception):
+    """Internal: a non-retryable auth/config failure (missing creds file, bad
+    seed, no Ed25519 backend). Trying the next server cannot fix it, so it must
+    fast-fail instead of being masked by a later transient error. Carries the
+    original so it can be re-raised unwrapped."""
+
+    def __init__(self, error: Exception) -> None:
+        super().__init__(str(error))
+        self.error = error
 
 
 class _Session:
@@ -200,6 +213,11 @@ class _Session:
         if not error.fatal:
             self._conn.background_error(error)
             return
+        if self.running and isinstance(error, AuthorizationViolationError | AuthenticationExpiredError):
+            # Parity with nats.go processAuthError: a fatal auth error on a live
+            # session reaches the async error handler as well as the disconnect
+            # path (unlike stale/other fatal errors, which only disconnect).
+            self._conn.background_error(error)
         if not self.running:
             # Handshake failure (auth, TLS required, ...) — fail the awaiting futures.
             for future in (self.info_future, self.handshake_pong):
@@ -611,7 +629,16 @@ class Connection:
                         raise _ClosingError
                 try:
                     session = await self._establish(server)
+                except _ConfigClassError as exc:
+                    # Permanent config/auth failure: fast-fail rather than let a
+                    # later transient error from another server mask the cause.
+                    raise exc.error from exc.error.__cause__
                 except Exception as exc:
+                    if not initial and self._is_repeated_auth_error(server, exc):
+                        # Same auth rejection twice from this server during
+                        # reconnect: abort the loop so the supervisor finalizes
+                        # Closed, regardless of the reconnect budget.
+                        raise
                     last_error = exc
                     self._pool.mark_failure(server)
                     log.info("connect to %s failed: %s", server.url, exc)
@@ -620,6 +647,20 @@ class Connection:
                 return session
             if initial:
                 raise NoServersAvailableError(f"initial connect failed: {last_error}") from last_error
+
+    def _is_repeated_auth_error(self, server: ParsedServer, exc: Exception) -> bool:
+        """Whether ``exc`` repeats this server's previous auth rejection.
+
+        Mirrors nats.go processAuthError: the per-server memory (identical type +
+        message) lets a revoked credential abort the reconnect loop the second
+        time it is seen, instead of hammering the server forever."""
+        if not isinstance(exc, AuthorizationViolationError | AuthenticationExpiredError):
+            return False
+        previous = server.last_auth_error
+        server.last_auth_error = exc
+        if self.options.ignore_auth_error_abort:
+            return False
+        return previous is not None and type(previous) is type(exc) and str(previous) == str(exc)
 
     async def _backoff(self, server: ParsedServer) -> None:
         options = self.options
@@ -671,13 +712,18 @@ class Connection:
                     session.parser.set_max_payload(int(info["max_payload"]))
                 # A real server advertises the whole cluster in the very first
                 # INFO; async INFO frames only follow on membership changes.
-                self._merge_connect_urls(info)
+                self._merge_connect_urls(info, server)
 
                 if (wants_tls or info.get("tls_required")) and not handshake_first:
                     context = (tls_config or TLSConfig()).resolve_context()
                     await transport.upgrade_tls(context, tls_hostname)
 
-                auth = await self._authenticate(server, info)
+                try:
+                    auth = await self._authenticate(server, info)
+                except (FileNotFoundError, PermissionError, IsADirectoryError, ConfigError) as exc:
+                    # Config-class failures are permanent: tag them so
+                    # _establish_any fast-fails instead of trying the next server.
+                    raise _ConfigClassError(exc) from exc
                 payload = build_connect_payload(
                     version=_client_version(),
                     verbose=options.verbose,
@@ -712,13 +758,17 @@ class Connection:
 
     async def _authenticate(self, server: ParsedServer, info: dict[str, Any]) -> AuthResult:
         nonce = info["nonce"].encode() if isinstance(info.get("nonce"), str) else None
-        authenticator: Authenticator | None = self._authenticator
-        if authenticator is None and server.username is not None:
-            # URL userinfo fallback: nats://user:pass@host or nats://token@host
+        authenticator: Authenticator | None
+        if server.username is not None:
+            # URL userinfo wins over option-derived auth (parity with nats.go,
+            # whose connectProto reads URL.User ahead of the Options credentials):
+            # nats://user:pass@host or nats://token@host.
             if server.password is not None:
                 authenticator = UserPasswordAuth(user=server.username, password=server.password)
             else:
                 authenticator = TokenAuth(token=server.username)
+        else:
+            authenticator = self._authenticator
         if authenticator is None:
             return AuthResult()
         return await authenticator.authenticate(nonce)
@@ -783,7 +833,7 @@ class Connection:
             log.warning("ignoring malformed async INFO")
             return
         session.server_info.update(info)
-        self._merge_connect_urls(info)
+        self._merge_connect_urls(info, session.server)
         if info.get("ldm"):
             self._emit(LameDuck(session.server.url))
             if self.options.allow_reconnect and not self._closing:
@@ -793,11 +843,11 @@ class Connection:
                 # graceful drain; truncating it mid-segment loses data.
                 asyncio.get_running_loop().call_soon(session.mark_lost, None)
 
-    def _merge_connect_urls(self, info: dict[str, Any]) -> None:
+    def _merge_connect_urls(self, info: dict[str, Any], current: ParsedServer) -> None:
         urls = info.get("connect_urls")
         if not isinstance(urls, list) or not urls:
             return
-        added = self._pool.merge_discovered([u for u in urls if isinstance(u, str)])
+        added = self._pool.merge_discovered([u for u in urls if isinstance(u, str)], keep_key=current.key)
         if added:
             self._emit(ServersDiscovered(tuple(s.url for s in added)))
 

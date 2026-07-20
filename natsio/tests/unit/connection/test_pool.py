@@ -72,3 +72,33 @@ class TestServerPool:
     def test_discovery_can_be_disabled(self) -> None:
         pool = ServerPool(("nats://a:4222",), randomize=False, accept_discovered=False)
         assert pool.merge_discovered(["10.0.0.5:4222"]) == []
+
+    def test_discovered_server_absent_from_next_info_is_pruned(self) -> None:
+        pool = ServerPool(("nats://a:4222",), randomize=False)
+        pool.merge_discovered(["10.0.0.5:4222", "10.0.0.6:4222"])
+        assert {s.host for s in pool.servers} == {"a", "10.0.0.5", "10.0.0.6"}
+        pool.merge_discovered(["10.0.0.5:4222"])
+        # 10.0.0.6 is no longer advertised -> pruned; explicit 'a' survives.
+        assert {s.host for s in pool.servers} == {"a", "10.0.0.5"}
+
+    def test_explicit_servers_never_pruned(self) -> None:
+        pool = ServerPool(("nats://a:4222", "nats://b:4222"), randomize=False)
+        pool.merge_discovered(["10.0.0.5:4222"])
+        # Neither explicit server appears in connect_urls, yet both are kept.
+        assert {s.host for s in pool.servers} == {"a", "b", "10.0.0.5"}
+        pool.merge_discovered(["c:4222"])
+        assert {s.host for s in pool.servers} == {"a", "b", "c"}
+
+    def test_empty_connect_urls_prunes_nothing(self) -> None:
+        pool = ServerPool(("nats://a:4222",), randomize=False)
+        pool.merge_discovered(["10.0.0.5:4222"])
+        assert pool.merge_discovered([]) == []
+        assert {s.host for s in pool.servers} == {"a", "10.0.0.5"}
+
+    def test_connected_discovered_server_kept_via_keep_key(self) -> None:
+        pool = ServerPool(("nats://a:4222",), randomize=False)
+        pool.merge_discovered(["10.0.0.5:4222"])
+        connected = next(s for s in pool.servers if s.host == "10.0.0.5")
+        # A later INFO omits the server we are connected to; keep_key protects it.
+        pool.merge_discovered(["10.0.0.9:4222"], keep_key=connected.key)
+        assert connected.key in {s.key for s in pool.servers}

@@ -7,6 +7,42 @@ Extension packages under `extensions/` keep their own changelogs.
 
 Ground-up rewrite. The previous implementation is retired to the `legacy` branch.
 
+### nats.go parity audit
+
+The full nats.go test suite (~54k lines, the de-facto client conformance
+oracle) was mined for behavioral edge cases across eight domains; every
+claimed divergence was reproduced live before being fixed. Highlights:
+
+- Liveness: a pending `request()` is woken by `close()` with
+  `ConnectionClosedError` instead of hanging out its timeout; JetStream
+  `consume()`/ordered iteration/`fetch()` surface `ConnectionClosedError` on
+  connection close or reconnect exhaustion instead of parking forever; KV
+  watchers/`keys()`/`history()` complete their initial snapshot (bounded idle)
+  instead of deadlocking when the bucket is purged mid-snapshot;
+  `unsubscribe()`/`drain()` called from inside a subscription callback no
+  longer abort the callback or deadlock.
+- Auth: URL userinfo now takes precedence over option credentials (nats.go
+  contract); permanent config errors (missing creds file, bad seed, missing
+  Ed25519 backend) fail fast instead of being masked by other pool servers;
+  a repeated identical auth rejection during reconnect aborts to Closed
+  (2-strikes, like nats.go — opt out with `ignore_auth_error_abort=True`);
+  auth errors additionally reach `error_cb`.
+- Pool: discovered servers absent from a later gossiped `connect_urls` are
+  pruned (explicit and currently-connected servers always kept).
+- Validation: stream/consumer names are validated client-side (a dotted name
+  used to hang the full timeout); KV keys reject `..` and non-terminal `>`;
+  `fetch()` rejects non-positive batch and negative timeout; binding
+  `key_value()` to a stream that doesn't cover the bucket's keyspace raises
+  `BucketNotFoundError`; empty `api_prefix`/`domain` are rejected.
+- Parser: PING/PONG/+OK tolerate trailing bytes (nonconforming-peer
+  robustness); `-ERR` quote normalization matches nats.go.
+- Semantics: sync `next_msg()` converts a payload-less 503 into
+  `NoRespondersError` and refuses callback-mode subscriptions; malformed
+  `$JS.ACK` replies raise `NotJSMessageError`; Object Store `get()` detects
+  chunks appended beyond the recorded count (`DigestMismatchError`);
+  `drain()` timeout surfaces `DrainTimeoutError` through the error callback;
+  `streams()` gained a `subject` filter.
+
 ### JetStream (ADR-37 simplified API)
 
 - `nc.jetstream()` → `JetStreamContext` with domain/api-prefix routing; typed

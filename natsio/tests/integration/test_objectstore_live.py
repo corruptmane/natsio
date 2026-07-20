@@ -514,6 +514,55 @@ class TestReviewRegressions:
         with pytest.raises(InvalidBucketNameError):
             await obj.add_bucket_link("ptr", "not a bucket!")
 
+    async def test_get_detects_appended_chunk(self, nc: natsio.Client, obj) -> None:
+        """[low] An out-of-band chunk appended to the nuid subject after a put
+        must fail the read — nats.go digests every message on the subject and
+        raises ErrDigestMismatch (TestGetObjectDigestMismatch)."""
+        await obj.put("abc", b"abc")
+        info = await obj._info_any("abc")
+        js = nc.jetstream()
+        await js.publish(obj._chunk_subject(info.nuid), b"123")
+        with pytest.raises(DigestMismatchError):
+            await obj.get_bytes("abc")
+
+
+class TestCoverageGaps:
+    async def test_multi_mb_roundtrip(self, obj) -> None:
+        size = 2 * 1024 * 1024  # 16 default 128KiB chunks
+        pattern = bytes(range(256))
+        data = (pattern * (size // len(pattern) + 1))[:size]
+        info = await obj.put("big", data)
+        assert info.chunks == 16
+        assert info.size == size
+        assert await obj.get_bytes("big") == data
+
+    @pytest.mark.parametrize("name", ["foo bar", "a.b.>", ".hidden*", "☂ file"])
+    async def test_special_object_names_end_to_end(self, obj, name: str) -> None:
+        data = ("payload for " + name).encode() * 4
+        info = await obj.put(name, data)
+        assert info.name == name
+        assert (await obj.info(name)).name == name
+        assert await obj.get_bytes(name) == data
+        await obj.delete(name)
+        with pytest.raises(ObjectNotFoundError):
+            await obj.info(name)
+
+    async def test_relink_over_existing_link_changes_target(self, obj) -> None:
+        a = await obj.put("A", b"data-a")
+        b = await obj.put("B", b"data-b")
+        await obj.add_link("L", a)
+        assert await obj.get_bytes("L") == b"data-a"
+        # Re-linking over an existing link succeeds (it is a link, not a live object).
+        await obj.add_link("L", b)
+        assert await obj.get_bytes("L") == b"data-b"
+
+    async def test_status_storage_and_replicas(self, obj) -> None:
+        from natsio.jetstream.entities import StorageType
+
+        status = await obj.status()
+        assert status.storage == StorageType.FILE
+        assert status.replicas == 1
+
 
 class TestSeal:
     async def test_seal_blocks_writes(self, obj) -> None:

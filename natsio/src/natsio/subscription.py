@@ -28,7 +28,8 @@ from types import TracebackType
 from typing import TYPE_CHECKING, Self
 
 from natsio._internal.dispatcher import SubscriptionEntry
-from natsio.errors import NATSError, SlowConsumerError, SubscriptionClosedError
+from natsio._internal.protocol import StatusCode
+from natsio.errors import NATSError, NoRespondersError, SlowConsumerError, SubscriptionClosedError
 from natsio.errors import TimeoutError as NATSTimeoutError
 from natsio.message import Msg
 
@@ -343,6 +344,8 @@ class Subscription:
 
     async def next_msg(self, timeout: float | None = None) -> Msg:  # noqa: ASYNC109
         """Await the next message. Raises :class:`~natsio.errors.TimeoutError` on expiry."""
+        if self._callback is not None:
+            raise SubscriptionClosedError("subscription is in callback mode; use the callback, not next_msg()")
         if self._failure is not None:
             raise self._failure
         try:
@@ -354,6 +357,8 @@ class Subscription:
             if self._failure is not None:
                 raise self._failure
             raise SubscriptionClosedError(f"subscription on {self.subject!r} is closed")
+        if msg.status is not None and msg.status.code == StatusCode.NO_RESPONDERS and not msg.payload:
+            raise NoRespondersError(f"no responders listening on {self.subject!r}")
         return msg
 
     # -- teardown ------------------------------------------------------------
@@ -396,7 +401,10 @@ class Subscription:
         # Suppressed: when not connected there is nothing in flight to wait for.
         with suppress(NATSError):
             await self._client.flush()  # make sure the UNSUB reached the server
-        await self._idle.wait()
+        # Draining from inside the callback: the in-flight message IS the last
+        # one, and _idle can never be set while this callback is running.
+        if self._reader is not asyncio.current_task():
+            await self._idle.wait()
         self._closed = True
         self._closed_event.set()
         await self._finalize(cancel_reader=False)
@@ -405,7 +413,11 @@ class Subscription:
         self._release_pause()
         reader = self._reader
         self._reader = None
-        if reader is not None and not reader.done():
+        # Never cancel/join the reader from within itself (teardown invoked from
+        # inside the callback): doing so would destroy the callback's own
+        # continuation. The callback returns normally and _callback_loop exits
+        # on its next iteration once _closed is observed.
+        if reader is not None and reader is not asyncio.current_task() and not reader.done():
             if cancel_reader:
                 reader.cancel()
             # asyncio.wait neither raises the reader's exception nor swallows

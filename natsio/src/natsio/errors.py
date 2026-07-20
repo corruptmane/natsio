@@ -13,6 +13,7 @@ __all__ = [
     "BadHeadersError",
     "ConfigError",
     "ConnectionClosedError",
+    "DrainTimeoutError",
     "MaxControlLineExceededError",
     "MaxPayloadExceededError",
     "MaxSubscriptionsExceededError",
@@ -45,6 +46,10 @@ class NATSError(Exception):
 
 class TimeoutError(NATSError, builtins.TimeoutError):
     """An operation exceeded its deadline."""
+
+
+class DrainTimeoutError(TimeoutError):
+    """A drain did not finish within ``drain_timeout``."""
 
 
 class ConfigError(NATSError, ValueError):

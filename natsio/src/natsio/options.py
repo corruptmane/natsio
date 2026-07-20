@@ -59,6 +59,10 @@ class ConnectOptions:
     reconnect_jitter_tls: float = 1.0
     no_randomize: bool = False
     ignore_discovered_servers: bool = False
+    # Abort the whole reconnect loop on a repeated auth error from the same
+    # server (parity with nats.go IgnoreAuthErrorAbort inverted): False means
+    # two identical auth rejections finalize the connection Closed.
+    ignore_auth_error_abort: bool = False
 
     # -- liveness --
     ping_interval: float = 120.0
@@ -165,6 +169,7 @@ class ConnectKwargs(TypedDict, total=False):
     reconnect_jitter_tls: float
     no_randomize: bool
     ignore_discovered_servers: bool
+    ignore_auth_error_abort: bool
     ping_interval: float
     max_outstanding_pings: int
     max_pending_size: int

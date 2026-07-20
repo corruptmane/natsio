@@ -1,8 +1,8 @@
 import asyncio
 
 import pytest
-from fake import EventRecorder, FakeEnv, connect_payload, frames_written
 
+from fake import EventRecorder, FakeEnv, FakeTransport, connect_payload, frames_written
 from natsio._internal.connection import Connection
 from natsio._internal.lifecycle import (
     Closed,
@@ -16,6 +16,7 @@ from natsio._internal.lifecycle import (
 )
 from natsio._internal.protocol import HMsgEvent, MsgEvent
 from natsio.errors import (
+    AuthenticationExpiredError,
     AuthorizationViolationError,
     ConfigError,
     ConnectionClosedError,
@@ -125,6 +126,41 @@ class TestHandshake:
             assert connect_payload(env.current)["auth_token"] == "s3cr3t"
         finally:
             await conn.close(flush=False)
+
+    async def test_url_userpass_wins_over_option_credentials(self) -> None:
+        env = FakeEnv()
+        conn = await connected_conn(env, servers=("nats://alice:secret@s1:4222",), user="bob", password="other")
+        try:
+            payload = connect_payload(env.current)
+            assert payload["user"] == "alice"
+            assert payload["pass"] == "secret"
+        finally:
+            await conn.close(flush=False)
+
+    async def test_url_token_wins_over_option_token(self) -> None:
+        env = FakeEnv()
+        conn = await connected_conn(env, servers=("nats://url-tok@s1:4222",), token="opt-tok")
+        try:
+            assert connect_payload(env.current)["auth_token"] == "url-tok"
+        finally:
+            await conn.close(flush=False)
+
+    async def test_config_error_fails_fast_without_burning_other_servers(self) -> None:
+        class _MissingFileAuth:
+            async def authenticate(self, nonce: bytes | None) -> object:
+                raise FileNotFoundError(2, "No such file or directory", "/nope.creds")
+
+        env = FakeEnv()
+        conn = Connection(
+            make_options(servers=("nats://s1:4222", "nats://s2:4222"), authenticator=_MissingFileAuth()),
+            transport_factory=env.factory,
+        )
+        with pytest.raises(FileNotFoundError):
+            await conn.connect()
+        # The permanent config error aborts on the first server instead of
+        # trying (and masking the cause with) the second.
+        assert env.attempts == 1
+        assert conn.state is ConnectionState.CLOSED
 
 
 class TestMessaging:
@@ -450,6 +486,84 @@ class TestReconnectPolicy:
             assert len(event.urls) == 2
             # The seed plus both discovered peers are now failover candidates.
             assert len(conn._pool.candidates()) == 3
+        finally:
+            await conn.close(flush=False)
+
+
+def _reject_auth_after_connect(env: FakeEnv, budget: dict[str, int], message: bytes) -> None:
+    """Make the fake server reject CONNECT with ``message`` for the next
+    ``budget['n']`` handshakes, auto-ponging normally otherwise."""
+
+    def on_write(transport: FakeTransport, data: bytes) -> None:
+        if budget["n"] > 0 and b"CONNECT" in data:
+            budget["n"] -= 1
+            asyncio.get_running_loop().call_soon(transport.deliver, message)
+            return
+        env._default_on_client_write(transport, data)
+
+    env.on_client_write = on_write
+
+
+class TestAuthReconnect:
+    async def test_repeated_auth_error_during_reconnect_closes(self) -> None:
+        env = FakeEnv()
+        recorder = EventRecorder()
+        budget = {"n": 0}
+        _reject_auth_after_connect(env, budget, b"-ERR 'Authorization Violation'\r\n")
+        conn = Connection(make_options(max_reconnect_attempts=-1), transport_factory=env.factory)
+        conn.bus.subscribe(recorder.hook)
+        await conn.connect()
+        budget["n"] = 1000  # reject every reconnect handshake from now on
+        env.current.drop()
+        # Two identical auth rejections abort the whole loop despite unlimited retries.
+        await recorder.wait_for(Closed, timeout=5.0)
+        assert conn.state is ConnectionState.CLOSED
+
+    async def test_ignore_auth_error_abort_keeps_retrying(self) -> None:
+        env = FakeEnv()
+        recorder = EventRecorder()
+        budget = {"n": 1000}
+        _reject_auth_after_connect(env, budget, b"-ERR 'Authorization Violation'\r\n")
+        conn = Connection(
+            make_options(max_reconnect_attempts=5, ignore_auth_error_abort=True),
+            transport_factory=env.factory,
+        )
+        conn.bus.subscribe(recorder.hook)
+        # Initial handshake must succeed, so do not reject until connected.
+        budget["n"] = 0
+        await conn.connect()
+        budget["n"] = 1000
+        env.current.drop()
+        await recorder.wait_for(Closed, timeout=5.0)
+        # Not aborted at strike two: exhausts the full retry budget instead.
+        assert env.attempts == 1 + 5
+
+    async def test_auth_error_then_success_clears_memory(self) -> None:
+        env = FakeEnv()
+        recorder = EventRecorder()
+        budget = {"n": 0}
+        _reject_auth_after_connect(env, budget, b"-ERR 'Authorization Violation'\r\n")
+        conn = Connection(make_options(max_reconnect_attempts=-1), transport_factory=env.factory)
+        conn.bus.subscribe(recorder.hook)
+        await conn.connect()
+        budget["n"] = 1  # exactly one reconnect handshake is rejected
+        env.current.drop()
+        await recorder.wait_for(Reconnected, timeout=5.0)
+        assert conn.state is ConnectionState.CONNECTED
+        assert all(s.last_auth_error is None for s in conn._pool.servers)
+        await conn.close(flush=False)
+
+    async def test_live_auth_error_reaches_error_handler_and_reconnects(self) -> None:
+        env = FakeEnv()
+        recorder = EventRecorder()
+        conn = await connected_conn(env, recorder)
+        try:
+            env.current.deliver(b"-ERR 'User Authentication Expired'\r\n")
+            event = await recorder.wait_for(ErrorOccurred)
+            assert isinstance(event, ErrorOccurred)
+            assert isinstance(event.error, AuthenticationExpiredError)
+            await recorder.wait_for(Reconnected)
+            assert conn.state is ConnectionState.CONNECTED
         finally:
             await conn.close(flush=False)
 

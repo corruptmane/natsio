@@ -6,13 +6,16 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 import natsio
+from natsio.errors import ConnectionClosedError
 from natsio.jetstream import (
     AckPolicy,
     ConsumerConfig,
     DeliverPolicy,
+    JetStreamContext,
     NoMessagesError,
     RetentionPolicy,
     StorageType,
+    Stream,
     StreamConfig,
     StreamNotFoundError,
     WrongLastSequenceError,
@@ -376,6 +379,205 @@ class TestOrderedConsumer:
         await iterator.aclose()
         # Self-healing must not skip or duplicate anything.
         assert received == [b"0", b"1", b"2"]
+
+
+def _pull_signal(client: natsio.Client) -> asyncio.Event:
+    """Fire an event the first time the client publishes a pull request.
+
+    Lets tests wait — event-driven, no sleeps — until a consume/fetch session
+    is actually parked on the server before they perturb the connection.
+    """
+    event = asyncio.Event()
+    original = client.publish
+
+    async def publish(subject: str, *args, **kwargs):
+        result = await original(subject, *args, **kwargs)
+        if ".CONSUMER.MSG.NEXT." in subject:
+            event.set()
+        return result
+
+    client.publish = publish  # ty: ignore[invalid-assignment]
+    return event
+
+
+class TestConnectionCloseWakesConsumers:
+    """A closing/exhausted connection must wake parked pull iterators, not hang.
+
+    Mirrors nats.go TestPullConsumerConnectionClosed and
+    TestPullConsumerMaxReconnectsExceeded.
+    """
+
+    async def test_client_close_wakes_parked_consume(self, server: NatsServerProcess) -> None:
+        nc = await natsio.connect(server.url, connect_timeout=5.0, request_timeout=5.0)
+        try:
+            js = nc.jetstream()
+            stream = await js.create_stream(StreamConfig(name="CLC", subjects=["clc.>"], storage=StorageType.MEMORY))
+            consumer = await stream.create_consumer(ConsumerConfig(durable_name="w"))
+            pulled = _pull_signal(nc)
+            async with consumer.consume(max_messages=5) as messages:
+                parked = asyncio.ensure_future(messages.next(timeout=30))
+                async with asyncio.timeout(5):
+                    await pulled.wait()  # a pull is outstanding: next() is parked
+                loop = asyncio.get_running_loop()
+                await nc.close()
+                started = loop.time()
+                with pytest.raises(ConnectionClosedError):
+                    async with asyncio.timeout(5):
+                        await parked
+                assert loop.time() - started < 2.0  # woken promptly, not on a deadline
+        finally:
+            await nc.close()
+
+    async def test_client_close_wakes_parked_ordered_messages(self, server: NatsServerProcess) -> None:
+        nc = await natsio.connect(server.url, connect_timeout=5.0, request_timeout=5.0)
+        try:
+            js = nc.jetstream()
+            stream = await js.create_stream(StreamConfig(name="OCLC", subjects=["oclc.>"], storage=StorageType.MEMORY))
+            ordered = stream.ordered_consumer()
+            pulled = _pull_signal(nc)
+            iterator = ordered.messages()
+            parked = asyncio.ensure_future(anext(iterator))
+            try:
+                async with asyncio.timeout(5):
+                    await pulled.wait()
+                await nc.close()
+                with pytest.raises(ConnectionClosedError):
+                    async with asyncio.timeout(5):
+                        await parked
+            finally:
+                parked.cancel()
+        finally:
+            await nc.close()
+
+    async def test_reconnect_exhaustion_wakes_parked_consume(self, server: NatsServerProcess) -> None:
+        nc = await natsio.connect(
+            server.url,
+            connect_timeout=5.0,
+            request_timeout=5.0,
+            max_reconnect_attempts=2,
+            reconnect_time_wait=0.2,
+            reconnect_time_wait_max=0.2,
+        )
+        try:
+            js = nc.jetstream()
+            stream = await js.create_stream(StreamConfig(name="EXH", subjects=["exh.>"], storage=StorageType.MEMORY))
+            consumer = await stream.create_consumer(ConsumerConfig(durable_name="w"))
+            pulled = _pull_signal(nc)
+            async with consumer.consume(max_messages=5) as messages:
+                parked = asyncio.ensure_future(messages.next(timeout=30))
+                async with asyncio.timeout(5):
+                    await pulled.wait()
+                server.kill()  # never restarted: reconnect budget will exhaust
+                with pytest.raises(ConnectionClosedError):
+                    async with asyncio.timeout(20):
+                        await parked
+        finally:
+            await nc.close()
+
+    async def test_fetch_raises_on_client_close(self, server: NatsServerProcess) -> None:
+        """A parked fetch() must surface ConnectionClosedError, not return []."""
+        nc = await natsio.connect(server.url, connect_timeout=5.0, request_timeout=5.0)
+        try:
+            js = nc.jetstream()
+            stream = await js.create_stream(StreamConfig(name="FCL", subjects=["fcl.>"], storage=StorageType.MEMORY))
+            consumer = await stream.create_consumer(ConsumerConfig(durable_name="w"))
+            pulled = _pull_signal(nc)
+            fetching = asyncio.ensure_future(consumer.fetch(5, timeout=30))
+            try:
+                async with asyncio.timeout(5):
+                    await pulled.wait()
+                await nc.close()
+                with pytest.raises(ConnectionClosedError):
+                    async with asyncio.timeout(5):
+                        await fetching
+            finally:
+                fetching.cancel()
+        finally:
+            await nc.close()
+
+
+class TestStreamListing:
+    async def test_streams_and_names_filter_by_subject(self, nc: natsio.Client) -> None:
+        js = nc.jetstream()
+        await js.create_stream(StreamConfig(name="ALPHA", subjects=["alpha.>"], storage=StorageType.MEMORY))
+        await js.create_stream(StreamConfig(name="BETA", subjects=["beta.>"], storage=StorageType.MEMORY))
+
+        infos = [info.config.name async for info in js.streams(subject="alpha.1")]
+        assert infos == ["ALPHA"]
+        names = [name async for name in js.stream_names(subject="beta.9")]
+        assert names == ["BETA"]
+
+        # No filter yields both.
+        assert {info.config.name async for info in js.streams()} == {"ALPHA", "BETA"}
+
+    async def test_pagination_across_page_boundary(self, nc: natsio.Client) -> None:
+        """The server pages STREAM.NAMES/LIST at 256 rows; 300 forces a second page."""
+        js = nc.jetstream()
+        total = 300
+
+        async def make(i: int) -> None:
+            await js.create_stream(StreamConfig(name=f"P{i:04d}", subjects=[f"p{i}.>"], storage=StorageType.MEMORY))
+
+        for start in range(0, total, 50):
+            await asyncio.gather(*(make(i) for i in range(start, min(start + 50, total))))
+
+        names = {name async for name in js.stream_names()}
+        assert len(names) == total
+        infos = {info.config.name async for info in js.streams()}
+        assert len(infos) == total
+        assert names == infos
+
+
+class TestNextBySubject:
+    async def _seed(self, js: JetStreamContext, name: str, *, allow_direct: bool) -> Stream:
+        stream = await js.create_stream(
+            StreamConfig(
+                name=name,
+                subjects=[f"{name}.>"],
+                storage=StorageType.MEMORY,
+                allow_direct=allow_direct,
+            )
+        )
+        await js.publish(f"{name}.a", b"1")  # seq 1
+        await js.publish(f"{name}.b", b"2")  # seq 2
+        await js.publish(f"{name}.a", b"3")  # seq 3
+        await js.publish(f"{name}.b", b"4")  # seq 4
+        return stream
+
+    async def test_next_by_subj_direct_path(self, nc: natsio.Client) -> None:
+        js = nc.jetstream()
+        stream = await self._seed(js, "NBSD", allow_direct=True)
+        assert stream.cached_info.config.allow_direct is True
+
+        first = await stream.get_msg(sequence=1, subject="NBSD.a", next_for=True)
+        assert (first.seq, first.payload) == (1, b"1")
+        # next a-message at or after seq 2 is seq 3, skipping the b at seq 2.
+        nxt = await stream.get_msg(sequence=2, subject="NBSD.a", next_for=True)
+        assert (nxt.seq, nxt.payload) == (3, b"3")
+
+    async def test_next_by_subj_api_path(self, nc: natsio.Client) -> None:
+        js = nc.jetstream()
+        stream = await self._seed(js, "NBSA", allow_direct=False)
+        assert not stream.cached_info.config.allow_direct
+
+        first = await stream.get_msg(sequence=1, subject="NBSA.a", next_for=True)
+        assert (first.seq, first.payload) == (1, b"1")
+        nxt = await stream.get_msg(sequence=2, subject="NBSA.a", next_for=True)
+        assert (nxt.seq, nxt.payload) == (3, b"3")
+
+
+class TestNameValidation:
+    async def test_dotted_stream_name_fails_fast(self, nc: natsio.Client) -> None:
+        import time
+
+        from natsio.errors import ConfigError
+
+        js = nc.jetstream()
+        start = time.monotonic()
+        with pytest.raises(ConfigError):
+            await js.stream_info("foo.123")
+        # Must reject client-side, not hang the full JS timeout.
+        assert time.monotonic() - start < 1.0
 
 
 class TestWorkQueueSemantics:

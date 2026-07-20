@@ -4,7 +4,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import StrEnum
-from typing import Final, Protocol
+from typing import Final, NoReturn, Protocol
 
 from natsio.jetstream.entities import Placement, Republish, StorageType, StreamInfo
 
@@ -23,6 +23,8 @@ __all__ = [
 
 _BUCKET_RE: Final = re.compile(r"\A[a-zA-Z0-9_-]+\Z")
 _KEY_RE: Final = re.compile(r"\A[-/_=.a-zA-Z0-9]+\Z")
+# A single subject token (no dots): the per-token unit for wildcard validation.
+_KEY_TOKEN_RE: Final = re.compile(r"\A[-/_=a-zA-Z0-9]+\Z")
 
 
 def validate_bucket_name(bucket: str) -> None:
@@ -32,12 +34,32 @@ def validate_bucket_name(bucket: str) -> None:
 
 def validate_key(key: str, *, wildcards: bool = False) -> None:
     """Validate a KV key (ADR-8). ``wildcards=True`` additionally allows the
-    ``*``/``>`` subject wildcards used by ``watch()``."""
-    stripped = key.replace("*", "x").replace(">", "x") if wildcards else key
-    if not _KEY_RE.match(stripped) or stripped.startswith(".") or stripped.endswith("."):
+    ``*``/``>`` subject wildcards used by ``watch()`` — ``*`` as a whole token
+    and ``>`` only as the final token, mirroring subject-filter grammar."""
+
+    def _reject() -> NoReturn:
         raise InvalidKeyError(
-            f"invalid key {key!r}: allowed characters are A-Z a-z 0-9 - / _ = . (no leading/trailing dot)"
+            f"invalid key {key!r}: allowed characters are A-Z a-z 0-9 - / _ = . "
+            "(no leading/trailing dot, no empty tokens; '*'/'>' only with wildcards, '>' only final)"
         )
+
+    if not key or key.startswith(".") or key.endswith(".") or ".." in key:
+        _reject()
+    if not wildcards:
+        if not _KEY_RE.match(key):
+            _reject()
+        return
+    tokens = key.split(".")
+    last = len(tokens) - 1
+    for index, token in enumerate(tokens):
+        if token == "*":
+            continue
+        if token == ">":
+            if index != last:
+                _reject()
+            continue
+        if not _KEY_TOKEN_RE.match(token):
+            _reject()
 
 
 class Operation(StrEnum):

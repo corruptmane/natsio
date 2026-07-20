@@ -71,6 +71,20 @@ class TestParse:
         assert headers is not None
         assert headers["Nats-Last-Consumer"] == "5"
 
+    def test_inline_status_irregular_whitespace(self) -> None:
+        _, status = parse_header_block(b"NATS/1.0  404   No Messages\r\n\r\n")
+        assert status is not None
+        assert (status.code, status.description) == (404, "No Messages")
+
+    def test_inline_status_bare_code_no_description(self) -> None:
+        _, status = parse_header_block(b"NATS/1.0 503\r\n\r\n")
+        assert status is not None
+        assert (status.code, status.description) == (503, "")
+
+    def test_inline_status_whitespace_only_is_no_status(self) -> None:
+        _, status = parse_header_block(b"NATS/1.0   \r\n\r\n")
+        assert status is None
+
     def test_non_numeric_status_is_not_a_status(self) -> None:
         _, status = parse_header_block(b"NATS/1.0 xyz\r\n\r\n")
         assert status is None

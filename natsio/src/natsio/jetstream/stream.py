@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 from natsio._internal.jsonmodel import RFC3339
 from natsio._internal.nuid import next_nuid
 from natsio._internal.protocol import Headers, parse_header_block
+from natsio._internal.validation import validate_consumer_name
 from natsio.errors import ConfigError, NoRespondersError
 
 if TYPE_CHECKING:
@@ -88,9 +89,10 @@ class Stream:
         # subsequent create into the same consumer — probe-confirmed).
         config = ConsumerConfig.from_wire(config.to_wire()) if config is not None else ConsumerConfig()
         name = config.name or config.durable_name
-        if name is None:
+        if not name:
             name = next_nuid()
             config.name = name
+        validate_consumer_name(name)
         endpoint = f"CONSUMER.CREATE.{self.name}.{name}"
         if config.filter_subject and "*" not in config.filter_subject and ">" not in config.filter_subject:
             endpoint += f".{config.filter_subject}"
@@ -107,17 +109,21 @@ class Stream:
         return Consumer(self, await self.consumer_info(name))
 
     async def consumer_info(self, name: str) -> ConsumerInfo:
+        validate_consumer_name(name)
         data = await self._ctx._api_request(f"CONSUMER.INFO.{self.name}.{name}")
         return ConsumerInfo.from_wire(data)
 
     async def delete_consumer(self, name: str) -> None:
+        validate_consumer_name(name)
         await self._ctx._api_request(f"CONSUMER.DELETE.{self.name}.{name}")
 
     async def pause_consumer(self, name: str, until: datetime) -> None:
         """Pause delivery until ``until`` (server 2.11+)."""
+        validate_consumer_name(name)
         await self._ctx._api_request(f"CONSUMER.PAUSE.{self.name}.{name}", {"pause_until": RFC3339.to_wire(until)})
 
     async def resume_consumer(self, name: str) -> None:
+        validate_consumer_name(name)
         await self._ctx._api_request(f"CONSUMER.PAUSE.{self.name}.{name}", {})
 
     async def consumer_names(self) -> AsyncIterator[str]:

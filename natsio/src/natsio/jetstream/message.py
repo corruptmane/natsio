@@ -13,11 +13,15 @@ if TYPE_CHECKING:
 
 from .errors import JetStreamError
 
-__all__ = ["AckMetadata", "JsMsg", "MessageAlreadyAckedError"]
+__all__ = ["AckMetadata", "JsMsg", "MessageAlreadyAckedError", "NotJSMessageError"]
 
 
 class MessageAlreadyAckedError(JetStreamError):
     """A terminal acknowledgement was already sent for this message."""
+
+
+class NotJSMessageError(JetStreamError):
+    """A reply subject is not a valid ``$JS.ACK`` reply (mirrors ErrNotJSMessage)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,7 +45,11 @@ class AckMetadata:
     def from_reply(cls, reply: str) -> "AckMetadata":
         tokens = reply.split(".")
         if len(tokens) < 9 or tokens[0] != "$JS" or tokens[1] != "ACK":
-            raise NATSError(f"not a JetStream ack reply subject: {reply!r}")
+            raise NotJSMessageError(f"not a JetStream ack reply subject: {reply!r}")
+        if len(tokens) in (10, 11):
+            # Neither the v1 (9) nor v2 (12+) shape — reject cleanly instead of
+            # letting int() raise a raw ValueError on a misaligned token.
+            raise NotJSMessageError(f"not a JetStream ack reply subject ({len(tokens)} tokens): {reply!r}")
         if len(tokens) >= 12:
             domain = None if tokens[2] == "_" else tokens[2]
             # tokens[3] is the account hash; unused client-side.

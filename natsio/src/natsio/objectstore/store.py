@@ -524,6 +524,14 @@ class ObjectResult:
                 size += len(msg.payload)
                 yield msg.payload
                 if received >= info.chunks:
+                    # A chunk appended out-of-band after the put makes the
+                    # recorded-count-th message report pending successors — the
+                    # digest would silently ignore it. nats.go digests every
+                    # message on the subject; reject the extra data instead.
+                    if msg.metadata.num_pending > 0:
+                        raise DigestMismatchError(
+                            f"object {info.name!r}: extra chunks beyond the recorded {info.chunks} — discard the data"
+                        )
                     break
         finally:
             self._active_messages = self._active_ordered = None

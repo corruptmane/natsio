@@ -6,7 +6,7 @@ from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any
 
 from natsio._internal.protocol import HeadersInput
-from natsio._internal.validation import validate_subject
+from natsio._internal.validation import validate_stream_name, validate_subject
 from natsio.errors import ConfigError, NoRespondersError
 from natsio.message import Msg
 
@@ -47,8 +47,12 @@ class JetStreamContext:
             raise ConfigError("provide either domain or api_prefix, not both")
         self._client = client
         if api_prefix is not None:
+            if not api_prefix:
+                raise ConfigError("API prefix cannot be empty")
             self._prefix = api_prefix.rstrip(".")
         elif domain is not None:
+            if not domain:
+                raise ConfigError("domain cannot be empty")
             self._prefix = f"$JS.{domain}.API"
         else:
             self._prefix = "$JS.API"
@@ -102,14 +106,12 @@ class JetStreamContext:
     # -- streams -------------------------------------------------------------
 
     async def create_stream(self, config: StreamConfig) -> Stream:
-        if not config.name:
-            raise ConfigError("stream config must carry a name")
+        validate_stream_name(config.name)
         data = await self._api_request(f"STREAM.CREATE.{config.name}", config.to_wire())
         return Stream(self, StreamInfo.from_wire(data))
 
     async def update_stream(self, config: StreamConfig) -> Stream:
-        if not config.name:
-            raise ConfigError("stream config must carry a name")
+        validate_stream_name(config.name)
         data = await self._api_request(f"STREAM.UPDATE.{config.name}", config.to_wire())
         return Stream(self, StreamInfo.from_wire(data))
 
@@ -118,10 +120,12 @@ class JetStreamContext:
         return Stream(self, await self.stream_info(name))
 
     async def stream_info(self, name: str, *, subjects_filter: str | None = None) -> StreamInfo:
+        validate_stream_name(name)
         payload = {"subjects_filter": subjects_filter} if subjects_filter else None
         return StreamInfo.from_wire(await self._api_request(f"STREAM.INFO.{name}", payload))
 
     async def delete_stream(self, name: str) -> None:
+        validate_stream_name(name)
         await self._api_request(f"STREAM.DELETE.{name}")
 
     async def purge_stream(
@@ -133,6 +137,7 @@ class JetStreamContext:
         keep: int | None = None,
     ) -> int:
         """Purge messages; returns the number purged."""
+        validate_stream_name(name)
         payload: dict[str, Any] = {}
         if subject is not None:
             payload["filter"] = subject
@@ -157,10 +162,13 @@ class JetStreamContext:
             if offset >= int(data.get("total", 0)) or not names:
                 return
 
-    async def streams(self) -> AsyncIterator[StreamInfo]:
+    async def streams(self, *, subject: str | None = None) -> AsyncIterator[StreamInfo]:
         offset = 0
         while True:
-            data = await self._api_request("STREAM.LIST", {"offset": offset})
+            payload: dict[str, Any] = {"offset": offset}
+            if subject is not None:
+                payload["subject"] = subject
+            data = await self._api_request("STREAM.LIST", payload)
             infos: list[dict[str, Any]] = data.get("streams") or []
             for info in infos:
                 yield StreamInfo.from_wire(info)

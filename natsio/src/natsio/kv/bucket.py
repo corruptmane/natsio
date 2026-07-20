@@ -5,8 +5,8 @@ from typing import TYPE_CHECKING, Final, Self
 
 from natsio.jetstream import headers as js_headers
 from natsio.jetstream.consumer import OrderedConsumer
-from natsio.jetstream.entities import DeliverPolicy
-from natsio.jetstream.errors import WrongLastSequenceError
+from natsio.jetstream.entities import DeliverPolicy, StreamConfig
+from natsio.jetstream.errors import NoMessagesError, WrongLastSequenceError
 from natsio.jetstream.message import JsMsg
 from natsio.jetstream.stream import Stream
 
@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from natsio.jetstream.context import JetStreamContext
 
 from .entities import KeyCodec, KeyValueStatus, KvEntry, Operation, ValueCodec, validate_key
-from .errors import KeyDeletedError, KeyExistsError, KeyNotFoundError
+from .errors import BucketNotFoundError, KeyDeletedError, KeyExistsError, KeyNotFoundError
 
 __all__ = ["KeyValue", "KvWatcher"]
 
@@ -30,6 +30,30 @@ _MARKER_OPERATIONS: Final = {
     "Purge": Operation.PURGE,
     "Remove": Operation.PURGE,
 }
+
+# The initial-snapshot phase of a watch is bounded by this idle timeout: N
+# seconds with zero deliveries means caught-up-or-empty (the stream may have
+# been purged out from under a pending snapshot). The live phase that follows
+# is unbounded.
+_SNAPSHOT_IDLE_TIMEOUT: Final = 5.0
+
+
+def validate_kv_stream(bucket: str, config: StreamConfig) -> None:
+    """Ensure a resolved stream actually covers ``bucket``'s KV keyspace.
+
+    Binding to a ``KV_``-named stream whose subjects don't include
+    ``$KV.<bucket>.>`` otherwise surfaces much later as a confusing
+    publish-time failure naming the raw subject; reject it up front.
+    """
+    prefix = f"{SUBJECT_PREFIX}.{bucket}."
+    covering = {f"{SUBJECT_PREFIX}.{bucket}.>", f"{SUBJECT_PREFIX}.>", ">"}
+    subjects = config.subjects or []
+    if any(subject in covering or subject.startswith(prefix) for subject in subjects):
+        return
+    raise BucketNotFoundError(
+        f"stream {config.name!r} is not a Key-Value bucket for {bucket!r}: "
+        f"its subjects {subjects} do not cover {prefix}>"
+    )
 
 
 class KeyValue:
@@ -52,6 +76,7 @@ class KeyValue:
         key_codec: KeyCodec | None = None,
         value_codec: ValueCodec | None = None,
     ) -> None:
+        validate_kv_stream(bucket, stream.cached_info.config)
         self._ctx = ctx
         self.bucket = bucket
         self._stream = stream
@@ -385,25 +410,44 @@ class KvWatcher:
         if self._updates_only or info.num_pending == 0:
             self._init_done = True
             yield None
-        # Revisions yielded during the initial snapshot, by key. The ordered
-        # consumer self-heals by REPLAYING from its last good point, so a heal
-        # landing mid-snapshot re-delivers entries; without dedup that showed
-        # up as duplicate keys and stale values in keys()/watch initial state.
-        snapshot_seen: dict[str, int] = {}
+        # -- initial snapshot (bounded) --------------------------------------
+        # Revisions yielded during the snapshot, by key. The ordered consumer
+        # self-heals by REPLAYING from its last good point, so a heal landing
+        # mid-snapshot re-delivers entries; without dedup that showed up as
+        # duplicate keys and stale values in keys()/watch initial state.
+        #
+        # The snapshot is bounded by an idle timeout: if the pending messages
+        # are purged before delivery the consumer never sees a delta==0 entry,
+        # and an unbounded wait would hang forever (probe_deadlock.py). On the
+        # NoMessagesError the snapshot is treated as complete.
+        if not self._init_done:
+            snapshot_seen: dict[str, int] = {}
+            try:
+                async for msg in self._ordered.messages(idle_timeout=_SNAPSHOT_IDLE_TIMEOUT):
+                    if self._stopped:
+                        return
+                    entry = self._kv._entry_from_msg(msg)
+                    caught_up = entry.delta == 0
+                    previous = snapshot_seen.get(entry.key, 0)
+                    duplicate = entry.revision <= previous
+                    if not duplicate:
+                        snapshot_seen[entry.key] = entry.revision
+                    if not duplicate and not (self._ignore_deletes and entry.is_marker):
+                        yield entry
+                    if caught_up:
+                        break
+            except NoMessagesError:
+                pass  # snapshot drained (quiet or purged-out): caught up
+            self._init_done = True
+            yield None
+        # -- live updates (unbounded) ----------------------------------------
+        # The snapshot generator is spent (broke out, or raised and ran its
+        # teardown); a fresh messages() call resumes from the ordered
+        # consumer's preserved position (_last_sseq), so the live phase neither
+        # replays the snapshot nor skips past it.
         async for msg in self._ordered.messages():
             if self._stopped:
                 return
             entry = self._kv._entry_from_msg(msg)
-            caught_up = not self._init_done and entry.delta == 0
-            duplicate = False
-            if not self._init_done:
-                previous = snapshot_seen.get(entry.key, 0)
-                duplicate = entry.revision <= previous
-                if not duplicate:
-                    snapshot_seen[entry.key] = entry.revision
-            if not duplicate and not (self._ignore_deletes and entry.is_marker):
+            if not (self._ignore_deletes and entry.is_marker):
                 yield entry
-            if caught_up:
-                self._init_done = True
-                snapshot_seen.clear()
-                yield None

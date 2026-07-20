@@ -1,3 +1,4 @@
+import pytest
 from helpers import (
     concat,
     err_frame,
@@ -30,6 +31,41 @@ def test_ping_pong_ok() -> None:
     assert events == [PingEvent(), PongEvent(), OkEvent()]
 
 
+@pytest.mark.parametrize(
+    "stream",
+    [
+        b"PING  \r\n",
+        b"PING x\r\n",
+        b"PING\t\r\n",
+    ],
+)
+def test_ping_with_trailing_content_tolerated(stream: bytes) -> None:
+    assert parse_whole(stream) == [PingEvent()]
+
+
+@pytest.mark.parametrize(
+    "stream",
+    [
+        b"PONG \r\n",
+        b"PONG whatever\r\n",
+    ],
+)
+def test_pong_with_trailing_content_tolerated(stream: bytes) -> None:
+    assert parse_whole(stream) == [PongEvent()]
+
+
+@pytest.mark.parametrize(
+    "stream",
+    [
+        b"+OK\r\n",
+        b"+OKay\r\n",
+        b"+OK something\r\n",
+    ],
+)
+def test_ok_with_trailing_content_tolerated(stream: bytes) -> None:
+    assert parse_whole(stream) == [OkEvent()]
+
+
 def test_info() -> None:
     (event,) = parse_whole(info_frame(b'{"server_id":"x","max_payload":1048576}'))
     assert event == InfoEvent(raw=b'{"server_id":"x","max_payload":1048576}')
@@ -43,6 +79,21 @@ def test_err_quotes_stripped() -> None:
 def test_err_without_quotes() -> None:
     (event,) = parse_whole(b"-ERR Unknown Protocol Operation\r\n")
     assert event == ErrEvent(message="Unknown Protocol Operation")
+
+
+@pytest.mark.parametrize(
+    ("line", "expected"),
+    [
+        (b"-ERR Unknown Protocol Operation\r\n", "Unknown Protocol Operation"),
+        (b"-ERR 'Stale Connection'\r\n", "Stale Connection"),
+        (b"-ERR 'Authorization Violation\r\n", "Authorization Violation"),
+        (b"-ERR Permissions Violation'\r\n", "Permissions Violation"),
+        (b"-ERR ''double''\r\n", "double"),
+    ],
+)
+def test_err_quote_normalization(line: bytes, expected: str) -> None:
+    (event,) = parse_whole(line)
+    assert event == ErrEvent(message=expected)
 
 
 def test_msg_without_reply() -> None:
@@ -71,6 +122,32 @@ def test_msg_payload_containing_crlf() -> None:
 def test_msg_tab_separated_args() -> None:
     (event,) = parse_whole(b"MSG foo\t7\t2\r\nhi\r\n")
     assert event == MsgEvent(subject="foo", sid=7, reply_to=None, payload=b"hi")
+
+
+def test_hmsg_tab_separated_args_no_reply() -> None:
+    block = header_block("A: 1")
+    frame = f"HMSG s\t3\t{len(block)}\t{len(block) + 2}\r\n".encode() + block + b"hi\r\n"
+    (event,) = parse_whole(frame)
+    assert isinstance(event, HMsgEvent)
+    assert event.subject == "s"
+    assert event.sid == 3
+    assert event.reply_to is None
+    assert event.payload == b"hi"
+    assert event.headers is not None
+    assert event.headers["A"] == "1"
+
+
+def test_hmsg_tab_separated_args_with_reply() -> None:
+    block = header_block("A: 1")
+    frame = f"HMSG s\t3\trep\t{len(block)}\t{len(block) + 2}\r\n".encode() + block + b"hi\r\n"
+    (event,) = parse_whole(frame)
+    assert isinstance(event, HMsgEvent)
+    assert event.subject == "s"
+    assert event.sid == 3
+    assert event.reply_to == "rep"
+    assert event.payload == b"hi"
+    assert event.headers is not None
+    assert event.headers["A"] == "1"
 
 
 def test_lowercase_operations_accepted() -> None:

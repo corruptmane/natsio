@@ -363,6 +363,16 @@ class TestReviewRegressions:
         collected = [key async for key in kv.iter_keys()]
         assert sorted(collected) == [f"k{i}" for i in range(5)]
 
+    async def test_bind_over_mis_subjected_kv_stream_rejected(self, nc: natsio.Client) -> None:
+        """Finding: binding to a KV_-named stream whose subjects don't cover the
+        bucket keyspace bound fine, then failed confusingly at write time."""
+        from natsio.jetstream import StreamConfig as ForeignStreamConfig
+
+        js = nc.jetstream()
+        await js.create_stream(ForeignStreamConfig(name="KV_BADBUCKET", subjects=["unrelated.foo"], allow_direct=True))
+        with pytest.raises(BucketNotFoundError, match="not a Key-Value bucket"):
+            await js.key_value("BADBUCKET")
+
     async def test_snapshot_survives_mid_delivery_self_heal(self, kv) -> None:
         """Finding (major): a heal during the initial snapshot duplicated keys
         and resurfaced stale values. Force a heal by deleting the ephemeral
@@ -392,3 +402,126 @@ class TestReviewRegressions:
         assert duplicates == []
         assert len(seen) == 50
         assert seen["key.0"] == b"new"
+
+
+async def _fill(kv, count: int) -> None:
+    for start in range(0, count, 200):
+        await asyncio.gather(*(kv.put(f"key-{i}", b"v") for i in range(start, min(start + 200, count))))
+
+
+class TestPurgedStreamSnapshot:
+    """nats.go TestListKeysFromPurgedStream: a purge (or emptying) mid-snapshot
+    must not deadlock keys()/watch — the initial snapshot is idle-bounded."""
+
+    async def test_keys_race_stream_purge_does_not_hang(self, nc: natsio.Client) -> None:
+        js = nc.jetstream()
+        for delay in (0.001, 0.005, 0.01):
+            kv = await js.create_key_value(KeyValueConfig(bucket=f"PURGED{int(delay * 1000)}"))
+            await _fill(kv, 2000)
+
+            async def purge_later(stream=kv._stream, d=delay) -> None:
+                await asyncio.sleep(d)
+                await stream.purge()
+
+            task = asyncio.create_task(purge_later())
+            try:
+                async with asyncio.timeout(20):
+                    keys = await kv.keys()
+            finally:
+                await task
+            # Bounded return — empty or partial — instead of the old forever-hang.
+            assert isinstance(keys, list)
+
+    async def test_plain_watcher_marker_arrives_after_purge(self, nc: natsio.Client) -> None:
+        js = nc.jetstream()
+        kv = await js.create_key_value(KeyValueConfig(bucket="PURGEDWATCH"))
+        await _fill(kv, 1000)
+
+        async def purge_later(stream=kv._stream) -> None:
+            await asyncio.sleep(0.002)
+            await stream.purge()
+
+        task = asyncio.create_task(purge_later())
+        saw_marker = False
+        try:
+            async with asyncio.timeout(20), kv.watch() as watcher:
+                async for entry in watcher:
+                    if entry is None:
+                        saw_marker = True
+                        break
+        finally:
+            await task
+        assert saw_marker
+
+
+class TestNonDirectGet:
+    async def test_get_falls_back_to_stream_msg_get(self, kv) -> None:
+        """nats.go TestKeyValueNonDirectGet: get() still works when the backing
+        stream disallows Direct Get (falls back to STREAM.MSG.GET)."""
+        await kv.put("k", b"one")
+        await kv.put("k", b"two")
+
+        config = kv._stream.cached_info.config
+        config.allow_direct = False
+        await kv._ctx.update_stream(config)
+        await kv._stream.info()  # refresh cached_info so get_msg picks the API path
+        assert kv._stream.cached_info.config.allow_direct is False
+
+        assert (await kv.get("k")).value == b"two"
+        assert (await kv.get("k", revision=1)).value == b"one"
+
+
+class TestHistoryExactness:
+    async def test_history_returns_exact_last_revisions(self, nc: natsio.Client) -> None:
+        """nats.go TestKeyValueHistory: history() returns exactly the last
+        `history` revisions, oldest first, with correct values."""
+        js = nc.jetstream()
+        kv = await js.create_key_value(KeyValueConfig(bucket="HIST10", history=10))
+        for i in range(1, 51):
+            await kv.put("k", b"v%d" % i)
+        entries = await kv.history("k")
+        assert [e.revision for e in entries] == list(range(41, 51))
+        assert [e.value for e in entries] == [b"v%d" % i for i in range(41, 51)]
+
+
+class TestWildcardWatch:
+    async def test_wildcard_subset_initial_then_live(self, nc: natsio.Client) -> None:
+        """nats.go TestKeyValueWatch default wildcard watcher: watch('a.*')
+        yields only the a-keys in the initial state, then only live a-updates."""
+        js = nc.jetstream()
+        kv = await js.create_key_value(KeyValueConfig(bucket="WSUB"))
+        await kv.put("a.1", b"1")
+        await kv.put("a.2", b"2")
+        await kv.put("b.1", b"3")
+
+        async with kv.watch("a.*") as watcher:
+            iterator = aiter(watcher)
+            initial: dict[str, bytes] = {}
+            async with asyncio.timeout(5):
+                while True:
+                    item = await anext(iterator)
+                    if item is None:
+                        break
+                    initial[item.key] = item.value
+            assert initial == {"a.1": b"1", "a.2": b"2"}
+
+            await kv.put("b.2", b"4")  # outside the filter: must not arrive
+            await kv.put("a.3", b"5")
+            async with asyncio.timeout(5):
+                live = await anext(iterator)
+            assert live is not None
+            assert (live.key, live.value) == ("a.3", b"5")
+
+    async def test_meta_only_watch_omits_values(self, nc: natsio.Client) -> None:
+        js = nc.jetstream()
+        kv = await js.create_key_value(KeyValueConfig(bucket="METAW"))
+        await kv.put("m", b"secret-value")
+        async with kv.watch(meta_only=True) as watcher:
+            iterator = aiter(watcher)
+            async with asyncio.timeout(5):
+                entry = await anext(iterator)
+            assert entry is not None
+            assert (entry.key, entry.revision, entry.operation) == ("m", 1, Operation.PUT)
+            assert entry.value == b""
+            async with asyncio.timeout(5):
+                assert await anext(iterator) is None

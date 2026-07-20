@@ -4,7 +4,7 @@ import random
 from dataclasses import dataclass, field
 from urllib.parse import unquote, urlparse
 
-from natsio.errors import ConfigError
+from natsio.errors import ConfigError, ServerError
 
 __all__ = ["ParsedServer", "ServerPool"]
 
@@ -19,13 +19,17 @@ class ParsedServer:
     port: int
     tls_required: bool
     url: str
-    # Credentials embedded in the URL (nats://user:pass@host) — lowest-priority auth.
+    # Credentials embedded in the URL (nats://user:pass@host) — these take
+    # precedence over option-derived auth (parity with nats.go).
     username: str | None = None
     password: str | None = None
     discovered: bool = False
     consecutive_failures: int = field(default=0, repr=False)
     # Monotonic clock reading of the last connection attempt; -inf means never.
     last_attempt: float = field(default=float("-inf"), repr=False)
+    # Most recent auth rejection from this server, remembered across reconnect
+    # attempts to detect a repeated (revoked) credential; cleared on success.
+    last_auth_error: ServerError | None = field(default=None, repr=False)
 
     @property
     def key(self) -> tuple[str, int]:
@@ -91,6 +95,7 @@ class ServerPool:
 
     def mark_success(self, server: ParsedServer) -> None:
         server.consecutive_failures = 0
+        server.last_auth_error = None
         if not self._randomize:
             # no_randomize means "honor my exact order" — keep the configured
             # primary first so failover returns to it.
@@ -103,17 +108,30 @@ class ServerPool:
             return
         self._servers.append(server)
 
-    def merge_discovered(self, connect_urls: list[str]) -> list[ParsedServer]:
-        """Merge INFO ``connect_urls`` (host:port entries). Returns newly-added servers."""
-        if not self._accept_discovered:
+    def merge_discovered(
+        self, connect_urls: list[str], *, keep_key: tuple[str, int] | None = None
+    ) -> list[ParsedServer]:
+        """Reconcile the pool against INFO ``connect_urls`` (host:port entries).
+
+        A non-empty list is the server's full advertisement of the cluster:
+        previously-discovered servers no longer present are pruned (parity with
+        nats.go processInfo), while explicitly-configured servers and the
+        currently-connected one (``keep_key``) are always kept. An empty list
+        carries no topology and prunes nothing. Returns newly-added servers.
+        """
+        if not self._accept_discovered or not connect_urls:
             return []
-        known = {s.key for s in self._servers}
-        added: list[ParsedServer] = []
+        parsed: list[ParsedServer] = []
         for url in connect_urls:
             try:
-                server = parse_server_url(url, discovered=True)
+                parsed.append(parse_server_url(url, discovered=True))
             except ConfigError:
                 continue
+        advertised = {s.key for s in parsed}
+        self._servers = [s for s in self._servers if not s.discovered or s.key in advertised or s.key == keep_key]
+        known = {s.key for s in self._servers}
+        added: list[ParsedServer] = []
+        for server in parsed:
             if server.key in known:
                 continue
             known.add(server.key)

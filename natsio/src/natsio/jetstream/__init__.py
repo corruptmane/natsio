@@ -51,7 +51,7 @@ from natsio.jetstream.errors import (
     StreamNotFoundError,
     WrongLastSequenceError,
 )
-from natsio.jetstream.message import AckMetadata, JsMsg, MessageAlreadyAckedError
+from natsio.jetstream.message import AckMetadata, JsMsg, MessageAlreadyAckedError, NotJSMessageError
 from natsio.jetstream.stream import StoredMsg, Stream
 
 __all__ = [
@@ -78,6 +78,7 @@ __all__ = [
     "MessageNotFoundError",
     "NoMessagesError",
     "NoStreamResponseError",
+    "NotJSMessageError",
     "OrderedConsumer",
     "Placement",
     "PriorityPolicy",

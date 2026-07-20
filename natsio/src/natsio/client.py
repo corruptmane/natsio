@@ -31,6 +31,8 @@ from natsio._internal.protocol import (
 )
 from natsio._internal.validation import validate_queue_group, validate_subject
 from natsio.errors import (
+    ConnectionClosedError,
+    DrainTimeoutError,
     MaxPayloadExceededError,
     NATSError,
     NoRespondersError,
@@ -85,6 +87,8 @@ class _RequestSink:
     def close(self) -> None:
         if self.queue is not None:
             self.queue.put_nowait(None)
+        elif self.future is not None and not self.future.done():
+            self.future.set_exception(ConnectionClosedError("connection closed"))
 
 
 class Client:
@@ -163,6 +167,9 @@ class Client:
                         log.debug("draining %r failed: %s", sub.subject, exc)
         except builtins.TimeoutError:
             log.warning("drain timed out after %ss; closing anyway", self._options.drain_timeout)
+            self._conn.background_error(
+                DrainTimeoutError(f"drain did not complete within {self._options.drain_timeout}s")
+            )
         finally:
             await self.close()
 

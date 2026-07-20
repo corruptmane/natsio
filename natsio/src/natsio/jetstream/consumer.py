@@ -21,6 +21,7 @@ if TYPE_CHECKING:
 from natsio._internal.dispatcher import SubscriptionEntry
 from natsio._internal.nuid import next_nuid
 from natsio._internal.protocol import HMsgEvent, MsgEvent
+from natsio.errors import ConfigError, ConnectionClosedError
 from natsio.message import Msg
 
 if TYPE_CHECKING:
@@ -87,17 +88,30 @@ class Consumer:
         Returns what arrived when the batch fills, the server ends the request
         (no more messages / request expired), or the deadline passes — an empty
         list is a normal outcome. ``no_wait`` returns only immediately-available
-        messages.
+        messages. Raises :class:`ConnectionClosedError` if the connection closes
+        mid-fetch with the batch still incomplete.
         """
+        if max_messages <= 0:
+            raise ConfigError("fetch max_messages must be positive")
+        if timeout < 0:
+            raise ConfigError("fetch timeout must not be negative")
         client = self._stream._ctx.client
         conn = client._conn
         inbox = f"_INBOX.{next_nuid()}"
         queue: asyncio.Queue[Msg] = asyncio.Queue()
+        closed = asyncio.Event()
 
         def handler(event: MsgEvent | HMsgEvent) -> None:
             queue.put_nowait(client._build_msg(event))
 
+        from natsio._internal.lifecycle import Closed
+
+        def on_event(event: object) -> None:
+            if isinstance(event, Closed):
+                closed.set()
+
         entry = conn.subscribe(inbox, None, handler)
+        unsubscribe_bus = conn.bus.subscribe(on_event)
         try:
             request: dict[str, Any] = {"batch": max_messages}
             if no_wait:
@@ -114,15 +128,31 @@ class Consumer:
             loop = asyncio.get_running_loop()
             deadline = loop.time() + timeout + _FETCH_GRACE
             while len(messages) < max_messages:
-                remaining = deadline - loop.time()
-                if remaining <= 0:
-                    break
-                wait = remaining if idle_heartbeat is None else min(remaining, idle_heartbeat * 2)
                 try:
-                    async with asyncio.timeout(wait):
-                        msg = await queue.get()
-                except builtins.TimeoutError:
-                    break  # deadline or two missed heartbeats: done with what we have
+                    msg = queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    if closed.is_set():
+                        # Drain buffered frames first (above); once empty, an
+                        # incomplete batch cut short by close is a hard error.
+                        raise ConnectionClosedError("connection closed during fetch") from None
+                    remaining = deadline - loop.time()
+                    if remaining <= 0:
+                        break
+                    wait = remaining if idle_heartbeat is None else min(remaining, idle_heartbeat * 2)
+                    getter = asyncio.ensure_future(queue.get())
+                    closer = asyncio.ensure_future(closed.wait())
+                    try:
+                        async with asyncio.timeout(wait):
+                            done, _ = await asyncio.wait((getter, closer), return_when=asyncio.FIRST_COMPLETED)
+                    except builtins.TimeoutError:
+                        break  # deadline or two missed heartbeats: done with what we have
+                    finally:
+                        getter.cancel()
+                        closer.cancel()
+                    if getter in done and not getter.cancelled():
+                        msg = getter.result()
+                    else:
+                        continue  # close fired: re-check the queue, then raise
                 try:
                     if self._classify(msg):
                         continue  # heartbeat
@@ -131,7 +161,9 @@ class Consumer:
                 messages.append(JsMsg(msg, client))
             return messages
         finally:
-            conn.unsubscribe(entry.sid)
+            unsubscribe_bus()
+            with suppress(ConnectionClosedError):
+                conn.unsubscribe(entry.sid)
 
     async def next(self, *, timeout: float = 5.0) -> JsMsg:  # noqa: ASYNC109
         """The next available message, or :class:`NoMessagesError` on expiry."""
@@ -267,7 +299,7 @@ class Consumption:
         self._last_frame_at = asyncio.get_running_loop().time()
         self._worker = client._spawn(self._pump(), name=f"natsio-consume-{self._consumer.name}")
 
-        from natsio._internal.lifecycle import Reconnected
+        from natsio._internal.lifecycle import Closed, Reconnected
 
         def on_event(event: object) -> None:
             if isinstance(event, Reconnected):
@@ -275,6 +307,10 @@ class Consumption:
                 self._pulls.clear()
                 self._total_pending = 0
                 self._wake.set()
+            elif isinstance(event, Closed):
+                # Emitted synchronously on client.close() and on reconnect
+                # exhaustion — without this, parked iterators hang forever.
+                self._fail(ConnectionClosedError("connection closed"))
 
         self._unsubscribe_bus = conn.bus.subscribe(on_event)
 
@@ -289,7 +325,10 @@ class Consumption:
             self._unsubscribe_bus = None
         client = self._consumer._stream._ctx.client
         if self._entry is not None:
-            client._conn.unsubscribe(self._entry.sid)
+            # Best-effort: a closed connection cannot carry the UNSUB, and the
+            # subscription dies with it anyway.
+            with suppress(ConnectionClosedError):
+                client._conn.unsubscribe(self._entry.sid)
             self._entry = None
         worker = self._worker
         self._worker = None
