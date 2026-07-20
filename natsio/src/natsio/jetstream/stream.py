@@ -83,7 +83,10 @@ class Stream:
         generated client-side and the consumer is ephemeral (set
         ``inactive_threshold`` to bound its lifetime).
         """
-        config = config if config is not None else ConsumerConfig()
+        # Structural copy: never mutate the caller's config (a reused config
+        # with a written-back generated name would silently collapse every
+        # subsequent create into the same consumer — probe-confirmed).
+        config = ConsumerConfig.from_wire(config.to_wire()) if config is not None else ConsumerConfig()
         name = config.name or config.durable_name
         if name is None:
             name = next_nuid()

@@ -89,7 +89,7 @@ class JetStreamContext:
         return AccountInfo.from_wire(await self._api_request("INFO"))
 
     async def api_level(self) -> int:
-        """The server's advertised JetStream API level (2.14 == 3)."""
+        """The server's advertised JetStream API level (nats-server 2.14.3 reports 4)."""
         info = await self.account_info()
         return info.api.level or 0
 
@@ -175,13 +175,13 @@ class JetStreamContext:
         expected_last_seq: int | None = None,
         expected_last_subject_seq: int | None = None,
         expected_last_msg_id: str | None = None,
-        ttl: float | str | None = None,
+        ttl: int | str | None = None,
         timeout: float | None = None,  # noqa: ASYNC109
     ) -> PubAck:
         """Publish to a stream and await its PubAck.
 
-        ``ttl`` is seconds (or the string ``"never"``) per ADR-43 and needs the
-        stream's ``allow_msg_ttl``. A 503 (no stream bound / leader election in
+        ``ttl`` is whole seconds (or the string ``"never"``) per ADR-43 and
+        needs the stream's ``allow_msg_ttl``. A 503 (no stream bound / leader election in
         progress) is retried briefly per ADR-22 before raising
         :class:`NoStreamResponseError`.
         """
@@ -198,7 +198,12 @@ class JetStreamContext:
         if expected_last_msg_id is not None:
             extra[js_headers.EXPECTED_LAST_MSG_ID] = expected_last_msg_id
         if ttl is not None:
-            extra[js_headers.TTL] = ttl if isinstance(ttl, str) else str(int(ttl))
+            if isinstance(ttl, str):
+                extra[js_headers.TTL] = ttl
+            else:
+                if ttl < 1:
+                    raise ConfigError("ttl is whole seconds and must be >= 1 (or the string 'never')")
+                extra[js_headers.TTL] = str(ttl)
         merged = _merge_headers(headers, extra)
 
         deadline = timeout if timeout is not None else self._timeout

@@ -35,15 +35,6 @@ __all__ = ["Consumer", "Consumption", "OrderedConsumer"]
 _NANOSECOND: int = 1_000_000_000
 _FETCH_GRACE = 1.0  # local slack past the server-side `expires`
 
-# 409 descriptions that end the *request* but not the consumer.
-_BENIGN_409_MARKERS = (
-    "exceeded maxrequest",
-    "message size exceeds maxbytes",
-    "exceeded maxwaiting",
-    "leadership change",
-    "server shutdown",
-)
-
 
 class _RequestGoneError(Exception):
     """Internal: the current pull ended (quietly or benignly)."""
@@ -166,7 +157,10 @@ class Consumer:
             raise _RequestGoneError  # request-limit / leadership-change family
         if status.code == 423:
             raise _RequestGoneError  # pin lost; caller re-pulls with a fresh pin
-        return True  # unknown status: skip, stay alive
+        # Anything else (400 Bad Request, future codes) means the pull itself
+        # was rejected. Swallowing it as a heartbeat would make an empty batch
+        # indistinguishable from a malformed request — surface it.
+        raise JetStreamError(f"pull request on consumer {self.name!r} failed: {status.code} {status.description}")
 
     # -- consume -------------------------------------------------------------
 
@@ -217,6 +211,7 @@ class Consumption:
         "_max_messages",
         "_pulls",
         "_queue",
+        "_rapid_ends",
         "_threshold_msgs",
         "_total_pending",
         "_unsubscribe_bus",
@@ -242,8 +237,9 @@ class Consumption:
         self._threshold_msgs = threshold_msgs
         self._inbox_base = f"_INBOX.{next_nuid()}"
         self._queue: asyncio.Queue[JsMsg] = asyncio.Queue()
-        self._pulls: dict[str, int] = {}  # token -> messages still expected
+        self._pulls: dict[str, tuple[int, float]] = {}  # token -> (still expected, issued at)
         self._total_pending = 0
+        self._rapid_ends = 0  # consecutive short-lived, message-less pulls
         self._closed = False
         self._closed_event = asyncio.Event()
         self._failure: Exception | None = None
@@ -310,13 +306,20 @@ class Consumption:
         msg = client._build_msg(event)
         status = msg.status
         if status is None:
-            remaining = self._pulls.get(token)
-            if remaining is not None:
+            # Data deliveries carry the message's ORIGINAL subject — the reply
+            # inbox (and its token) appears only on status frames. Attribute
+            # the delivery to the oldest outstanding pull: the server serves
+            # requests in FIFO order, and any drift self-corrects when a pull
+            # ends via its (token-addressed) status.
+            if self._pulls:
+                oldest = next(iter(self._pulls))
+                remaining, issued_at = self._pulls[oldest]
                 if remaining <= 1:
-                    self._pulls.pop(token, None)
+                    self._pulls.pop(oldest, None)
                 else:
-                    self._pulls[token] = remaining - 1
-                self._total_pending = max(0, self._total_pending - 1)
+                    self._pulls[oldest] = (remaining - 1, issued_at)
+            self._total_pending = max(0, self._total_pending - 1)
+            self._rapid_ends = 0  # real data: any rejection loop is over
             self._queue.put_nowait(JsMsg(msg, client))
             if self._total_pending <= self._threshold_msgs:
                 self._wake.set()
@@ -324,9 +327,19 @@ class Consumption:
         if status.code == 100:
             return  # heartbeat: _last_frame_at already refreshed
         # Any other status ends that pull request.
-        remaining = self._pulls.pop(token, None)
-        if remaining is not None:
+        entry = self._pulls.pop(token, None)
+        if entry is not None:
+            remaining, issued_at = entry
             self._total_pending = max(0, self._total_pending - remaining)
+            # A pull that dies quickly without delivering anything is the
+            # signature of a rejection loop (max_bytes too small, heartbeat
+            # invalid, sustained leadership churn). Pace the re-pull instead
+            # of hammering the server — probed at 22k pulls/sec without this.
+            now = asyncio.get_running_loop().time()
+            if now - issued_at < 1.0:
+                self._rapid_ends = min(self._rapid_ends + 1, 8)
+            else:
+                self._rapid_ends = 0
         description = status.description.lower()
         if status.code == 409 and "consumer deleted" in description:
             self._fail(ConsumerDeletedError(f"consumer {self._consumer.name!r} was deleted"))
@@ -334,7 +347,26 @@ class Consumption:
         if status.code == 409 and "consumer is push based" in description:
             self._fail(JetStreamError(f"consumer {self._consumer.name!r} is push based"))
             return
-        self._wake.set()  # benign end (404/408/limits/leadership): re-pull
+        if status.code == 409 and "message size exceeds maxbytes" in description:
+            # Re-pulling with the same max_bytes can never succeed.
+            self._fail(
+                JetStreamError(
+                    f"consume() max_bytes is smaller than the next message on "
+                    f"consumer {self._consumer.name!r}: {status.description}"
+                )
+            )
+            return
+        if status.code not in (404, 408, 409, 423):
+            # 400 Bad Request and unknown codes: the pull is malformed or the
+            # server is telling us something new — re-pulling identically would
+            # loop forever. Fail loudly.
+            self._fail(
+                JetStreamError(
+                    f"pull request on consumer {self._consumer.name!r} failed: {status.code} {status.description}"
+                )
+            )
+            return
+        self._wake.set()  # benign end (404/408/limits/leadership/pin): re-pull
 
     def _fail(self, error: Exception) -> None:
         if self._failure is None:
@@ -344,14 +376,35 @@ class Consumption:
     # -- pull issuance -------------------------------------------------------
 
     async def _pump(self) -> None:
+        try:
+            await self._pump_loop()
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            # A dead pump with no recorded failure is a silent forever-hang for
+            # the iterator (probe-confirmed): always convert to a failure.
+            self._fail(exc)
+
+    async def _pump_loop(self) -> None:
         loop = asyncio.get_running_loop()
         while not self._closed:
             if self._failure is not None:
                 return
+            if self._rapid_ends:
+                # Rejection-loop pacing: capped exponential, cancelled early
+                # only by session close.
+                delay = min(0.1 * (2**self._rapid_ends), 5.0)
+                with suppress(builtins.TimeoutError):
+                    async with asyncio.timeout(delay):
+                        await self._closed_event.wait()
+                if self._closed or self._failure is not None:
+                    return
+            # Clear FIRST: a wake arriving while we issue the pull below stays
+            # latched for the next loop instead of being lost.
+            self._wake.clear()
             need = self._max_messages - self._total_pending - self._queue.qsize()
             if need > 0 and (self._total_pending <= self._threshold_msgs or not self._pulls):
                 await self._issue_pull(need)
-            self._wake.clear()
             stall_after = self._heartbeat * 2
             try:
                 async with asyncio.timeout(stall_after):
@@ -371,7 +424,7 @@ class Consumption:
         }
         if self._max_bytes is not None:
             request["max_bytes"] = self._max_bytes
-        self._pulls[token] = batch
+        self._pulls[token] = (batch, asyncio.get_running_loop().time())
         self._total_pending += batch
         client = self._consumer._stream._ctx.client
         try:
@@ -400,8 +453,11 @@ class Consumption:
             yield msg
 
     async def next(self, *, timeout: float | None = None) -> JsMsg:  # noqa: ASYNC109
-        async with asyncio.timeout(timeout):
-            msg = await self._next_or_none()
+        try:
+            async with asyncio.timeout(timeout):
+                msg = await self._next_or_none()
+        except builtins.TimeoutError:
+            raise NoMessagesError(f"no message within {timeout}s") from None
         if msg is None:
             if self._failure is not None:
                 raise self._failure
@@ -409,9 +465,10 @@ class Consumption:
         return msg
 
     async def _next_or_none(self) -> JsMsg | None:
+        self._start()  # tolerate use without `async with` — hang-free by design
         while True:
             try:
-                return self._queue.get_nowait()
+                msg = self._queue.get_nowait()
             except asyncio.QueueEmpty:
                 if self._closed or self._failure is not None:
                     return None
@@ -423,7 +480,15 @@ class Consumption:
                     getter.cancel()
                     closer.cancel()
                 if getter in done and not getter.cancelled():
-                    return getter.result()
+                    msg = getter.result()
+                else:
+                    continue
+            # Consuming from the buffer is what makes room for the next pull —
+            # without this wake, delivery stalls for 2x idle_heartbeat every
+            # time the buffer fills (probe: ~1.2s gaps every batch).
+            if self._total_pending + self._queue.qsize() <= self._threshold_msgs:
+                self._wake.set()
+            return msg
 
 
 class OrderedConsumer:
@@ -434,9 +499,27 @@ class OrderedConsumer:
     loss it silently recreates itself starting at the next unseen stream
     sequence (``deliver_policy=by_start_sequence`` — always paired with
     ``opt_start_seq``).
+
+    Prefer the context-manager form for deterministic teardown of the
+    server-side ephemeral consumer::
+
+        async with stream.ordered_consumer() as ordered:
+            async for msg in ordered:
+                ...
+
+    A bare ``async for`` over the object also works; teardown then happens at
+    generator finalization (or via :meth:`stop`).
     """
 
-    __slots__ = ("_base", "_consumer", "_expected_cseq", "_last_sseq", "_session", "_stream")
+    __slots__ = (
+        "_base",
+        "_consumer",
+        "_expected_cseq",
+        "_last_sseq",
+        "_recreate_failures",
+        "_session",
+        "_stream",
+    )
 
     def __init__(self, stream: "Stream", base: ConsumerConfig) -> None:
         self._stream = stream
@@ -445,6 +528,17 @@ class OrderedConsumer:
         self._session: Consumption | None = None
         self._expected_cseq = 1
         self._last_sseq = 0
+        self._recreate_failures = 0
+
+    async def __aenter__(self) -> Self:
+        return self
+
+    async def __aexit__(self, *exc_info: object) -> None:
+        await self.stop()
+
+    async def stop(self) -> None:
+        """Deterministically stop the session and delete the ephemeral consumer."""
+        await self._teardown()
 
     def messages(
         self,
@@ -452,35 +546,70 @@ class OrderedConsumer:
         max_messages: int = 500,
         expires: float = 30.0,
         idle_heartbeat: float | None = None,
+        idle_timeout: float | None = None,
     ) -> AsyncGenerator[JsMsg]:
-        """The ordered message stream (an async generator — ``aclose()`` to stop)."""
-        return self._iterate(max_messages=max_messages, expires=expires, idle_heartbeat=idle_heartbeat)
+        """The ordered message stream (an async generator — ``aclose()`` to stop).
+
+        ``idle_timeout`` bounds the wait for each message: on expiry the stream
+        raises :class:`NoMessagesError` instead of silently self-healing
+        forever, letting callers distinguish a quiet stream from a dead one.
+        """
+        return self._iterate(
+            max_messages=max_messages,
+            expires=expires,
+            idle_heartbeat=idle_heartbeat,
+            idle_timeout=idle_timeout,
+        )
 
     def __aiter__(self) -> AsyncIterator[JsMsg]:
         return self._iterate(max_messages=500, expires=30.0, idle_heartbeat=None)
 
     async def _iterate(
-        self, *, max_messages: int, expires: float, idle_heartbeat: float | None
+        self,
+        *,
+        max_messages: int,
+        expires: float,
+        idle_heartbeat: float | None,
+        idle_timeout: float | None = None,
     ) -> AsyncGenerator[JsMsg]:
         try:
             while True:
                 if self._session is None:
-                    await self._start_session(max_messages, expires, idle_heartbeat)
+                    await self._recreate_backoff()
+                    try:
+                        await self._start_session(max_messages, expires, idle_heartbeat)
+                    except Exception:
+                        self._recreate_failures = min(self._recreate_failures + 1, 8)
+                        raise
                 assert self._session is not None
                 try:
-                    msg = await self._session.next()
+                    msg = await self._session.next(timeout=idle_timeout)
+                except NoMessagesError:
+                    if idle_timeout is not None:
+                        raise  # the caller asked for a liveness bound
+                    await self._reset()
+                    continue
                 except (ConsumerDeletedError, JetStreamError):
+                    self._recreate_failures = min(self._recreate_failures + 1, 8)
                     await self._reset()
                     continue
                 metadata = msg.metadata
                 if metadata.consumer_seq != self._expected_cseq:
+                    self._recreate_failures = min(self._recreate_failures + 1, 8)
                     await self._reset()  # gap: recreate from the last good point
                     continue
+                self._recreate_failures = 0
                 self._expected_cseq += 1
                 self._last_sseq = metadata.stream_seq
                 yield msg
         finally:
             await self._teardown()
+
+    async def _recreate_backoff(self) -> None:
+        if self._recreate_failures == 0:
+            return
+        # Recreate storms tend to coincide with cluster churn — back off.
+        await asyncio.sleep(min(0.1 * (2**self._recreate_failures), 5.0))
 
     async def _start_session(self, max_messages: int, expires: float, idle_heartbeat: float | None) -> None:
         config = ConsumerConfig(

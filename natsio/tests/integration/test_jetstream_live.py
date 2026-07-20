@@ -60,7 +60,7 @@ class TestStreams:
         js = nc.jetstream()
         info = await js.account_info()
         assert info.limits.max_streams != 0  # -1 (unlimited) on a default server
-        assert await js.api_level() >= 3  # 2.14 == level 3
+        assert await js.api_level() >= 3  # nats-server 2.14.3 reports 4
 
     async def test_purge_and_get_msg(self, nc: natsio.Client) -> None:
         js = nc.jetstream()

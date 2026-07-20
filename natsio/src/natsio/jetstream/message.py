@@ -123,8 +123,13 @@ class JsMsg:
 
     async def ack(self) -> None:
         """Acknowledge successful processing."""
+        reply = self._reply_subject()
         self._mark_terminal()
-        await self._client.publish(self._reply_subject(), b"+ACK")
+        try:
+            await self._client.publish(reply, b"+ACK")
+        except BaseException:
+            self._acked = False  # the frame never left; allow a retry
+            raise
 
     async def ack_sync(self, timeout: float | None = 5.0) -> None:  # noqa: ASYNC109
         """Acknowledge and wait for the server to confirm it was recorded."""
@@ -138,19 +143,29 @@ class JsMsg:
 
     async def nak(self, *, delay: timedelta | float | None = None) -> None:
         """Negative-acknowledge: redeliver (optionally after ``delay``)."""
+        reply = self._reply_subject()
         self._mark_terminal()
         if delay is None:
             payload = b"-NAK"
         else:
             seconds = delay.total_seconds() if isinstance(delay, timedelta) else float(delay)
             payload = b"-NAK " + json.dumps({"delay": int(seconds * 1_000_000_000)}).encode()
-        await self._client.publish(self._reply_subject(), payload)
+        try:
+            await self._client.publish(reply, payload)
+        except BaseException:
+            self._acked = False
+            raise
 
     async def term(self, reason: str = "") -> None:
         """Terminate delivery: never redeliver this message."""
+        reply = self._reply_subject()
         self._mark_terminal()
         payload = b"+TERM" if not reason else b"+TERM " + reason.encode()
-        await self._client.publish(self._reply_subject(), payload)
+        try:
+            await self._client.publish(reply, payload)
+        except BaseException:
+            self._acked = False
+            raise
 
     async def in_progress(self) -> None:
         """Reset the ack-wait timer; the message is still being worked on."""
