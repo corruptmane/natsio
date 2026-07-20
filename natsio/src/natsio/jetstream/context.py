@@ -175,12 +175,21 @@ class JetStreamContext:
         key_codec: "KeyCodec | None" = None,
         value_codec: "ValueCodec | None" = None,
     ) -> "KeyValue":
-        """Create (or idempotently assert) a Key-Value bucket."""
-        from natsio.kv.bucket import SUBJECT_PREFIX, KeyValue
+        """Create a Key-Value bucket.
 
-        stream_config = _kv_stream_config(config)
-        stream = await self.create_stream(stream_config)
-        del SUBJECT_PREFIX  # (referenced for clarity; config builder owns it)
+        Re-creating with an identical configuration is idempotent; an existing
+        bucket with a DIFFERENT configuration raises
+        :class:`~natsio.kv.BucketExistsError`.
+        """
+        from natsio.kv.bucket import KeyValue
+        from natsio.kv.errors import BucketExistsError
+
+        from .errors import StreamNameInUseError
+
+        try:
+            stream = await self.create_stream(_kv_stream_config(config))
+        except StreamNameInUseError:
+            raise BucketExistsError(f"bucket {config.bucket!r} already exists with a different configuration") from None
         return KeyValue(
             self,
             config.bucket,
@@ -330,6 +339,6 @@ def _kv_stream_config(config: "KeyValueConfig") -> StreamConfig:
         allow_direct=True,
         compression=StorageCompression.S2 if config.compression else None,
         metadata=config.metadata,
-        allow_msg_ttl=True if config.limit_marker_ttl is not None else None,
+        allow_msg_ttl=True if (config.allow_msg_ttl or config.limit_marker_ttl is not None) else None,
         subject_delete_marker_ttl=config.limit_marker_ttl,
     )

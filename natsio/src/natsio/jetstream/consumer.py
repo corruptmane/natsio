@@ -648,6 +648,11 @@ class OrderedConsumer:
             config.deliver_policy = DeliverPolicy.BY_START_SEQUENCE
             config.opt_start_seq = self._last_sseq + 1
         self._consumer = await self._stream.create_consumer(config)
+        if self._last_sseq == 0 and config.deliver_policy is DeliverPolicy.NEW:
+            # Anchor a NEW-policy consumer at creation time: if it is lost
+            # before delivering anything, the recreate resumes from here
+            # instead of re-anchoring NEW and silently skipping the gap.
+            self._last_sseq = self._consumer.cached_info.delivered.stream_seq
         self._expected_cseq = 1
         heartbeat = idle_heartbeat if idle_heartbeat is not None else min(expires / 2, 30.0)
         self._session = self._consumer.consume(max_messages=max_messages, expires=expires, idle_heartbeat=heartbeat)

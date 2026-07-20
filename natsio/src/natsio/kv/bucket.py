@@ -23,10 +23,12 @@ STREAM_PREFIX: Final = "KV_"
 SUBJECT_PREFIX: Final = "$KV"
 
 # ADR-48 limit-marker reasons map onto marker operations.
+# All limit-marker reasons read as purge-class, matching how other clients
+# surface server-authored subject-delete markers.
 _MARKER_OPERATIONS: Final = {
     "MaxAge": Operation.PURGE,
     "Purge": Operation.PURGE,
-    "Remove": Operation.DELETE,
+    "Remove": Operation.PURGE,
 }
 
 
@@ -148,25 +150,29 @@ class KeyValue:
         Succeeds for brand-new keys and for deleted/purged keys; raises
         :class:`KeyExistsError` when a live value exists.
         """
-        try:
-            return await self.update(key, value, last=0)
-        except WrongLastSequenceError:
-            pass
-        # The key has revisions. If the latest is a marker, retry against the
-        # MARKER's revision (the classic bug is retrying against the original
-        # error or the pre-delete value revision).
-        try:
-            entry = await self._get_any(key)
-        except KeyNotFoundError:
-            # Purged away between attempts (markers can self-expire): race
-            # once more against "no revisions".
-            return await self.update(key, value, last=0)
-        if entry.is_marker:
-            return await self.update(key, value, last=entry.revision)
-        raise KeyExistsError(
-            f"key {key!r} already has a live value (revision {entry.revision})",
-            revision=entry.revision,
-        )
+        expected = 0
+        last_error: WrongLastSequenceError | None = None
+        for _ in range(4):  # bounded re-resolve under concurrent marker churn
+            try:
+                return await self.update(key, value, last=expected)
+            except WrongLastSequenceError as exc:
+                last_error = exc
+            # The key has revisions. If the latest is a marker, CAS against the
+            # MARKER's revision (the classic bug is retrying against the
+            # original error or the pre-delete value revision).
+            try:
+                entry = await self._get_any(key)
+            except KeyNotFoundError:
+                expected = 0  # purged away between attempts (markers self-expire)
+                continue
+            if not entry.is_marker:
+                raise KeyExistsError(
+                    f"key {key!r} already has a live value (revision {entry.revision})",
+                    revision=entry.revision,
+                ) from None
+            expected = entry.revision
+        assert last_error is not None
+        raise last_error
 
     async def update(self, key: str, value: bytes | str, *, last: int) -> int:
         """Compare-and-set: store only if ``last`` is the key's latest revision.
@@ -195,8 +201,16 @@ class KeyValue:
         """Write a purge marker and roll up: prior revisions are removed.
 
         ``ttl`` (whole seconds, or ``"never"``) lets the marker itself expire
-        — requires the bucket's ``limit_marker_ttl``/per-message TTLs.
+        — requires per-message TTLs on the bucket
+        (``KeyValueConfig(allow_msg_ttl=True)`` or ``limit_marker_ttl``).
         """
+        if ttl is not None and not self._stream.cached_info.config.allow_msg_ttl:
+            from natsio.errors import ConfigError
+
+            raise ConfigError(
+                f"bucket {self.bucket!r} does not allow per-message TTLs; create it "
+                "with KeyValueConfig(allow_msg_ttl=True) or limit_marker_ttl to use purge(ttl=...)"
+            )
         encoded = self._encode_key(key)
         await self._ctx.publish(
             self._subject(encoded),
@@ -251,19 +265,31 @@ class KeyValue:
         )
 
     def _maybe_encode_watch_key(self, key: str) -> str:
-        if "*" in key or ">" in key or self._key_codec is None:
-            return key  # wildcards cannot be codec-transformed meaningfully
+        if self._key_codec is None:
+            return key
+        if "*" in key or ">" in key:
+            from natsio.errors import ConfigError
+
+            raise ConfigError(
+                "wildcard watch keys cannot be combined with a key codec: the encoded "
+                "keyspace would silently match nothing; watch('>') the whole bucket instead"
+            )
         return self._key_codec.encode(key)
 
     async def keys(self) -> list[str]:
         """Every key with a live value. An empty bucket returns ``[]`` promptly."""
-        found: list[str] = []
+        return [key async for key in self.iter_keys()]
+
+    async def iter_keys(self) -> AsyncGenerator[str]:
+        """Stream keys with live values without buffering the whole keyspace."""
+        yielded: set[str] = set()
         async with self.watch(ignore_deletes=True, meta_only=True) as watcher:
             async for entry in watcher:
                 if entry is None:
                     break
-                found.append(entry.key)
-        return found
+                if entry.key not in yielded:
+                    yielded.add(entry.key)
+                    yield entry.key
 
     async def history(self, key: str) -> list[KvEntry]:
         """Every stored revision of ``key``, oldest first (markers included)."""
@@ -283,7 +309,7 @@ class KeyValue:
         return KeyValueStatus(
             bucket=self.bucket,
             values=info.state.messages,
-            history=max(1, config.max_msgs_per_subject),
+            history=config.max_msgs_per_subject,  # -1 = unlimited (foreign buckets)
             # The server echoes max_age=0 for "never expires"; normalize.
             ttl=config.max_age or None,
             bytes=info.state.bytes,
@@ -322,7 +348,7 @@ class KvWatcher:
     an async context manager for deterministic teardown.
     """
 
-    __slots__ = ("_ignore_deletes", "_init_done", "_kv", "_ordered", "_updates_only")
+    __slots__ = ("_ignore_deletes", "_init_done", "_kv", "_ordered", "_stopped", "_updates_only")
 
     def __init__(
         self,
@@ -337,6 +363,7 @@ class KvWatcher:
         self._updates_only = updates_only
         self._ignore_deletes = ignore_deletes
         self._init_done = False
+        self._stopped = False
 
     async def __aenter__(self) -> Self:
         return self
@@ -345,21 +372,38 @@ class KvWatcher:
         await self.stop()
 
     async def stop(self) -> None:
+        self._stopped = True
         await self._ordered.stop()
 
     def __aiter__(self) -> AsyncGenerator[KvEntry | None]:
         return self._iterate()
 
     async def _iterate(self) -> AsyncGenerator[KvEntry | None]:
+        if self._stopped:
+            return  # a stopped watcher must not resurrect its consumer
         info = await self._ordered.start()
         if self._updates_only or info.num_pending == 0:
             self._init_done = True
             yield None
+        # Revisions yielded during the initial snapshot, by key. The ordered
+        # consumer self-heals by REPLAYING from its last good point, so a heal
+        # landing mid-snapshot re-delivers entries; without dedup that showed
+        # up as duplicate keys and stale values in keys()/watch initial state.
+        snapshot_seen: dict[str, int] = {}
         async for msg in self._ordered.messages():
+            if self._stopped:
+                return
             entry = self._kv._entry_from_msg(msg)
             caught_up = not self._init_done and entry.delta == 0
-            if not (self._ignore_deletes and entry.is_marker):
+            duplicate = False
+            if not self._init_done:
+                previous = snapshot_seen.get(entry.key, 0)
+                duplicate = entry.revision <= previous
+                if not duplicate:
+                    snapshot_seen[entry.key] = entry.revision
+            if not duplicate and not (self._ignore_deletes and entry.is_marker):
                 yield entry
             if caught_up:
                 self._init_done = True
+                snapshot_seen.clear()
                 yield None

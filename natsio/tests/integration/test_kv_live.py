@@ -282,3 +282,113 @@ class TestPerKeyTTL:
         assert (await kv.status()).values == 1  # the marker
         await asyncio.sleep(2.0)
         assert (await kv.status()).values == 0  # marker expired away
+
+
+class TestReviewRegressions:
+    async def test_status_reports_unlimited_history_for_foreign_bucket(self, nc: natsio.Client) -> None:
+        """Finding: max(1, -1) masked unlimited-history foreign buckets as 1."""
+        from natsio.jetstream import StreamConfig as ForeignStreamConfig
+
+        js = nc.jetstream()
+        await js.create_stream(
+            ForeignStreamConfig(
+                name="KV_FOREIGN", subjects=["$KV.FOREIGN.>"], max_msgs_per_subject=-1, allow_direct=True
+            )
+        )
+        kv = await js.key_value("FOREIGN")
+        assert (await kv.status()).history == -1
+
+    async def test_sub_100ms_ttl_rejected_client_side(self) -> None:
+        from natsio.errors import ConfigError
+
+        with pytest.raises(ConfigError, match="100ms"):
+            KeyValueConfig(bucket="b", ttl=timedelta(milliseconds=50))
+
+    async def test_purge_ttl_without_allow_msg_ttl_is_typed_error(self, kv) -> None:
+        """Finding: was a raw APIError from the server."""
+        from natsio.errors import ConfigError
+
+        await kv.put("k", b"v")
+        with pytest.raises(ConfigError, match="allow_msg_ttl"):
+            await kv.purge("k", ttl=1)
+
+    async def test_allow_msg_ttl_flag_decoupled_from_limit_markers(self, nc: natsio.Client) -> None:
+        js = nc.jetstream()
+        kv = await js.create_key_value(KeyValueConfig(bucket="MSGTTL", allow_msg_ttl=True))
+        await kv.put("k", b"v")
+        await kv.purge("k", ttl=1)  # no limit_marker_ttl needed
+        await asyncio.sleep(2.0)
+        assert (await kv.status()).values == 0
+
+    async def test_create_key_value_idempotent_and_conflicting(self, nc: natsio.Client) -> None:
+        from natsio.kv import BucketExistsError
+
+        js = nc.jetstream()
+        config = KeyValueConfig(bucket="IDEM", history=3)
+        await js.create_key_value(config)
+        again = await js.create_key_value(config)  # identical: idempotent
+        assert again.bucket == "IDEM"
+        with pytest.raises(BucketExistsError):
+            await js.create_key_value(KeyValueConfig(bucket="IDEM", history=7))
+
+    async def test_wildcard_watch_with_key_codec_refused(self, nc: natsio.Client) -> None:
+        from natsio.errors import ConfigError
+
+        class Codec:
+            def encode(self, key: str) -> str:
+                return f"e.{key}"
+
+            def decode(self, key: str) -> str:
+                return key.removeprefix("e.")
+
+        js = nc.jetstream()
+        await js.create_key_value(KeyValueConfig(bucket="WCODEC"))
+        kv = await js.key_value("WCODEC", key_codec=Codec())
+        with pytest.raises(ConfigError, match="wildcard"):
+            kv.watch("a.*")
+        kv.watch(">")  # whole-bucket watch stays allowed
+
+    async def test_stopped_watcher_does_not_resurrect_consumer(self, kv) -> None:
+        """Finding: iterating after stop() rebuilt server-side state."""
+        watcher = kv.watch()
+        await watcher.stop()
+        got = [item async for item in watcher]
+        assert got == []
+        names = [name async for name in kv._stream.consumer_names()]
+        assert names == []
+
+    async def test_iter_keys_streams(self, kv) -> None:
+        for i in range(5):
+            await kv.put(f"k{i}", b"v")
+        collected = [key async for key in kv.iter_keys()]
+        assert sorted(collected) == [f"k{i}" for i in range(5)]
+
+    async def test_snapshot_survives_mid_delivery_self_heal(self, kv) -> None:
+        """Finding (major): a heal during the initial snapshot duplicated keys
+        and resurfaced stale values. Force a heal by deleting the ephemeral
+        consumer right after the watch starts."""
+        for i in range(50):
+            await kv.put(f"key.{i}", b"old")
+        await kv.put("key.0", b"new")  # key.0 latest is "new"
+
+        seen: dict[str, bytes] = {}
+        duplicates: list[str] = []
+        async with kv.watch() as watcher:
+            iterator = aiter(watcher)
+            first = await anext(iterator)
+            assert first is not None
+            seen[first.key] = first.value
+            # Sabotage: kill the consumer mid-snapshot; the watcher must heal
+            # without duplicating or resurfacing stale revisions.
+            assert watcher._ordered._consumer is not None
+            await kv._stream.delete_consumer(watcher._ordered._consumer.name)
+            async with asyncio.timeout(20):
+                async for item in iterator:
+                    if item is None:
+                        break
+                    if item.key in seen:
+                        duplicates.append(item.key)
+                    seen[item.key] = item.value
+        assert duplicates == []
+        assert len(seen) == 50
+        assert seen["key.0"] == b"new"

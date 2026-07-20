@@ -4,6 +4,7 @@ from natsio.errors import ConfigError
 from natsio.jetstream.errors import JetStreamError
 
 __all__ = [
+    "BucketExistsError",
     "BucketNotFoundError",
     "InvalidBucketNameError",
     "InvalidKeyError",
@@ -15,6 +16,10 @@ __all__ = [
 
 class BucketNotFoundError(JetStreamError):
     """No Key-Value bucket with that name exists."""
+
+
+class BucketExistsError(JetStreamError):
+    """A bucket with that name exists with a different configuration."""
 
 
 class KeyNotFoundError(JetStreamError):

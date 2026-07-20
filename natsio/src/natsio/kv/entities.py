@@ -83,8 +83,10 @@ class KeyValueConfig:
     placement: Placement | None = None
     republish: Republish | None = None
     compression: bool = False
+    # Enable per-message TTLs on the bucket (needed by purge(key, ttl=...)).
+    allow_msg_ttl: bool = False
     # ADR-48: markers left by server-side limit deletions (MaxAge etc.) expire
-    # on their own after this long. Enables per-message TTLs on the bucket.
+    # on their own after this long. Implies allow_msg_ttl.
     limit_marker_ttl: timedelta | None = None
     metadata: dict[str, str] | None = None
 
@@ -92,6 +94,10 @@ class KeyValueConfig:
         validate_bucket_name(self.bucket)
         if not 1 <= self.history <= 64:
             raise InvalidBucketNameError("history must be between 1 and 64")
+        if self.ttl is not None and timedelta(0) < self.ttl < timedelta(milliseconds=100):
+            from natsio.errors import ConfigError
+
+            raise ConfigError("ttl must be at least 100ms (server-enforced max_age floor)")
 
 
 @dataclass(frozen=True, slots=True)

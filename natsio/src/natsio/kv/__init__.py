@@ -25,6 +25,7 @@ from natsio.kv.entities import (
     validate_key,
 )
 from natsio.kv.errors import (
+    BucketExistsError,
     BucketNotFoundError,
     InvalidBucketNameError,
     InvalidKeyError,
@@ -35,6 +36,7 @@ from natsio.kv.errors import (
 
 __all__ = [
     "KV_OPERATION_HEADER",
+    "BucketExistsError",
     "BucketNotFoundError",
     "InvalidBucketNameError",
     "InvalidKeyError",
