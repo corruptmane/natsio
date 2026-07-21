@@ -20,6 +20,9 @@
   ],
   "previousVersions": [
     {
+      "tag": "v0.10.0"
+    },
+    {
       "tag": "v0.9.0"
     }
   ]

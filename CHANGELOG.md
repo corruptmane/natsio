@@ -3,7 +3,7 @@
 All notable changes to the `natsio` core client are documented here.
 Extension packages under `extensions/` keep their own changelogs.
 
-## Unreleased
+## 0.10.0 — 2026-07-21
 
 - `await` is now optional (a no-op) on the session-factory returns —
   `subscribe()`, `consume()`, `ordered_consumer()`, KV/Object Store
