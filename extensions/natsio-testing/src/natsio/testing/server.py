@@ -95,6 +95,14 @@ class NatsServerProcess:
                 except TimeoutError:
                     writer.close()
                     return
+                except OSError:
+                    # Kill-and-restart on the same port: Linux can accept the
+                    # probe on the dead predecessor's socket and then RST it
+                    # mid-read. Not ready yet — keep probing. (TimeoutError is
+                    # an OSError subclass, so its clause must come first.)
+                    writer.close()
+                    await asyncio.sleep(0.05)
+                    continue
                 finally:
                     writer.close()
                 if banner.startswith(b"INFO "):
