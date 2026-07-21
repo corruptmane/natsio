@@ -1,16 +1,26 @@
 {
   "$schema": "https://context7.com/schema/context7.json",
   "projectTitle": "natsio",
-  "description": "Zero-dependency asyncio NATS client for modern Python — JetStream, Key-Value, Object Store",
-  "folders": ["docs", "examples"],
+  "description": "Zero-dependency asyncio NATS client for modern Python \u2014 JetStream, Key-Value, Object Store",
+  "folders": [
+    "docs",
+    "examples"
+  ],
   "excludeFolders": [],
   "excludeFiles": [],
   "rules": [
     "Requires Python 3.13+ and NATS server 2.14+",
+    "nc.subscribe() is SYNCHRONOUS and returns a Subscription \u2014 never write 'await nc.subscribe(...)' (that is nats-py's idiom, shown in the migration guide only for contrast)",
+    "Iterate a Subscription directly ('async for msg in sub:'); there is no '.messages' property (that is nats-py)",
     "Use 'async with await natsio.connect(...)' for connection lifecycle; subscriptions are async context managers and async iterators",
     "JetStream uses only the ADR-37 simplified API: consumer.fetch()/next()/consume() and stream.ordered_consumer(); there are no push consumers",
+    "In migration-guide code blocks, lines under a '# nats-py' comment are the OLD client's API for comparison \u2014 only lines under '# natsio' apply to this library",
     "Install natsio[nkeys] for NKey or .creds authentication; the core package has zero runtime dependencies",
     "Per-message TTLs and durations accept datetime.timedelta; whole-second ints and the string 'never' also work for TTLs"
   ],
-  "previousVersions": [{ "tag": "v0.9.0" }]
+  "previousVersions": [
+    {
+      "tag": "v0.9.0"
+    }
+  ]
 }
