@@ -34,6 +34,15 @@ Either backend works; they are verified to produce identical keys and
 signatures. If your keys live in a KMS or HSM, you need neither — supply your
 own signer via `CallbackAuth` and natsio stays dependency-free.
 
+## Getting started
+
+- **[`examples/`](examples/)** — ten runnable, commented scripts from hello-world
+  pub/sub through JetStream, KV, Object Store, and graceful shutdown. Start a
+  local server with `just server`, then `python examples/01_hello_pubsub.py`.
+- **[Migrating from nats-py](docs/migration-from-nats-py.md)** — side-by-side
+  API mappings, an error-type table, the JetStream generational shift, and an
+  honest list of behavioral differences.
+
 ## Workspace layout
 
 This repository is a [uv](https://docs.astral.sh/uv/) workspace:
@@ -43,15 +52,15 @@ This repository is a [uv](https://docs.astral.sh/uv/) workspace:
 | `natsio/` | The core client — the only published distribution for now |
 | `extensions/natsio-*` | Orbit-style extension packages (independent versioning; see `extensions/README.md`) |
 | `tools/` | Development-only utilities (test-server management, benchmarks) |
+| `examples/` | Runnable, teaching-oriented example scripts |
+| `docs/` | Guides (migration from nats-py; docs site to come) |
 
 ## Development
 
 ```bash
 uv sync              # create venv, install workspace + dev tools
-uv run pytest        # run tests
-uv run ruff format . # format
-uv run ruff check .  # lint
-uv run ty check      # type-check
+just gates           # format check, lint, types, full test suite
+just bench --quick   # benchmark against nats-py / nats-core
 ```
 
 ## License

@@ -10,11 +10,11 @@ sync:
 
 # Format everything
 fmt:
-    uv run ruff format natsio extensions tools
+    uv run ruff format natsio extensions tools examples
 
 # Lint (with autofix)
 lint:
-    uv run ruff check --fix natsio extensions tools
+    uv run ruff check --fix natsio extensions tools examples
 
 # Type-check with ty
 typecheck:
@@ -34,8 +34,8 @@ test *ARGS:
 
 # Non-mutating verification: format check, lint, types (CI's lint job)
 check:
-    uv run ruff format --check natsio extensions tools
-    uv run ruff check natsio extensions tools
+    uv run ruff format --check natsio extensions tools examples
+    uv run ruff check natsio extensions tools examples
     uv run ty check
 
 # Everything CI runs: check + the full test suite
@@ -62,7 +62,15 @@ server port="4222":
 bench *ARGS:
     uv run natsio-bench {{ARGS}}
 
+# Build the documentation site (strict: broken links fail)
+docs:
+    uv run mkdocs build --strict
+
+# Serve the documentation site locally with live reload
+docs-serve:
+    uv run mkdocs serve
+
 # Remove caches and build artifacts
 clean:
-    rm -rf dist .pytest_cache .ruff_cache .hypothesis
+    rm -rf dist site .pytest_cache .ruff_cache .hypothesis
     find . -type d -name __pycache__ -prune -exec rm -rf {} \;
