@@ -10,11 +10,11 @@ sync:
 
 # Format everything
 fmt:
-    uv run ruff format natsio extensions
+    uv run ruff format natsio extensions tools
 
 # Lint (with autofix)
 lint:
-    uv run ruff check --fix natsio extensions
+    uv run ruff check --fix natsio extensions tools
 
 # Type-check with ty
 typecheck:
@@ -34,8 +34,8 @@ test *ARGS:
 
 # Non-mutating verification: format check, lint, types (CI's lint job)
 check:
-    uv run ruff format --check natsio extensions
-    uv run ruff check natsio extensions
+    uv run ruff format --check natsio extensions tools
+    uv run ruff check natsio extensions tools
     uv run ty check
 
 # Everything CI runs: check + the full test suite
@@ -57,6 +57,10 @@ build-all:
 # Run a throwaway JetStream-enabled server in the foreground (Ctrl-C to stop)
 server port="4222":
     tools/.bin/nats-server -a 127.0.0.1 -p {{port}} -js -sd /tmp/natsio-dev-js
+
+# Run the benchmark harness (natsio vs nats-py vs nats-core); e.g. `just bench --quick`
+bench *ARGS:
+    uv run natsio-bench {{ARGS}}
 
 # Remove caches and build artifacts
 clean:

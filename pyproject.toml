@@ -7,11 +7,13 @@ members = ["natsio", "extensions/natsio-*", "tools/natsio-*"]
 [tool.uv.sources]
 natsio = { workspace = true }
 natsio-testing = { workspace = true }
+natsio-bench = { workspace = true }
 
 [dependency-groups]
 dev = [
     "natsio",
     "natsio-testing",
+    "natsio-bench",
     # Ed25519 backends: both are exercised, and the official `nkeys` package is
     # used to differential-test our own NKey codec against the reference.
     "pynacl>=1.6.2",

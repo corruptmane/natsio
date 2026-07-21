@@ -1,0 +1,39 @@
+[build-system]
+requires = ["uv_build>=0.10,<0.11"]
+build-backend = "uv_build"
+
+[project]
+name = "natsio-bench"
+version = "0.1.0.dev0"
+description = "Fair, reproducible benchmark harness comparing natsio, nats-py, and nats-core"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.13"
+authors = [{ name = "Corrupt Mane", email = "corruptmane@gmail.com" }]
+keywords = ["nats", "nats.io", "benchmark", "asyncio"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Framework :: AsyncIO",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.13",
+    "Typing :: Typed",
+]
+dependencies = [
+    "natsio",
+    "natsio-testing",
+    "nats-py>=2.15.0",
+    "nats-core>=0.2.0",
+]
+
+[project.scripts]
+natsio-bench = "natsio_bench.cli:main"
+
+[tool.uv.sources]
+natsio = { workspace = true }
+natsio-testing = { workspace = true }
+
+# Plain module (a tool, not a natsio.* namespace extension): the package is
+# `natsio_bench`, laid out under src/ per the default uv_build layout.
+[tool.uv.build-backend]
+module-name = "natsio_bench"

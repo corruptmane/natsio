@@ -5,6 +5,7 @@ requires-python = ">=3.13"
 [manifest]
 members = [
     "natsio",
+    "natsio-bench",
     "natsio-testing",
 ]
 
@@ -13,6 +14,7 @@ dev = [
     { name = "cryptography", specifier = ">=49" },
     { name = "hypothesis", specifier = ">=6.100" },
     { name = "natsio", editable = "natsio" },
+    { name = "natsio-bench", editable = "tools/natsio-bench" },
     { name = "natsio-testing", editable = "extensions/natsio-testing" },
     { name = "nkeys", specifier = ">=0.2.1" },
     { name = "pynacl", specifier = ">=1.6.2" },
@@ -206,6 +208,24 @@ wheels = [
 ]
 
 [[package]]
+name = "nats-core"
+version = "0.2.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/06/ec/da29ae3ff515c561f8cb8c4c6a6a6ab936261a9d590a8a6249885e261be2/nats_core-0.2.0.tar.gz", hash = "sha256:f0299490b263d67cd298c9eeafb0634b067bd064eb56568ecc75698a5efc49fe", size = 22541, upload-time = "2026-04-14T16:13:54.065Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/7a/ce/1957df7551c21d6948105c772f86a9bbd7f8371a1e47f7844bc7ce86a2b0/nats_core-0.2.0-py3-none-any.whl", hash = "sha256:86ffc0531509945cc114c03c25b6d9b1a0a4ff1f5a6a30074e3a43d3fbefa687", size = 26395, upload-time = "2026-04-14T16:13:54.909Z" },
+]
+
+[[package]]
+name = "nats-py"
+version = "2.15.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/02/f0/fc5e93f2b0dd14a202590ad9d30eda1955ea872039b5204357348d0f4b1e/nats_py-2.15.0.tar.gz", hash = "sha256:6622c547d9a7d2313d9c147d46c386188f4ec2c7b5c9f9a0438a4d1b55f54a93", size = 75995, upload-time = "2026-06-05T07:34:03.904Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/db/a8/b55606c7c621fb813c8ec78baf201d2c78bf6051091ec0c7ada572999e95/nats_py-2.15.0-py3-none-any.whl", hash = "sha256:9f8d36aa52a9926a88b8f1d70cf1fdce0ad387941479b500ee9ab3e51073cefd", size = 90334, upload-time = "2026-06-05T07:34:02.81Z" },
+]
+
+[[package]]
 name = "natsio"
 version = "0.1.0.dev0"
 source = { editable = "natsio" }
@@ -224,6 +244,25 @@ requires-dist = [
     { name = "pynacl", marker = "extra == 'nkeys'", specifier = ">=1.5.0" },
 ]
 provides-extras = ["nkeys", "cryptography"]
+
+[[package]]
+name = "natsio-bench"
+version = "0.1.0.dev0"
+source = { editable = "tools/natsio-bench" }
+dependencies = [
+    { name = "nats-core" },
+    { name = "nats-py" },
+    { name = "natsio" },
+    { name = "natsio-testing" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "nats-core", specifier = ">=0.2.0" },
+    { name = "nats-py", specifier = ">=2.15.0" },
+    { name = "natsio", editable = "natsio" },
+    { name = "natsio-testing", editable = "extensions/natsio-testing" },
+]
 
 [[package]]
 name = "natsio-testing"
