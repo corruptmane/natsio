@@ -94,7 +94,7 @@ class _RequestSink:
 class Client:
     """A connection to a NATS server or cluster.
 
-    Prefer the :func:`connect` factory::
+    Prefer the `connect()` factory:
 
         async with await natsio.connect("nats://localhost:4222") as nc:
             await nc.publish("greet", b"hello")
@@ -183,7 +183,7 @@ class Client:
         ``Reconnected`` fire as usual. Non-blocking: it returns once the drop is
         scheduled, not once the connection is back.
 
-        Raises :class:`~natsio.errors.ConnectionClosedError` if the client is
+        Raises `ConnectionClosedError` if the client is
         already closed or draining.
         """
         await self._conn.force_reconnect()
@@ -605,10 +605,10 @@ async def connect(
     _transport_factory: TransportFactory | None = None,
     **kwargs: Unpack[ConnectKwargs],
 ) -> Client:
-    """Connect to NATS and return a ready :class:`Client`.
+    """Connect to NATS and return a ready `Client`.
 
     ``servers`` and any keyword arguments are folded into a
-    :class:`~natsio.options.ConnectOptions`; pass ``options=`` to supply one
+    `ConnectOptions`; pass ``options=`` to supply one
     directly (keyword arguments then override its fields).
     """
     base = options if options is not None else ConnectOptions()

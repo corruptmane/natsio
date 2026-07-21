@@ -2,9 +2,9 @@
 
 Builders are dumb and fast: framing only, single-join assembly, no I/O.
 Subject/queue validation happens at the public API boundary; header safety is
-enforced by :func:`natsio._internal.protocol.headers.encode_header_block`,
+enforced by `natsio._internal.protocol.headers.encode_header_block()`,
 which is the only sanctioned way to produce ``header_block`` for
-:func:`encode_hpub`.
+`encode_hpub()`.
 """
 
 from typing import Any, Final

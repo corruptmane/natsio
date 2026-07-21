@@ -1,9 +1,9 @@
 """Micro (ADR-32) data types: config, monitoring responses, validation.
 
-The monitoring responses (:class:`PingResponse`, :class:`InfoResponse`,
-:class:`StatsResponse`) are the wire contract answered on ``$SRV.*`` — their
+The monitoring responses (`PingResponse`, `InfoResponse`,
+`StatsResponse`) are the wire contract answered on ``$SRV.*`` — their
 ``type`` strings and JSON field names are fixed by ADR-32 and must match
-nats.go byte-for-byte, so they are built on the same :class:`JsonModel`
+nats.go byte-for-byte, so they are built on the same `JsonModel`
 framework the JetStream API uses (unknown fields round-trip, ``None`` is
 omitted).
 """

@@ -155,7 +155,7 @@ class KeyCodec(Protocol):
 
     The seam that keeps codec packs (path notation, encryption of key names,
     escaping of exotic characters — ADR-54) a plug-in, not a breaking change.
-    Encoded keys must still satisfy :func:`validate_key`.
+    Encoded keys must still satisfy `validate_key()`.
     """
 
     def encode(self, key: str) -> str: ...

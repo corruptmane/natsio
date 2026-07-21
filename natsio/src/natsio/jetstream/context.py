@@ -51,7 +51,7 @@ class TooManyStalledMsgsError(JetStreamError):
 class AsyncPublishTimeoutError(JetStreamError, builtins.TimeoutError):
     """An async publish received no PubAck within ``publish_async_timeout``.
 
-    Also a :class:`TimeoutError`, so a plain ``except TimeoutError`` works.
+    Also a `TimeoutError`, so a plain ``except TimeoutError`` works.
     """
 
 
@@ -70,7 +70,7 @@ class _PendingAck:
 
 
 class JetStreamContext:
-    """Entry point to JetStream. Obtain via :meth:`Client.jetstream`."""
+    """Entry point to JetStream. Obtain via `Client.jetstream()`."""
 
     __slots__ = (
         "_acks",
@@ -189,7 +189,7 @@ class JetStreamContext:
         """Update the stream, creating it when absent (nats.go CreateOrUpdateStream).
 
         The idempotent way to assert a stream in scripts and services:
-        re-running never raises :class:`StreamNameInUseError` — an existing
+        re-running never raises `StreamNameInUseError` — an existing
         stream is updated to ``config`` (a no-op when identical), a missing
         one is created. Update-then-create mirrors nats.go's order, and a
         create that loses a race to a concurrent creator is absorbed by a
@@ -280,7 +280,7 @@ class JetStreamContext:
 
         Re-creating with an identical configuration is idempotent; an existing
         bucket with a DIFFERENT configuration raises
-        :class:`~natsio.kv.BucketExistsError`.
+        `BucketExistsError`.
         """
         from natsio.kv.bucket import KeyValue
         from natsio.kv.errors import BucketExistsError
@@ -309,7 +309,7 @@ class JetStreamContext:
         """Update an existing Key-Value bucket's configuration.
 
         Runs a STREAM.UPDATE on the mapped backing stream. Raises
-        :class:`~natsio.kv.BucketNotFoundError` when no such bucket exists —
+        `BucketNotFoundError` when no such bucket exists —
         there is nothing to update.
         """
         from natsio.kv.bucket import KeyValue
@@ -334,7 +334,7 @@ class JetStreamContext:
 
         Mirrors nats.go ``CreateOrUpdateStream``: attempt the update first and
         fall back to a create when the backing stream is absent. Race-tolerant
-        under concurrent creators (see :meth:`create_or_update_stream`).
+        under concurrent creators (see `create_or_update_stream()`).
         """
         from natsio.kv.bucket import KeyValue
 
@@ -389,11 +389,11 @@ class JetStreamContext:
                 yield name[len(STREAM_PREFIX) :]
 
     async def key_value_stores(self) -> AsyncIterator["KeyValueStatus"]:
-        """Yield a :class:`~natsio.kv.KeyValueStatus` for every KV bucket.
+        """Yield a `KeyValueStatus` for every KV bucket.
 
         Statuses are built straight from the paged STREAM.LIST info, so no extra
         per-bucket round-trip is made. Filtering matches
-        :meth:`key_value_store_names`.
+        `key_value_store_names()`.
         """
         from natsio.kv.bucket import STREAM_PREFIX, SUBJECT_PREFIX
 
@@ -409,7 +409,7 @@ class JetStreamContext:
 
         Re-creating with an identical configuration is idempotent; an existing
         bucket with a DIFFERENT configuration raises
-        :class:`~natsio.objectstore.BucketExistsError`.
+        `BucketExistsError`.
         """
         from natsio.objectstore.errors import BucketExistsError
         from natsio.objectstore.store import ObjectStore
@@ -426,10 +426,10 @@ class JetStreamContext:
         """Update an existing Object Store bucket's configuration.
 
         Runs a STREAM.UPDATE on the mapped backing stream. Raises
-        :class:`~natsio.objectstore.BucketNotFoundError` when no such bucket
+        `BucketNotFoundError` when no such bucket
         exists. The server rejects updates that would violate a sealed stream or
         otherwise change immutable config; those surface as their mapped
-        :class:`APIError`.
+        `APIError`.
         """
         from natsio.objectstore.errors import BucketNotFoundError
         from natsio.objectstore.store import ObjectStore
@@ -447,7 +447,7 @@ class JetStreamContext:
 
         Mirrors nats.go ``CreateOrUpdateStream``: update first, create on absence.
         Race-tolerant under concurrent creators (see
-        :meth:`create_or_update_stream`).
+        `create_or_update_stream()`).
         """
         from natsio.objectstore.store import ObjectStore
 
@@ -497,11 +497,11 @@ class JetStreamContext:
                 yield name[len(STREAM_PREFIX) :]
 
     async def object_stores(self) -> AsyncIterator["ObjectStoreStatus"]:
-        """Yield an :class:`~natsio.objectstore.ObjectStoreStatus` for every bucket.
+        """Yield an `ObjectStoreStatus` for every bucket.
 
         Statuses are built straight from the paged STREAM.LIST info, so no extra
         per-bucket round-trip is made. Filtering matches
-        :meth:`object_store_names`.
+        `object_store_names()`.
         """
         from natsio.objectstore.store import STREAM_PREFIX, SUBJECT_PREFIX
 
@@ -532,7 +532,7 @@ class JetStreamContext:
         ``ttl`` is a ``timedelta``, whole seconds, or ``"never"`` (ADR-43) and
         needs the stream's ``allow_msg_ttl``. A 503 (no stream bound / leader election in
         progress) is retried briefly per ADR-22 before raising
-        :class:`NoStreamResponseError`.
+        `NoStreamResponseError`.
 
         ``expected_last_subject_seq_subject`` (server 2.12+) scopes an
         ``expected_last_subject_seq`` check to a different subject filter — e.g.
@@ -585,17 +585,17 @@ class JetStreamContext:
 
         The message is sent immediately with a per-message reply inbox; the
         server's ack is routed back to the returned future. Await the future to
-        get the :class:`PubAck` or the failure — an :class:`APIError` (e.g.
-        :class:`WrongLastSequenceError`), :class:`NoStreamResponseError` after
-        503 retries are exhausted, :class:`AsyncPublishTimeoutError`, or
-        :class:`~natsio.errors.ConnectionClosedError` if the connection drops
+        get the `PubAck` or the failure — an `APIError` (e.g.
+        `WrongLastSequenceError`), `NoStreamResponseError` after
+        503 retries are exhausted, `AsyncPublishTimeoutError`, or
+        `ConnectionClosedError` if the connection drops
         with the ack still outstanding.
 
         Outstanding acks are capped at ``publish_async_max_pending``. When the
         window is full this call waits up to ``publish_async_stall_wait`` for it
-        to drain, then raises :class:`TooManyStalledMsgsError`.
+        to drain, then raises `TooManyStalledMsgsError`.
 
-        Header/expectation arguments behave exactly as :meth:`publish`.
+        Header/expectation arguments behave exactly as `publish()`.
         """
         validate_subject(subject)
         merged = _merge_headers(
@@ -667,7 +667,7 @@ class JetStreamContext:
         """Wait until every outstanding async publish has resolved (ack or error).
 
         Returns immediately when the window is already empty. With ``timeout``,
-        raises :class:`~natsio.errors.TimeoutError` if the window has not drained
+        raises `TimeoutError` if the window has not drained
         in time; the outstanding publishes keep their own futures.
         """
         if not self._acks:

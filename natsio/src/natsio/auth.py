@@ -1,7 +1,7 @@
 """Authenticators for NKey, JWT/.creds, token, user/password, and custom flows.
 
 NKey and JWT auth need an Ed25519 backend — see the ``natsio[nkeys]`` /
-``natsio[cryptography]`` extras. :class:`CallbackAuth` needs neither: you sign
+``natsio[cryptography]`` extras. `CallbackAuth` needs neither: you sign
 the server nonce yourself (KMS/HSM-held keys, auth-callout flows) and natsio
 stays fully dependency-free.
 """

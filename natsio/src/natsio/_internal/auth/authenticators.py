@@ -1,6 +1,6 @@
 """Pluggable authentication.
 
-An :class:`Authenticator` turns the server's INFO (most importantly its
+An `Authenticator` turns the server's INFO (most importantly its
 ``nonce``) into the auth fields of CONNECT. It is re-invoked on **every**
 (re)connect: nonces change each time, credentials files may have been rotated
 on disk, and callables may return fresh tokens — nothing here is cached.

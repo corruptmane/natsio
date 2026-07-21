@@ -6,7 +6,7 @@ layer wires two callbacks at construction time:
 - ``on_bytes(data)`` — called for every received chunk (must not block);
 - ``on_close(exc)``  — called exactly once when the transport is gone.
 
-Implementations are structural (:class:`typing.Protocol` — no inheritance):
+Implementations are structural (`typing.Protocol` — no inheritance):
 TCP today; a WebSocket transport can be added later without touching the
 parser or connection.
 """

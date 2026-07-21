@@ -1,6 +1,6 @@
 """JetStream API entities (ADR-1 JSON rules, 2.14-era field coverage).
 
-Every model is a slotted dataclass over :class:`~natsio._internal.jsonmodel.JsonModel`:
+Every model is a slotted dataclass over `JsonModel`:
 durations are ``timedelta`` (nanoseconds on the wire), timestamps are aware
 ``datetime`` (RFC 3339 on the wire), and unknown server fields round-trip via
 ``extra`` — a config read from a newer server and written back loses nothing.

@@ -8,7 +8,7 @@ produce byte-identical keys and signatures.
 
 Everything else in natsio keeps working with zero dependencies; only NKey/JWT
 auth requires an extra, and users holding keys in a KMS/HSM can skip it
-entirely with :class:`~natsio._internal.auth.authenticators.CallbackAuth`.
+entirely with `CallbackAuth`.
 """
 
 from collections.abc import Callable

@@ -79,7 +79,7 @@ class Consumer:
 
         The server drops the current pin; the next pull request from any client
         in the group becomes the new pinned client. Raises
-        :class:`ConsumerNotFoundError` if the consumer no longer exists.
+        `ConsumerNotFoundError` if the consumer no longer exists.
         """
         await self._stream._ctx._api_request(
             f"CONSUMER.UNPIN.{self._stream.name}.{self.name}",
@@ -141,7 +141,7 @@ class Consumer:
         Returns what arrived when the batch fills, the server ends the request
         (no more messages / request expired), or the deadline passes — an empty
         list is a normal outcome. ``no_wait`` returns only immediately-available
-        messages. Raises :class:`ConnectionClosedError` if the connection closes
+        messages. Raises `ConnectionClosedError` if the connection closes
         mid-fetch with the batch still incomplete.
 
         ``group`` selects an ADR-42 priority group (required, and validated, when
@@ -249,10 +249,10 @@ class Consumer:
         min_pending: int | None = None,
         min_ack_pending: int | None = None,
     ) -> JsMsg:
-        """The next available message, or :class:`NoMessagesError` on expiry.
+        """The next available message, or `NoMessagesError` on expiry.
 
         ``group`` / ``min_pending`` / ``min_ack_pending`` carry the same ADR-42
-        priority-group semantics as :meth:`fetch`.
+        priority-group semantics as `fetch()`.
         """
         messages = await self.fetch(
             1,
@@ -305,14 +305,14 @@ class Consumer:
 
         Keeps up to ``max_messages`` requested from the server, re-pulling when
         the outstanding count drops below ``threshold`` of the target so the
-        buffer never drains to a stall. Use as an async context manager::
+        buffer never drains to a stall. Use as an async context manager:
 
             async with consumer.consume() as messages:
                 async for msg in messages:
                     await msg.ack()
 
         ``group`` / ``min_pending`` / ``min_ack_pending`` carry ADR-42 priority-
-        group semantics (see :meth:`fetch`); the group, when the consumer has
+        group semantics (see `fetch()`); the group, when the consumer has
         priority groups configured, is validated here before the session starts.
         """
         self._validate_group(group)
@@ -402,7 +402,7 @@ class Consumption:
 
     def __await__(self) -> Generator[None, None, "Consumption"]:
         """``await`` is optional and completes immediately (no I/O) — nats-py
-        muscle memory support; see :meth:`Subscription.__await__`."""
+        muscle memory support; see `Subscription.__await__()`."""
         return self
         yield  # unreachable: makes this a generator that never suspends
 
@@ -680,14 +680,14 @@ class OrderedConsumer:
     ``opt_start_seq``).
 
     Prefer the context-manager form for deterministic teardown of the
-    server-side ephemeral consumer::
+    server-side ephemeral consumer:
 
         async with stream.ordered_consumer() as ordered:
             async for msg in ordered:
                 ...
 
     A bare ``async for`` over the object also works; teardown then happens at
-    generator finalization (or via :meth:`stop`).
+    generator finalization (or via `stop()`).
     """
 
     __slots__ = (
@@ -711,7 +711,7 @@ class OrderedConsumer:
 
     def __await__(self) -> Generator[None, None, "OrderedConsumer"]:
         """``await`` is optional and completes immediately (no I/O) — nats-py
-        muscle memory support; see :meth:`Subscription.__await__`."""
+        muscle memory support; see `Subscription.__await__()`."""
         return self
         yield  # unreachable: makes this a generator that never suspends
 
@@ -725,7 +725,7 @@ class OrderedConsumer:
         """Eagerly create the underlying ephemeral consumer.
 
         Iteration does this lazily; starting explicitly is useful when the
-        caller needs the initial :class:`ConsumerInfo` (e.g. ``num_pending``
+        caller needs the initial `ConsumerInfo` (e.g. ``num_pending``
         to detect an initially-empty stream) before blocking on messages.
         """
         if self._session is None:
@@ -749,7 +749,7 @@ class OrderedConsumer:
         """The ordered message stream (an async generator — ``aclose()`` to stop).
 
         ``idle_timeout`` bounds the wait for each message: on expiry the stream
-        raises :class:`NoMessagesError` instead of silently self-healing
+        raises `NoMessagesError` instead of silently self-healing
         forever, letting callers distinguish a quiet stream from a dead one.
 
         ``until_drained=True`` is the finite-read mode: iteration ends

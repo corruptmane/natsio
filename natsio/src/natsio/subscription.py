@@ -3,11 +3,11 @@
 A subscription is fed synchronously from the connection's read path, so
 delivery must never block there. Everything that can block — user callbacks,
 async iteration — happens in the consumer's own task, pulling from the queue.
-When the pending limits are exceeded the configured :class:`PendingLimitPolicy`
+When the pending limits are exceeded the configured `PendingLimitPolicy`
 decides what gives, and every policy is loud: drops are counted and reported
 through the client's error callback.
 
-Termination design: closure is signalled by an :class:`asyncio.Event` latch,
+Termination design: closure is signalled by an `asyncio.Event` latch,
 never by an in-band queue sentinel. A sentinel can be dropped when the queue is
 full, is consumed by only one of several waiters, and blocks the closer when
 nobody is reading — an Event has none of those failure modes. The queue itself
@@ -62,14 +62,14 @@ class PendingLimitPolicy(Enum):
 
     ERROR = "error"
     """Treat overflow as fatal for this subscription: stop delivering and
-    raise :class:`~natsio.errors.SlowConsumerError` to the consumer."""
+    raise `SlowConsumerError` to the consumer."""
 
 
 class Subscription:
     """An active subscription.
 
     Consume it as an async iterator (the default), or pass ``cb=`` to
-    :meth:`Client.subscribe` to have messages handed to a callback instead.
+    `Client.subscribe()` to have messages handed to a callback instead.
     Usable as an async context manager, which unsubscribes on exit.
     """
 
@@ -343,7 +343,7 @@ class Subscription:
             yield msg
 
     async def next_msg(self, timeout: float | None = None) -> Msg:  # noqa: ASYNC109
-        """Await the next message. Raises :class:`~natsio.errors.TimeoutError` on expiry."""
+        """Await the next message. Raises `TimeoutError` on expiry."""
         if self._callback is not None:
             raise SubscriptionClosedError("subscription is in callback mode; use the callback, not next_msg()")
         if self._failure is not None:
@@ -379,7 +379,7 @@ class Subscription:
         The count is total deliveries since the subscription was created (the
         server's ``UNSUB <sid> <max>`` contract). When the limit is reached the
         subscription closes itself: iterators finish, ``next_msg`` raises
-        :class:`~natsio.errors.SubscriptionClosedError`.
+        `SubscriptionClosedError`.
         """
         if self._closed:
             return
@@ -391,7 +391,7 @@ class Subscription:
     async def drain(self) -> None:
         """Stop new delivery, wait for the backlog to be handled, then close.
 
-        Unbounded by itself — bound it with :meth:`Client.drain`'s
+        Unbounded by itself — bound it with `Client.drain()`'s
         ``drain_timeout`` or your own ``asyncio.timeout``; cancellation is
         honored, never swallowed.
         """

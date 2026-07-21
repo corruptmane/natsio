@@ -1,7 +1,7 @@
 """Managed NATS connection: handshake, write path, liveness, reconnect.
 
-Layering: one :class:`Connection` (lives as long as the client) supervises a
-sequence of :class:`_Session` objects (one per physical transport connection).
+Layering: one `Connection` (lives as long as the client) supervises a
+sequence of `_Session` objects (one per physical transport connection).
 A session owns the parser, the coalescing flusher, and ping liveness; the
 connection owns the server pool, the subscription registry, reconnect policy,
 and the event bus.

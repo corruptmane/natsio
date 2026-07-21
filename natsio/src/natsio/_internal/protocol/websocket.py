@@ -1,11 +1,11 @@
 """Sans-io WebSocket (RFC 6455) client core: no asyncio, no sockets.
 
-Two pull-parsers in the house style (:meth:`receive_data` + :meth:`next_event`,
+Two pull-parsers in the house style (`receive_data()` + `next_event()`,
 returning :data:`WS_NEED_DATA` when the buffer does not yet hold a full unit):
 
-* :class:`WSHandshake` — builds the HTTP/1.1 ``Upgrade`` request and parses the
+* `WSHandshake` — builds the HTTP/1.1 ``Upgrade`` request and parses the
   ``101 Switching Protocols`` response, validating ``Sec-WebSocket-Accept``.
-* :class:`WSFrameDecoder` — decodes server frames (unmasked) into typed events,
+* `WSFrameDecoder` — decodes server frames (unmasked) into typed events,
   reassembling nothing at the message level: each data frame's payload is handed
   up immediately as opaque NATS bytes (the NATS parser does its own framing).
 
@@ -17,7 +17,7 @@ violation on decode, since no extension was negotiated. nats.go offers it
 optionally; declining keeps the whole codec allocation-light and branch-free.
 
 Framing violations are fatal, exactly like the NATS parser: a WebSocket stream
-cannot be resynchronized mid-frame, so a :class:`WebsocketError` tears the
+cannot be resynchronized mid-frame, so a `WebsocketError` tears the
 transport down and the decoder refuses further use.
 """
 

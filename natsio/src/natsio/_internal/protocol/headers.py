@@ -1,6 +1,6 @@
 """NATS message headers: parsing and encoding.
 
-The wire format is an HTTP/1.1-like block::
+The wire format is an HTTP/1.1-like block:
 
     NATS/1.0[ <code>[ <description>]]\r\n
     Key: Value\r\n
@@ -9,7 +9,7 @@ The wire format is an HTTP/1.1-like block::
 
 Repeated keys are preserved (multi-value). Lookup is exact-match and
 case-preserving; the canonical ``Nats-*`` spellings are provided as constants
-in :mod:`natsio._internal.protocol.wire` users should prefer.
+in `natsio._internal.protocol.wire` users should prefer.
 """
 
 from collections.abc import Iterator, Mapping, Sequence
@@ -131,7 +131,7 @@ def _is_valid_key(key: str) -> bool:
 def parse_header_block(block: bytes) -> tuple[Headers | None, InlineStatus | None]:
     """Parse a complete, length-delimited header block.
 
-    Raises :class:`BadHeadersError` only when the envelope itself is wrong
+    Raises `BadHeadersError` only when the envelope itself is wrong
     (missing ``NATS/1.0`` version line or missing terminating CRLF CRLF) —
     the caller knows the block's exact length, so this is never a framing
     hazard. Individually malformed header *lines* are skipped: the block is
@@ -177,7 +177,7 @@ def _parse_status_line(line: bytes) -> InlineStatus | None:
 def encode_header_block(headers: HeadersInput) -> bytes:
     """Encode headers for HPUB, validating against wire injection.
 
-    Raises :class:`BadHeadersError` for keys/values that could break framing:
+    Raises `BadHeadersError` for keys/values that could break framing:
     CR or LF anywhere, ``:`` or non-printable-ASCII in keys.
     """
     out = [HEADER_VERSION, CRLF]

@@ -1,6 +1,6 @@
 """Typed dataclass ↔ JSON mapping for the JetStream API, zero dependencies.
 
-Field conversion is declared inline with ``Annotated``::
+Field conversion is declared inline with ``Annotated``:
 
     @dataclass(slots=True, kw_only=True)
     class StreamConfig(JsonModel):

@@ -60,8 +60,8 @@ def validate_kv_stream(bucket: str, config: StreamConfig) -> None:
 class KeyValue:
     """A handle to one Key-Value bucket.
 
-    Obtain via :meth:`JetStreamContext.key_value` /
-    :meth:`JetStreamContext.create_key_value`. Codecs (identity by default)
+    Obtain via `JetStreamContext.key_value()` /
+    `JetStreamContext.create_key_value()`. Codecs (identity by default)
     transform keys and values on the way in and out — the seam that keeps
     codec packs a plug-in rather than a breaking change.
     """
@@ -117,8 +117,8 @@ class KeyValue:
     async def get(self, key: str, *, revision: int | None = None) -> KvEntry:
         """The live entry for ``key`` (or a specific ``revision``).
 
-        Raises :class:`KeyNotFoundError` — or its subclass
-        :class:`KeyDeletedError` when the latest revision is a marker.
+        Raises `KeyNotFoundError` — or its subclass
+        `KeyDeletedError` when the latest revision is a marker.
         """
         entry = await self._get_any(key, revision=revision)
         if entry.is_marker:
@@ -129,7 +129,7 @@ class KeyValue:
         return entry
 
     async def _get_any(self, key: str, *, revision: int | None = None) -> KvEntry:
-        """Like :meth:`get` but returns marker entries instead of raising."""
+        """Like `get()` but returns marker entries instead of raising."""
         encoded = self._encode_key(key)
         subject = self._subject(encoded)
         from natsio.jetstream.errors import MessageNotFoundError
@@ -186,7 +186,7 @@ class KeyValue:
         ``ttl`` (a ``timedelta``, whole seconds, or ``"never"`` — ADR-43) makes this single
         revision self-expire — requires the bucket's ``allow_msg_ttl``
         (``KeyValueConfig(allow_msg_ttl=True)`` or ``limit_marker_ttl``),
-        otherwise :class:`~natsio.errors.ConfigError`.
+        otherwise `ConfigError`.
         """
         self._require_msg_ttl(ttl)
         encoded = self._encode_key(key)
@@ -197,10 +197,10 @@ class KeyValue:
         """Store a value only if the key has no live value.
 
         Succeeds for brand-new keys and for deleted/purged keys; raises
-        :class:`KeyExistsError` when a live value exists. ``ttl`` (whole
+        `KeyExistsError` when a live value exists. ``ttl`` (whole
         seconds, or ``"never"``) makes the created revision self-expire — same
-        ``allow_msg_ttl`` requirement as :meth:`put`; when it expires the key is
-        gone and :meth:`create` succeeds for it again.
+        ``allow_msg_ttl`` requirement as `put()`; when it expires the key is
+        gone and `create()` succeeds for it again.
         """
         self._require_msg_ttl(ttl)
         expected = 0
@@ -230,7 +230,7 @@ class KeyValue:
     async def update(self, key: str, value: bytes | str, *, last: int) -> int:
         """Compare-and-set: store only if ``last`` is the key's latest revision.
 
-        Raises :class:`~natsio.jetstream.WrongLastSequenceError` on conflict.
+        Raises `WrongLastSequenceError` on conflict.
         """
         return await self._update_revision(key, value, last=last, ttl=None)
 
@@ -264,7 +264,7 @@ class KeyValue:
         (``KeyValueConfig(allow_msg_ttl=True)`` or ``limit_marker_ttl``).
         ``last`` makes the rollup a compare-and-set: it proceeds only if ``last``
         is the key's latest revision, else
-        :class:`~natsio.jetstream.WrongLastSequenceError`.
+        `WrongLastSequenceError`.
         """
         self._require_msg_ttl(ttl)
         encoded = self._encode_key(key)
@@ -329,7 +329,7 @@ class KeyValue:
         With no ``keys`` the whole bucket is watched (``">"``); one key behaves
         exactly as a single-key watch; several keys install an ordered consumer
         with one filter subject per key, so the initial state and live updates
-        cover the union of the keys. Yields :class:`KvEntry` items and exactly
+        cover the union of the keys. Yields `KvEntry` items and exactly
         one ``None`` marker once the current state has been fully delivered
         (immediately for ``updates_only``); afterwards it streams live updates.
         Self-healing — backed by the ordered consumer.
@@ -478,7 +478,7 @@ class KvWatcher:
 
     def __await__(self) -> Generator[None, None, "KvWatcher"]:
         """``await`` is optional and completes immediately (no I/O) — nats-py
-        muscle memory support; see :meth:`Subscription.__await__`."""
+        muscle memory support; see `Subscription.__await__()`."""
         return self
         yield  # unreachable: makes this a generator that never suspends
 

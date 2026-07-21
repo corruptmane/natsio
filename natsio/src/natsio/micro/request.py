@@ -13,7 +13,7 @@ class Request:
     """A single service request, exposing the payload and reply helpers.
 
     A handler is ``async def handler(req: Request) -> None``. It responds with
-    :meth:`respond` (or :meth:`respond_error` for a failure) exactly once;
+    `respond()` (or `respond_error()` for a failure) exactly once;
     returning without responding is allowed but leaves the caller waiting.
     """
 
@@ -49,7 +49,7 @@ class Request:
 
     @property
     def data(self) -> bytes:
-        """Alias for :attr:`payload`."""
+        """Alias for `payload`."""
         return self._msg.payload
 
     async def respond(self, payload: bytes | str = b"", *, headers: HeadersInput | None = None) -> None:

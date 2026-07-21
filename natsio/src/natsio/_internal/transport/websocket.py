@@ -1,15 +1,15 @@
-"""WebSocket transport: the same :class:`~.base.Transport` seam as TCP, layered
+"""WebSocket transport: the same `Transport` seam as TCP, layered
 over the sans-io RFC 6455 core.
 
 Connect order: TCP connect, then (for ``wss``) TLS wraps the socket BEFORE the
 HTTP Upgrade — WebSocket TLS is transport-level, never an in-band STARTTLS, so
-:meth:`upgrade_tls` is unsupported here. Once the ``101`` handshake completes,
-NATS bytes stream both ways: every :meth:`write` becomes exactly one masked
+`upgrade_tls()` is unsupported here. Once the ``101`` handshake completes,
+NATS bytes stream both ways: every `write()` becomes exactly one masked
 binary frame; inbound frames are decoded and their payloads fed to the NATS
 parser as an opaque byte stream. Server pings are answered transparently with a
 pong; a server close frame is surfaced as connection loss (EOF-equivalent).
 
-Like :class:`~.tcp.TCPTransport` this rides a raw ``asyncio.Protocol`` (one
+Like `TCPTransport` this rides a raw ``asyncio.Protocol`` (one
 buffer copy, direct ``pause_writing``/``pause_reading`` for backpressure).
 """
 

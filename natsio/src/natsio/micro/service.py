@@ -125,7 +125,7 @@ class Endpoint:
 
     def __await__(self) -> Generator[None, None, "Endpoint"]:
         """``await`` is optional and completes immediately (no I/O) — the same
-        muscle-memory tolerance as :meth:`natsio.Client.subscribe`."""
+        muscle-memory tolerance as `natsio.Client.subscribe()`."""
         return self
         yield  # unreachable: makes this a generator that never suspends
 
@@ -172,7 +172,7 @@ class Group:
 
     def __await__(self) -> Generator[None, None, "Group"]:
         """``await`` is optional and completes immediately (no I/O) — the same
-        muscle-memory tolerance as :meth:`natsio.Client.subscribe`."""
+        muscle-memory tolerance as `natsio.Client.subscribe()`."""
         return self
         yield  # unreachable: makes this a generator that never suspends
 
@@ -203,11 +203,11 @@ class Group:
 
 
 class Service:
-    """A running micro service instance (create via :func:`add_service`).
+    """A running micro service instance (create via `add_service()`).
 
     Answers ``$SRV`` monitoring for its lifetime and routes requests to
     registered endpoints. Use it as an async context manager, or await
-    :attr:`stopped` to block until it stops.
+    `stopped` to block until it stops.
     """
 
     __slots__ = (
@@ -236,7 +236,7 @@ class Service:
 
     def __await__(self) -> Generator[None, None, "Service"]:
         """``await`` is optional and completes immediately (no I/O) — the same
-        muscle-memory tolerance as :meth:`natsio.Client.subscribe`."""
+        muscle-memory tolerance as `natsio.Client.subscribe()`."""
         return self
         yield  # unreachable: makes this a generator that never suspends
 
@@ -468,7 +468,7 @@ class Service:
         """Drain every subscription (endpoints + monitoring) and mark stopped.
 
         Idempotent, and drain-friendly: in-flight requests finish before their
-        subscription closes. Resolves :attr:`stopped`.
+        subscription closes. Resolves `stopped`.
         """
         if self._stopped:
             return
@@ -502,10 +502,10 @@ def add_service(
 ) -> Service:
     """Create and start a micro service.
 
-    Pass a :class:`ServiceConfig`, or the config fields as keyword arguments
+    Pass a `ServiceConfig`, or the config fields as keyword arguments
     (``add_service(nc, name="calc", version="1.0.0")``). Enables the ``$SRV``
     monitoring responders immediately; register handlers with
-    :meth:`Service.add_endpoint` / :meth:`Service.add_group`.
+    `Service.add_endpoint()` / `Service.add_group()`.
     """
     if config is None:
         config = ServiceConfig(**kwargs)

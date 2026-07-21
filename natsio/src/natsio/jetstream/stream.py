@@ -46,7 +46,7 @@ class Stream:
     """A thin, stateful handle to one stream.
 
     ``cached_info`` is populated when the handle is created and refreshed only
-    by an explicit :meth:`info` call.
+    by an explicit `info()` call.
     """
 
     __slots__ = ("_ctx", "cached_info")

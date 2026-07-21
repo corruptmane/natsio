@@ -1,8 +1,8 @@
 """Public exception hierarchy.
 
-Every exception raised by natsio derives from :class:`NATSError`. Where it
+Every exception raised by natsio derives from `NATSError`. Where it
 helps ``except`` ergonomics, subtrees additionally mix in the matching
-builtin (e.g. :class:`TimeoutError` is also a :class:`builtins.TimeoutError`).
+builtin (e.g. `TimeoutError` is also a `builtins.TimeoutError`).
 """
 
 import builtins

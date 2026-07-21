@@ -37,7 +37,7 @@ class Msg:
 
     @property
     def data(self) -> bytes:
-        """Alias for :attr:`payload`."""
+        """Alias for `payload`."""
         return self.payload
 
     async def respond(self, payload: bytes | str = b"", *, headers: HeadersInput | None = None) -> None:

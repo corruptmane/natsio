@@ -97,8 +97,8 @@ async def _iter_chunks(data: ObjectData, chunk_size: int) -> AsyncGenerator[byte
 class ObjectStore:
     """A handle to one Object Store bucket.
 
-    Obtain via :meth:`JetStreamContext.object_store` /
-    :meth:`JetStreamContext.create_object_store`.
+    Obtain via `JetStreamContext.object_store()` /
+    `JetStreamContext.create_object_store()`.
     """
 
     __slots__ = ("_ctx", "_stream", "bucket")
@@ -122,8 +122,8 @@ class ObjectStore:
     # -- metadata ------------------------------------------------------------
 
     async def info(self, name: str, *, show_deleted: bool = False) -> ObjectInfo:
-        """The object's metadata. Raises :class:`ObjectNotFoundError` for a
-        missing object — or its subclass :class:`ObjectDeletedError` when the
+        """The object's metadata. Raises `ObjectNotFoundError` for a
+        missing object — or its subclass `ObjectDeletedError` when the
         latest revision is a delete marker.
 
         With ``show_deleted=True`` a delete marker is returned instead of
@@ -135,7 +135,7 @@ class ObjectStore:
         return info
 
     async def _info_any(self, name: str) -> ObjectInfo:
-        """Like :meth:`info` but returns delete markers instead of raising."""
+        """Like `info()` but returns delete markers instead of raising."""
         info, _seq = await self._stored_meta(name)
         return info
 
@@ -158,7 +158,7 @@ class ObjectStore:
         Every meta write is CAS-gated: unguarded rollup writes are how
         concurrent puts orphan chunks and racing deletes get silently rolled
         away (probe-confirmed). Raises
-        :class:`~natsio.jetstream.WrongLastSequenceError` on conflict.
+        `WrongLastSequenceError` on conflict.
         """
         info.mtime = datetime.now(UTC)  # wire parity with nats.go; readers re-stamp from the message
         await self._ctx.publish(
@@ -297,16 +297,16 @@ class ObjectStore:
         RENAME — when ``meta.name`` differs from ``name`` the object moves:
         the metadata is rewritten under the new name's subject and the old
         name's meta subject is purged, so ``info(name)`` then raises
-        :class:`ObjectNotFoundError`. The chunks stay under the same nuid (no
+        `ObjectNotFoundError`. The chunks stay under the same nuid (no
         data is copied). Renaming onto a *live* object raises
-        :class:`ObjectExistsError`; onto a *deleted* name is allowed (it
+        `ObjectExistsError`; onto a *deleted* name is allowed (it
         overwrites the marker).
 
-        Raises :class:`ObjectNotFoundError` if ``name`` never existed and
-        :class:`ObjectDeletedError` (its subclass) if the latest revision is a
+        Raises `ObjectNotFoundError` if ``name`` never existed and
+        `ObjectDeletedError` (its subclass) if the latest revision is a
         delete marker — a deleted object cannot be updated.
 
-        Every meta write is CAS-gated like :meth:`put` / :meth:`delete`. On a
+        Every meta write is CAS-gated like `put()` / `delete()`. On a
         rename the new meta is written first and the old subject purged second
         (nats.go's order): a crash in that window leaves the object readable
         under *both* names — same nuid, same chunks — until a later write
@@ -386,16 +386,16 @@ class ObjectStore:
 
         Follows one link hop transparently. ``chunk_timeout`` bounds the wait
         for each chunk and is always finite — a stream that lost chunks raises
-        :class:`~natsio.jetstream.NoMessagesError` instead of hanging forever
+        `NoMessagesError` instead of hanging forever
         (pass a larger value for very slow links, never ``None``).
 
         With ``show_deleted=True`` a deleted object resolves to its delete
         marker and yields no chunks (empty content, ``result.info`` is the
         marker) instead of raising — otherwise a delete marker raises
-        :class:`ObjectDeletedError`. The flag applies only to ``name`` itself;
+        `ObjectDeletedError`. The flag applies only to ``name`` itself;
         a link target is always resolved live (a dangling link still raises).
 
-        ::
+        :
 
             async with obj.get("report.pdf") as result:
                 print(result.info.size)
@@ -418,7 +418,7 @@ class ObjectStore:
 
         Links carry no data — ``get`` on the link streams the target. Refuses
         deleted targets and links-to-links; refuses to shadow an existing
-        live non-link object (:class:`ObjectExistsError`).
+        live non-link object (`ObjectExistsError`).
         """
         validate_object_name(name)
         if not target.name or not target.bucket:
@@ -433,8 +433,8 @@ class ObjectStore:
         """Store ``name`` as a link to a whole bucket (no object name).
 
         Bucket links are directory-entry style pointers: ``get`` on one raises
-        :class:`LinkError` — open the linked bucket via
-        :meth:`JetStreamContext.object_store` instead.
+        `LinkError` — open the linked bucket via
+        `JetStreamContext.object_store()` instead.
         """
         validate_object_name(name)
         target_bucket = bucket.bucket if isinstance(bucket, ObjectStore) else bucket
@@ -476,7 +476,7 @@ class ObjectStore:
     ) -> "ObjectWatcher":
         """Watch the bucket's metadata for changes.
 
-        Yields :class:`ObjectInfo` items and exactly one ``None`` marker once
+        Yields `ObjectInfo` items and exactly one ``None`` marker once
         the current state has been fully delivered (immediately for
         ``updates_only``); afterwards it streams live updates. Self-healing —
         backed by the ordered consumer.
@@ -552,7 +552,7 @@ class ObjectResult:
     ``info`` is the (link-resolved) metadata, available once iteration starts
     — or after ``__aenter__`` when used as a context manager. The digest and
     size are verified after the final chunk; a mismatch raises
-    :class:`DigestMismatchError`, so a completed iteration is a verified read.
+    `DigestMismatchError`, so a completed iteration is a verified read.
     """
 
     __slots__ = (
@@ -689,7 +689,7 @@ class ObjectWatcher:
 
     def __await__(self) -> Generator[None, None, "ObjectWatcher"]:
         """``await`` is optional and completes immediately (no I/O) — nats-py
-        muscle memory support; see :meth:`Subscription.__await__`."""
+        muscle memory support; see `Subscription.__await__()`."""
         return self
         yield  # unreachable: makes this a generator that never suspends
 

@@ -9,7 +9,7 @@ byte and hold the Ed25519 public key.
 This is a checksummed encoding, not cryptography: no package publishes it
 standalone, and owning it buys ``str`` in/out, typed errors, and independence
 from a thinly-maintained wrapper. The Ed25519 math it needs is delegated to
-:mod:`natsio._internal.auth.signer`.
+`natsio._internal.auth.signer`.
 """
 
 import base64

@@ -1,14 +1,14 @@
 """Sans-io NATS protocol parser.
 
-An h11-style pull parser: :meth:`Parser.receive_data` appends raw bytes to an
-internal buffer, :meth:`Parser.next_event` returns exactly one complete typed
+An h11-style pull parser: `Parser.receive_data()` appends raw bytes to an
+internal buffer, `Parser.next_event()` returns exactly one complete typed
 event or :data:`NEED_DATA`. The parser never performs I/O and never awaits —
 chunk-boundary handling is therefore a pure function of the buffer, testable
 for every possible split of a byte stream.
 
 Framing errors are fatal by design: a byte stream cannot be resynchronized
 mid-frame, so the only correct recovery is tearing down the transport. After
-a :class:`ParserError` the parser instance refuses further use.
+a `ParserError` the parser instance refuses further use.
 """
 
 from enum import Enum

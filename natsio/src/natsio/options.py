@@ -21,7 +21,7 @@ __all__ = ["ConnectKwargs", "ConnectOptions", "TLSConfig"]
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class TLSConfig:
-    """TLS settings. ``context=None`` uses :func:`ssl.create_default_context`."""
+    """TLS settings. ``context=None`` uses `ssl.create_default_context()`."""
 
     context: ssl_module.SSLContext | None = None
     hostname: str | None = None
@@ -156,9 +156,9 @@ class ConnectOptions:
 
 
 class ConnectKwargs(TypedDict, total=False):
-    """Keyword arguments accepted by :func:`natsio.connect`.
+    """Keyword arguments accepted by `natsio.connect()`.
 
-    A typed mirror of :class:`ConnectOptions` — kept in sync by a unit test —
+    A typed mirror of `ConnectOptions` — kept in sync by a unit test —
     so ``connect(..., ping_interval=30)`` type-checks instead of being ``Any``.
     """
 

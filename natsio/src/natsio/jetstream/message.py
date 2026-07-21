@@ -74,9 +74,9 @@ class AckMetadata:
 class JsMsg:
     """A message delivered by a JetStream consumer.
 
-    Wraps the core :class:`~natsio.message.Msg` and adds acknowledgement.
+    Wraps the core `Msg` and adds acknowledgement.
     ``ack``/``nak``/``term`` are terminal — sending a second terminal ack
-    raises :class:`MessageAlreadyAckedError`; ``in_progress`` may be sent any
+    raises `MessageAlreadyAckedError`; ``in_progress`` may be sent any
     number of times before a terminal ack.
     """
 

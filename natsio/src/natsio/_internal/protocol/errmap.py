@@ -2,7 +2,7 @@
 
 The server keeps the socket open after some errors (permissions, subscription
 limits, pedantic-mode subject complaints) and closes it after the rest. The
-connection layer keys its reaction off :attr:`ServerError.fatal`, so getting
+connection layer keys its reaction off `ServerError.fatal`, so getting
 this table right is what separates "log and carry on" from "tear down and
 reconnect".
 """

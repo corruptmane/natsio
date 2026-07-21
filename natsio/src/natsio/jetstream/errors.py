@@ -39,7 +39,7 @@ class ConsumerDeletedError(JetStreamError):
 class NoMessagesError(JetStreamError, TimeoutError):
     """``next()`` found no message within its deadline.
 
-    Subclasses :class:`TimeoutError`, so a plain ``except TimeoutError`` works.
+    Subclasses `TimeoutError`, so a plain ``except TimeoutError`` works.
     """
 
 
