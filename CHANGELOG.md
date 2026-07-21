@@ -7,6 +7,37 @@ Extension packages under `extensions/` keep their own changelogs.
 
 Ground-up rewrite. The previous implementation is retired to the `legacy` branch.
 
+### nats.go parity features
+
+Feature-surface parity with nats.go, each mirrored from its source contract:
+
+- Core: `Client.force_reconnect()` (deliberate drop, backoff-bypassing,
+  never counted as a server failure); `retry_on_failed_connect` (initial
+  failure returns a reconnecting client; first success fires `Connected`);
+  dedicated `reconnect_buf_size` (8MB default, `-1` disables buffering and
+  fails/reports loudly — `ReconnectBufExceededError`);
+  `permission_err_on_subscribe` (denied subscriptions raise
+  `PermissionsViolationError` and close, using nats.go's exact error
+  regexes).
+- KV: per-key TTLs on `put`/`create` (ADR-43), `purge(key, last=...)` CAS,
+  `purge_deletes(older_than=...)` (30-min default marker threshold),
+  multi-key `watch(*keys)`, `watch(resume_from_revision=...)`, status
+  `metadata`/`description`.
+- Object Store: `update_meta` with the full rename contract (CAS-gated on
+  both subjects — stricter than nats.go's unguarded writes), public
+  `show_deleted` on `info`/`get`.
+- JetStream: ADR-42 priority groups — `priority_groups`/`priority_policy`
+  consumer config, `group`/`min_pending`/`min_ack_pending` on
+  fetch/next/consume, pinned-client `Nats-Pin-Id` lifecycle with 423
+  recovery, `Consumer.unpin()`; async publish window (`publish_async` →
+  future, pending cap 4000 with 200ms stall wait,
+  `publish_async_complete()`, in-flight futures fail on disconnect);
+  `expected_last_subject_seq_subject` (2.12) on both publish paths;
+  message-schedule stream config + header constants (2.12).
+- Management: `update_key_value` / `create_or_update_key_value` /
+  `key_value_store_names` / `key_value_stores` and the Object Store
+  equivalents, with nats.go's dual subject+prefix listing filters.
+
 ### nats.go parity audit
 
 The full nats.go test suite (~54k lines, the de-facto client conformance

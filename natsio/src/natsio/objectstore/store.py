@@ -121,12 +121,16 @@ class ObjectStore:
 
     # -- metadata ------------------------------------------------------------
 
-    async def info(self, name: str) -> ObjectInfo:
+    async def info(self, name: str, *, show_deleted: bool = False) -> ObjectInfo:
         """The object's metadata. Raises :class:`ObjectNotFoundError` for a
         missing object — or its subclass :class:`ObjectDeletedError` when the
-        latest revision is a delete marker."""
+        latest revision is a delete marker.
+
+        With ``show_deleted=True`` a delete marker is returned instead of
+        raising (``deleted=True``, ``size``/``chunks`` 0) — the same view
+        ``list(include_deleted=True)`` and ``watch()`` see."""
         info = await self._info_any(name)
-        if info.is_deleted:
+        if info.is_deleted and not show_deleted:
             raise ObjectDeletedError(f"object {name!r} in bucket {self.bucket!r} was deleted")
         return info
 
@@ -279,15 +283,117 @@ class ObjectStore:
             raise BucketNotFoundError(f"bucket {self.bucket!r} no longer exists") from None
         await self._stream.purge(subject=self._chunk_subject(info.nuid))
 
+    async def update_meta(self, name: str, meta: ObjectMeta) -> ObjectInfo:
+        """Update an object's description, metadata, and headers in place.
+
+        The stored data is untouched: ``chunks``, ``nuid``, ``digest``,
+        ``size`` and the object's options (link, chunk size) carry over from
+        the current revision — only ``meta``'s ``description`` / ``metadata`` /
+        ``headers`` (and name, see below) are rewritten. ``meta.chunk_size``
+        is ignored here: it only governs how *new* data is split at ``put``
+        time and is meaningless for an in-place meta rewrite (nats.go likewise
+        refuses to touch the options on ``UpdateMeta``).
+
+        RENAME — when ``meta.name`` differs from ``name`` the object moves:
+        the metadata is rewritten under the new name's subject and the old
+        name's meta subject is purged, so ``info(name)`` then raises
+        :class:`ObjectNotFoundError`. The chunks stay under the same nuid (no
+        data is copied). Renaming onto a *live* object raises
+        :class:`ObjectExistsError`; onto a *deleted* name is allowed (it
+        overwrites the marker).
+
+        Raises :class:`ObjectNotFoundError` if ``name`` never existed and
+        :class:`ObjectDeletedError` (its subclass) if the latest revision is a
+        delete marker — a deleted object cannot be updated.
+
+        Every meta write is CAS-gated like :meth:`put` / :meth:`delete`. On a
+        rename the new meta is written first and the old subject purged second
+        (nats.go's order): a crash in that window leaves the object readable
+        under *both* names — same nuid, same chunks — until a later write
+        cleans it up; it is never data loss. A rename is NOT safe against a
+        concurrent writer of the *source* name (the two names share one nuid,
+        so a racing put/delete on either name affects the other — inherent to
+        the ADR-20 format, same as nats.go).
+        """
+        validate_object_name(meta.name)
+        info, seq = await self._stored_meta(name)
+        if info.is_deleted:
+            raise ObjectDeletedError(f"cannot update meta of deleted object {name!r} in bucket {self.bucket!r}")
+
+        def build(base: ObjectInfo) -> ObjectInfo:
+            # nuid/size/chunks/digest and options (link, chunk size) preserved.
+            return ObjectInfo(
+                name=meta.name,
+                description=meta.description,
+                metadata=meta.metadata,
+                headers=meta.headers,
+                options=base.options,
+                bucket=self.bucket,
+                nuid=base.nuid,
+                size=base.size,
+                chunks=base.chunks,
+                digest=base.digest,
+            )
+
+        if meta.name == name:
+            # In-place: CAS against this subject, re-anchoring on conflict.
+            try:
+                for _ in range(8):
+                    updated = build(info)
+                    try:
+                        await self._publish_meta(updated, expected_seq=seq)
+                        return updated
+                    except WrongLastSequenceError:
+                        info, seq = await self._stored_meta(name)
+                        if info.is_deleted:
+                            raise ObjectDeletedError(
+                                f"object {name!r} in bucket {self.bucket!r} was deleted during update"
+                            ) from None
+                raise WrongLastSequenceError(f"gave up updating meta for {name!r} under sustained concurrent writes")
+            except NoStreamResponseError:
+                raise BucketNotFoundError(f"bucket {self.bucket!r} no longer exists") from None
+
+        # Rename: CAS against the TARGET subject, refusing to shadow a live
+        # object (a deleted marker there is fair game to overwrite).
+        updated = build(info)
+        try:
+            for _ in range(8):
+                try:
+                    existing, target_seq = await self._stored_meta(meta.name)
+                except ObjectNotFoundError:
+                    existing, target_seq = None, 0
+                if existing is not None and not existing.is_deleted:
+                    raise ObjectExistsError(
+                        f"cannot rename {name!r} to {meta.name!r}: a live object already exists there"
+                    )
+                try:
+                    await self._publish_meta(updated, expected_seq=target_seq)
+                    break
+                except WrongLastSequenceError:
+                    continue  # the target subject changed under us — re-check it
+            else:
+                raise WrongLastSequenceError(f"gave up renaming {name!r} under sustained concurrent writes")
+        except NoStreamResponseError:
+            raise BucketNotFoundError(f"bucket {self.bucket!r} no longer exists") from None
+        # New meta committed under the new name; drop the old name's meta.
+        await self._stream.purge(subject=self._meta_subject(name))
+        return updated
+
     # -- reads ---------------------------------------------------------------
 
-    def get(self, name: str, *, chunk_timeout: float = 30.0) -> "ObjectResult":
+    def get(self, name: str, *, chunk_timeout: float = 30.0, show_deleted: bool = False) -> "ObjectResult":
         """Stream an object's data with digest verification.
 
         Follows one link hop transparently. ``chunk_timeout`` bounds the wait
         for each chunk and is always finite — a stream that lost chunks raises
         :class:`~natsio.jetstream.NoMessagesError` instead of hanging forever
         (pass a larger value for very slow links, never ``None``).
+
+        With ``show_deleted=True`` a deleted object resolves to its delete
+        marker and yields no chunks (empty content, ``result.info`` is the
+        marker) instead of raising — otherwise a delete marker raises
+        :class:`ObjectDeletedError`. The flag applies only to ``name`` itself;
+        a link target is always resolved live (a dangling link still raises).
 
         ::
 
@@ -297,7 +403,7 @@ class ObjectStore:
                     ...
         """
         validate_object_name(name)
-        return ObjectResult(self, name, chunk_timeout=chunk_timeout)
+        return ObjectResult(self, name, chunk_timeout=chunk_timeout, show_deleted=show_deleted)
 
     async def get_bytes(self, name: str) -> bytes:
         """The whole object in one buffer (small objects, tests, scripts)."""
@@ -449,12 +555,22 @@ class ObjectResult:
     :class:`DigestMismatchError`, so a completed iteration is a verified read.
     """
 
-    __slots__ = ("_active_messages", "_active_ordered", "_chunk_store", "_chunk_timeout", "_info", "_name", "_store")
+    __slots__ = (
+        "_active_messages",
+        "_active_ordered",
+        "_chunk_store",
+        "_chunk_timeout",
+        "_info",
+        "_name",
+        "_show_deleted",
+        "_store",
+    )
 
-    def __init__(self, store: ObjectStore, name: str, *, chunk_timeout: float) -> None:
+    def __init__(self, store: ObjectStore, name: str, *, chunk_timeout: float, show_deleted: bool = False) -> None:
         self._store = store
         self._name = name
         self._chunk_timeout = chunk_timeout
+        self._show_deleted = show_deleted
         self._info: ObjectInfo | None = None
         self._chunk_store: ObjectStore | None = None
         self._active_messages: AsyncGenerator[JsMsg] | None = None
@@ -484,7 +600,7 @@ class ObjectResult:
         if self._info is not None:
             return
         store = self._store
-        info = await store.info(self._name)
+        info = await store.info(self._name, show_deleted=self._show_deleted)
         if info.is_link:
             link = info.options.link if info.options is not None else None
             assert link is not None

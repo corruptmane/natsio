@@ -171,6 +171,8 @@ class StreamConfig(JsonModel):
     # 2.12+ (atomic batch publish, counters)
     allow_atomic: bool | None = None
     allow_msg_counter: bool | None = None
+    # 2.12+ (message schedules)
+    allow_msg_schedules: bool | None = None
 
 
 @dataclass(slots=True, kw_only=True)

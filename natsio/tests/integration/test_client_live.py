@@ -6,7 +6,7 @@ import pytest
 
 import natsio
 from natsio import Msg, PendingLimitPolicy
-from natsio.errors import NoRespondersError, TimeoutError
+from natsio.errors import NoRespondersError, PermissionsViolationError, TimeoutError
 from server import NatsServerProcess, require_server_binary
 
 
@@ -203,6 +203,72 @@ class TestLifecycle:
                 await restarted.stop()
         finally:
             await nc.close()
+
+    async def test_force_reconnect(self, server: NatsServerProcess) -> None:
+        # A long reconnect_time_wait proves force_reconnect bypasses the backoff:
+        # without the bypass the Reconnected event would not arrive for 30s.
+        nc = await natsio.connect(server.url, connect_timeout=5.0, reconnect_time_wait=30.0)
+        try:
+            sub = nc.subscribe("foo")
+            await nc.flush()
+
+            reconnected = asyncio.Event()
+
+            async def watch() -> None:
+                async for event in nc.events():
+                    if isinstance(event, natsio.Reconnected):
+                        reconnected.set()
+                        return
+
+            watcher = asyncio.create_task(watch())
+            try:
+                await nc.force_reconnect()
+                await asyncio.wait_for(reconnected.wait(), timeout=10)
+                assert nc.status is natsio.ConnectionState.CONNECTED
+                assert nc.stats.reconnects == 1
+                # The replayed subscription still delivers after the reconnect.
+                await nc.publish("foo", b"after-force")
+                msg = await sub.next_msg(timeout=5)
+                assert msg.payload == b"after-force"
+            finally:
+                watcher.cancel()
+        finally:
+            await nc.close()
+
+    async def test_permission_err_on_subscribe(self) -> None:
+        binary = require_server_binary()
+        config = """
+        authorization {
+            users = [
+                { user: u, password: p, permissions: { subscribe: { deny: "forbidden" } } }
+            ]
+        }
+        """
+        process = NatsServerProcess(binary, config=config)
+        await process.start()
+        try:
+            nc = await natsio.connect(
+                process.url,
+                user="u",
+                password="p",
+                permission_err_on_subscribe=True,
+                connect_timeout=5.0,
+            )
+            try:
+                forbidden = nc.subscribe("forbidden")
+                allowed = nc.subscribe("allowed")
+                await nc.flush()
+                # The denied subscription is failed and terminated.
+                with pytest.raises(PermissionsViolationError):
+                    await forbidden.next_msg(timeout=5)
+                assert forbidden.is_closed
+                # A permitted subscription is unaffected.
+                await nc.publish("allowed", b"ok")
+                assert (await allowed.next_msg(timeout=5)).payload == b"ok"
+            finally:
+                await nc.close()
+        finally:
+            await process.stop()
 
     async def test_slow_consumer_drops_are_reported(self, server: NatsServerProcess) -> None:
         errors: list[Exception] = []

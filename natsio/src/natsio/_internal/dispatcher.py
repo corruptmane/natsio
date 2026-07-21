@@ -32,6 +32,10 @@ class SubscriptionEntry:
     # Fired (synchronously, on the read path — must not block) when an armed
     # auto-unsubscribe retires this entry, so the owner can finish consumers.
     on_complete: Callable[[], None] | None = field(default=None, repr=False)
+    # Fired (synchronously, on the read path — must not block) when the server
+    # denies this subscription (permission violation), so the owner can fail
+    # parked consumers with the error.
+    on_fail: Callable[[Exception], None] | None = field(default=None, repr=False)
 
     @property
     def remaining(self) -> int | None:
@@ -66,6 +70,23 @@ class Dispatcher:
             entry.max_msgs = max_msgs
             if entry.remaining == 0:
                 self.remove(sid)
+
+    def fail_by_subject(self, subject: str, queue: str | None, error: Exception) -> None:
+        """Terminate every subscription registered for ``(subject, queue)``.
+
+        Routes a subscription "Permissions Violation" -ERR to the owning
+        consumer(s): the entry is removed and its owner woken with ``error``.
+        Only entries that opted into failure (``on_fail`` set) are touched, so
+        internal registrations (e.g. the request mux inbox) are left intact.
+        """
+        for entry in list(self._subs.values()):
+            if entry.on_fail is None or entry.subject != subject or entry.queue != queue:
+                continue
+            self.remove(entry.sid)
+            try:
+                entry.on_fail(error)
+            except Exception:
+                log.exception("permission failure for sid %d (%s) failed", entry.sid, entry.subject)
 
     def get(self, sid: int) -> SubscriptionEntry | None:
         return self._subs.get(sid)

@@ -10,16 +10,22 @@ from natsio.errors import ConnectionClosedError
 from natsio.jetstream import (
     AckPolicy,
     ConsumerConfig,
+    ConsumerNotFoundError,
     DeliverPolicy,
     JetStreamContext,
+    JetStreamError,
     NoMessagesError,
+    NoStreamResponseError,
+    PriorityPolicy,
     RetentionPolicy,
     StorageType,
     Stream,
     StreamConfig,
     StreamNotFoundError,
+    TooManyStalledMsgsError,
     WrongLastSequenceError,
 )
+from natsio.jetstream import headers as js_headers
 from server import NatsServerProcess, require_server_binary
 
 
@@ -598,3 +604,341 @@ class TestWorkQueueSemantics:
         for msg in batch:
             await msg.ack_sync()
         assert (await stream.info()).state.messages == 0
+
+
+class TestPriorityGroups:
+    """ADR-42 priority groups: overflow gating, pinned client, unpin handover."""
+
+    async def test_overflow_min_pending_gates_delivery(self, nc: natsio.Client) -> None:
+        js = nc.jetstream()
+        stream = await js.create_stream(StreamConfig(name="OVF", subjects=["ovf.>"], storage=StorageType.MEMORY))
+        consumer = await stream.create_consumer(
+            ConsumerConfig(
+                durable_name="w",
+                priority_policy=PriorityPolicy.OVERFLOW,
+                priority_groups=["A"],
+            )
+        )
+        # The policy round-trips as a first-class field, not via `extra`.
+        assert consumer.cached_info.config.priority_policy is PriorityPolicy.OVERFLOW
+        assert consumer.cached_info.config.priority_groups == ["A"]
+
+        for i in range(100):
+            await js.publish("ovf.x", b"%d" % i)
+        # 100 pending < min_pending 110: the overflow gate stays shut.
+        assert await consumer.fetch(10, min_pending=110, group="A", timeout=0.5) == []
+
+        for i in range(100):
+            await js.publish("ovf.x", b"%d" % i)
+        # 200 pending >= 110: messages flow.
+        batch = await consumer.fetch(10, min_pending=110, group="A", timeout=2)
+        assert len(batch) == 10
+        for msg in batch:
+            await msg.ack_sync()
+
+    async def test_overflow_min_ack_pending_gates_delivery(self, nc: natsio.Client) -> None:
+        js = nc.jetstream()
+        stream = await js.create_stream(StreamConfig(name="OVFACK", subjects=["ovfack.>"], storage=StorageType.MEMORY))
+        consumer = await stream.create_consumer(
+            ConsumerConfig(
+                durable_name="w",
+                priority_policy=PriorityPolicy.OVERFLOW,
+                priority_groups=["A"],
+            )
+        )
+        for i in range(50):
+            await js.publish("ovfack.x", b"%d" % i)
+
+        # Nothing is unacked yet: the min_ack_pending gate stays shut.
+        assert await consumer.fetch(10, min_ack_pending=10, group="A", timeout=0.5) == []
+
+        # Take 10 and leave them unacked -> num_ack_pending == 10.
+        unacked = await consumer.fetch(10, group="A", timeout=2)
+        assert len(unacked) == 10
+
+        # Now the gate opens.
+        gated = await consumer.fetch(10, min_ack_pending=10, group="A", timeout=2)
+        assert len(gated) == 10
+        for msg in (*unacked, *gated):
+            await msg.ack_sync()
+
+    async def test_min_pending_requires_overflow_policy(self, nc: natsio.Client) -> None:
+        """min_* on a non-overflow consumer is a server-side rejection."""
+        js = nc.jetstream()
+        stream = await js.create_stream(StreamConfig(name="NOOVF", subjects=["noovf.>"], storage=StorageType.MEMORY))
+        consumer = await stream.create_consumer(
+            ConsumerConfig(
+                durable_name="cons",
+                priority_policy=PriorityPolicy.PINNED_CLIENT,
+                priority_groups=["A"],
+                priority_timeout=timedelta(seconds=5),
+            )
+        )
+        await js.publish("noovf.x", b"payload")
+        with pytest.raises(JetStreamError, match="Overflow"):
+            await consumer.fetch(5, min_pending=1, group="A", timeout=1)
+
+    async def test_pinned_client_starves_second_session(self, nc: natsio.Client) -> None:
+        js = nc.jetstream()
+        stream = await js.create_stream(StreamConfig(name="PINS", subjects=["pins.>"], storage=StorageType.MEMORY))
+        await stream.create_consumer(
+            ConsumerConfig(
+                durable_name="cons",
+                priority_policy=PriorityPolicy.PINNED_CLIENT,
+                priority_groups=["A"],
+                priority_timeout=timedelta(seconds=30),
+            )
+        )
+        total = 20
+        for i in range(total):
+            await js.publish("pins.x", b"%d" % i)
+
+        # Two independent client handles compete for the single pin.
+        first_handle = await stream.consumer("cons")
+        second_handle = await stream.consumer("cons")
+        drained: list[bytes] = []
+
+        # Start (and pin) the first session before the second exists.
+        async with first_handle.consume(max_messages=5, expires=2, group="A") as pinned:
+            first = await pinned.next(timeout=3)
+            # Pinned delivery is stamped with the pin id.
+            assert first.headers is not None
+            assert first.headers.get(js_headers.PIN_ID)
+            drained.append(first.payload)
+            await first.ack_sync()
+
+            async with second_handle.consume(max_messages=5, expires=2, group="A") as passive:
+                # The pinned session drains everything...
+                while len(drained) < total:
+                    msg = await pinned.next(timeout=3)
+                    drained.append(msg.payload)
+                    await msg.ack_sync()
+                # ...and the passive session, never pinned, starved throughout.
+                with pytest.raises(NoMessagesError):
+                    await passive.next(timeout=0.5)
+
+        assert len(drained) == total
+
+    async def test_unpin_hands_over_to_second_session(self, nc: natsio.Client) -> None:
+        js = nc.jetstream()
+        stream = await js.create_stream(StreamConfig(name="UNPIN", subjects=["unpin.>"], storage=StorageType.MEMORY))
+        consumer = await stream.create_consumer(
+            ConsumerConfig(
+                durable_name="cons",
+                priority_policy=PriorityPolicy.PINNED_CLIENT,
+                priority_groups=["A"],
+                priority_timeout=timedelta(seconds=50),
+            )
+        )
+        for i in range(20):
+            await js.publish("unpin.x", b"%d" % i)
+
+        first_handle = await stream.consumer("cons")
+        second_handle = await stream.consumer("cons")
+
+        async with first_handle.consume(max_messages=5, expires=2, group="A") as pinned:
+            first = await pinned.next(timeout=3)
+            assert first.headers is not None
+            first_pin = first.headers.get(js_headers.PIN_ID)
+            assert first_pin
+            await first.ack_sync()
+
+            async with second_handle.consume(max_messages=5, expires=2, group="A") as taking_over:
+                # Passive while the first session holds the pin.
+                with pytest.raises(NoMessagesError):
+                    await taking_over.next(timeout=0.5)
+
+                # Release the pin; stop the old session so the takeover is
+                # unambiguous, then publish fresh work for the new pinned client.
+                await consumer.unpin("A")
+                await pinned.stop()
+                for i in range(20, 30):
+                    await js.publish("unpin.x", b"%d" % i)
+
+                msg = await taking_over.next(timeout=3)
+                new_pin = msg.headers.get(js_headers.PIN_ID) if msg.headers else None
+                assert new_pin
+                assert new_pin != first_pin
+                await msg.ack_sync()
+
+    async def test_unpin_unknown_consumer_raises(self, nc: natsio.Client) -> None:
+        js = nc.jetstream()
+        stream = await js.create_stream(StreamConfig(name="UNPINX", subjects=["unpinx.>"], storage=StorageType.MEMORY))
+        consumer = await stream.create_consumer(
+            ConsumerConfig(
+                durable_name="gone",
+                priority_policy=PriorityPolicy.PINNED_CLIENT,
+                priority_groups=["A"],
+                priority_timeout=timedelta(seconds=5),
+            )
+        )
+        await stream.delete_consumer("gone")
+        with pytest.raises(ConsumerNotFoundError):
+            await consumer.unpin("A")
+
+
+class TestPublishAsync:
+    async def test_async_publishes_get_sequential_acks(self, nc: natsio.Client) -> None:
+        js = nc.jetstream()
+        await js.create_stream(StreamConfig(name="APUB", subjects=["apub.>"], storage=StorageType.MEMORY))
+        futures = [await js.publish_async(f"apub.{i}", b"%d" % i) for i in range(10)]
+        await js.publish_async_complete(timeout=5)
+        acks = await asyncio.gather(*futures)
+        assert [ack.seq for ack in acks] == list(range(1, 11))
+        assert js.publish_async_pending == 0
+
+    async def test_async_dedup_by_msg_id(self, nc: natsio.Client) -> None:
+        js = nc.jetstream()
+        await js.create_stream(
+            StreamConfig(
+                name="ADEDUP",
+                subjects=["adedup.>"],
+                storage=StorageType.MEMORY,
+                duplicate_window=timedelta(seconds=30),
+            )
+        )
+        first = await (await js.publish_async("adedup.a", b"one", msg_id="x"))
+        second = await (await js.publish_async("adedup.a", b"one", msg_id="x"))
+        assert not first.duplicate
+        assert second.duplicate is True
+        assert second.seq == first.seq
+
+    async def test_async_wrong_seq_fails_only_that_future(self, nc: natsio.Client) -> None:
+        js = nc.jetstream()
+        await js.create_stream(StreamConfig(name="AEXP", subjects=["aexp.>"], storage=StorageType.MEMORY))
+        ack = await (await js.publish_async("aexp.a", b"1"))
+        ok_fut = await js.publish_async("aexp.a", b"2", expected_last_seq=ack.seq)
+        bad_fut = await js.publish_async("aexp.a", b"3", expected_last_seq=999)
+        assert (await ok_fut).seq == 2
+        with pytest.raises(WrongLastSequenceError):
+            await bad_fut
+
+    async def test_async_complete_drains_a_burst(self, nc: natsio.Client) -> None:
+        js = nc.jetstream()
+        await js.create_stream(StreamConfig(name="ACOMP", subjects=["acomp.>"], storage=StorageType.MEMORY))
+        for i in range(50):
+            await js.publish_async(f"acomp.{i}")
+        await js.publish_async_complete(timeout=5)
+        assert js.publish_async_pending == 0
+
+    async def test_window_full_raises_stall(self, server: NatsServerProcess) -> None:
+        # A max-pending of 1 means a second concurrent publish can never find
+        # room (it is itself the outstanding one), so it stalls out deterministically.
+        nc = await natsio.connect(server.url, connect_timeout=5.0, request_timeout=5.0)
+        try:
+            js = JetStreamContext(nc, publish_async_max_pending=1, publish_async_stall_wait=0.05)
+            await js.create_stream(StreamConfig(name="ASTALL", subjects=["astall.>"], storage=StorageType.MEMORY))
+            await js.publish_async("astall.a")  # fills the window
+            with pytest.raises(TooManyStalledMsgsError):
+                await js.publish_async("astall.b")
+            await js.publish_async_complete(timeout=5)
+        finally:
+            await nc.close()
+
+    async def test_close_fails_inflight_future(self, server: NatsServerProcess) -> None:
+        """A close mid-flight must fail the outstanding future, not hang it."""
+        nc = await natsio.connect(server.url, connect_timeout=5.0, request_timeout=5.0)
+        try:
+            js = nc.jetstream()
+            await js.create_stream(StreamConfig(name="ACLOSE", subjects=["aclose.>"], storage=StorageType.MEMORY))
+            # No stream is bound to this subject: the 503 keeps the ack in flight
+            # (retrying) so the future is guaranteed pending when we close.
+            pending = await js.publish_async("nobody.home")
+            assert js.publish_async_pending == 1
+            await nc.close()
+            with pytest.raises((ConnectionClosedError, NoStreamResponseError)):
+                async with asyncio.timeout(5):
+                    await pending
+        finally:
+            await nc.close()
+
+
+class TestExpectLastSubjectSeqForSubject:
+    """2.12 companion header: scope the subject-sequence check to another filter."""
+
+    async def test_wildcard_scoped_check(self, nc: natsio.Client) -> None:
+        js = nc.jetstream()
+        await js.create_stream(StreamConfig(name="SUBJSEQ", subjects=["ss.>"], storage=StorageType.MEMORY))
+        await js.publish("ss.a.1", b"1")  # seq 1
+        ack2 = await js.publish("ss.a.2", b"2")  # seq 2 (last on filter ss.a.*)
+
+        # Publish to ss.b.1 while asserting the last sequence on the ss.a.* filter.
+        ack3 = await js.publish(
+            "ss.b.1",
+            b"3",
+            expected_last_subject_seq=ack2.seq,
+            expected_last_subject_seq_subject="ss.a.*",
+        )
+        assert ack3.seq == 3
+
+        with pytest.raises(WrongLastSequenceError):
+            await js.publish(
+                "ss.b.2",
+                b"4",
+                expected_last_subject_seq=99,
+                expected_last_subject_seq_subject="ss.a.*",
+            )
+
+    async def test_scoped_check_on_async_publish(self, nc: natsio.Client) -> None:
+        js = nc.jetstream()
+        await js.create_stream(StreamConfig(name="SUBJSEQA", subjects=["ssa.>"], storage=StorageType.MEMORY))
+        await js.publish("ssa.a.1", b"1")
+        ack2 = await js.publish("ssa.a.2", b"2")
+
+        good = await js.publish_async(
+            "ssa.b.1",
+            b"3",
+            expected_last_subject_seq=ack2.seq,
+            expected_last_subject_seq_subject="ssa.a.*",
+        )
+        assert (await good).seq == 3
+
+        bad = await js.publish_async(
+            "ssa.b.2",
+            b"4",
+            expected_last_subject_seq=99,
+            expected_last_subject_seq_subject="ssa.a.*",
+        )
+        with pytest.raises(WrongLastSequenceError):
+            await bad
+
+
+class TestMessageSchedules:
+    """2.12 message schedules: publish a schedule-definition message, assert delivery."""
+
+    async def test_scheduled_message_materializes(self, nc: natsio.Client) -> None:
+        js = nc.jetstream()
+        stream = await js.create_stream(
+            StreamConfig(
+                name="SCHED",
+                subjects=["schedule.>", "target.>"],
+                storage=StorageType.MEMORY,
+                allow_msg_schedules=True,
+            )
+        )
+        assert stream.cached_info.config.allow_msg_schedules is True
+        consumer = await stream.create_consumer(ConsumerConfig(durable_name="w", filter_subject="target.>"))
+
+        sched_time = datetime.now(UTC).replace(microsecond=0) + timedelta(seconds=1)
+        schedule = f"@at {sched_time.strftime('%Y-%m-%dT%H:%M:%SZ')}"
+        ack = await js.publish(
+            "schedule.at",
+            b"hello",
+            headers={
+                js_headers.SCHEDULE: schedule,
+                js_headers.SCHEDULE_TARGET: "target.at",
+            },
+        )
+
+        # The stored schedule-definition message carries the client-set headers.
+        stored = await stream.get_msg(sequence=ack.seq)
+        assert stored.headers is not None
+        assert stored.headers.get(js_headers.SCHEDULE) == schedule
+        assert stored.headers.get(js_headers.SCHEDULE_TARGET) == "target.at"
+
+        # The server delivers the generated message to the target subject.
+        msg = await consumer.next(timeout=8)
+        assert msg.payload == b"hello"
+        assert msg.headers is not None
+        assert msg.headers.get(js_headers.SCHEDULER)  # server stamps the schedule source
+        await msg.ack()

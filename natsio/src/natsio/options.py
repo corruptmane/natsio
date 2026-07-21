@@ -59,6 +59,13 @@ class ConnectOptions:
     reconnect_jitter_tls: float = 1.0
     no_randomize: bool = False
     ignore_discovered_servers: bool = False
+    # Return a client in RECONNECTING state instead of raising when the initial
+    # connect exhausts the pool; the first successful connect fires Connected.
+    retry_on_failed_connect: bool = False
+    # Dedicated cap (bytes) for publishes buffered while disconnected, separate
+    # from max_pending_size. 0 uses the 8MB default; -1 disables buffering (a
+    # publish while disconnected then raises ReconnectBufExceededError at once).
+    reconnect_buf_size: int = 8 * 1024 * 1024
     # Abort the whole reconnect loop on a repeated auth error from the same
     # server (parity with nats.go IgnoreAuthErrorAbort inverted): False means
     # two identical auth rejections finalize the connection Closed.
@@ -78,6 +85,13 @@ class ConnectOptions:
     inbox_prefix: str = "_INBOX"
     pending_msgs_limit: int = 65_536
     pending_bytes_limit: int = 64 * 1024 * 1024
+    # Route a subscription "Permissions Violation" -ERR to the matching
+    # subscription (next_msg/iteration raise PermissionsViolationError and the
+    # subscription is terminated) instead of surfacing it only as a background
+    # error. NOTE: with this off (the default), a denied subscription stays
+    # registered and is re-sent — and re-denied — on every reconnect; nats.go
+    # always latches the denial. Enable this to get the latching behavior.
+    permission_err_on_subscribe: bool = False
 
     # -- limits --
     max_control_line: int = 4096
@@ -170,6 +184,8 @@ class ConnectKwargs(TypedDict, total=False):
     no_randomize: bool
     ignore_discovered_servers: bool
     ignore_auth_error_abort: bool
+    retry_on_failed_connect: bool
+    reconnect_buf_size: int
     ping_interval: float
     max_outstanding_pings: int
     max_pending_size: int
@@ -179,5 +195,6 @@ class ConnectKwargs(TypedDict, total=False):
     inbox_prefix: str
     pending_msgs_limit: int
     pending_bytes_limit: int
+    permission_err_on_subscribe: bool
     max_control_line: int
     instrumentation: Instrumentation | None

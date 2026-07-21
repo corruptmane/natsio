@@ -6,16 +6,18 @@ from datetime import timedelta
 import pytest
 
 import natsio
-from natsio.jetstream import WrongLastSequenceError
+from natsio.jetstream import StorageType, StreamConfig, WrongLastSequenceError
 from natsio.kv import (
     BucketNotFoundError,
     KeyDeletedError,
     KeyExistsError,
     KeyNotFoundError,
     KeyValueConfig,
+    KeyValueStatus,
     KvEntry,
     Operation,
 )
+from natsio.objectstore import ObjectStoreConfig
 from server import NatsServerProcess, require_server_binary
 
 
@@ -525,3 +527,226 @@ class TestWildcardWatch:
             assert entry.value == b""
             async with asyncio.timeout(5):
                 assert await anext(iterator) is None
+
+
+class TestPerKeyTTLWrites:
+    async def test_put_with_ttl_expires(self, nc: natsio.Client) -> None:
+        """nats.go KeyTTL: a put carrying a TTL self-expires."""
+        js = nc.jetstream()
+        kv = await js.create_key_value(KeyValueConfig(bucket="PUTTTL", limit_marker_ttl=timedelta(seconds=30)))
+        await kv.put("k", b"v", ttl=1)
+        assert (await kv.get("k")).value == b"v"
+        await asyncio.sleep(2.0)
+        with pytest.raises(KeyNotFoundError):
+            await kv.get("k")
+
+    async def test_create_with_ttl_then_recreate_after_expiry(self, nc: natsio.Client) -> None:
+        """nats.go TestKeyValueLimitMarkerTTL 'create with TTL': after the TTL'd
+        value expires the key is gone and create() succeeds for it again."""
+        js = nc.jetstream()
+        kv = await js.create_key_value(KeyValueConfig(bucket="CREATETTL", limit_marker_ttl=timedelta(seconds=30)))
+        await kv.create("age", b"22", ttl=1)
+        assert (await kv.get("age")).value == b"22"
+        await asyncio.sleep(2.0)
+        with pytest.raises(KeyNotFoundError):
+            await kv.get("age")
+        # The key expired (a MaxAge marker sits where the value was); create must
+        # CAS against that marker and succeed.
+        revision = await kv.create("age", b"33")
+        assert revision > 1
+        assert (await kv.get("age")).value == b"33"
+
+    async def test_put_ttl_without_allow_msg_ttl_rejected(self, kv) -> None:
+        from natsio.errors import ConfigError
+
+        with pytest.raises(ConfigError, match="per-message TTL"):
+            await kv.put("k", b"v", ttl=1)
+
+    async def test_create_ttl_without_allow_msg_ttl_rejected(self, kv) -> None:
+        from natsio.errors import ConfigError
+
+        with pytest.raises(ConfigError, match="per-message TTL"):
+            await kv.create("k", b"v", ttl=1)
+
+
+class TestPurgeCas:
+    async def test_purge_with_stale_last_rejected_correct_succeeds(self, kv) -> None:
+        """nats.go LastRevision on Purge: a stale expected revision conflicts."""
+        first = await kv.put("p", b"v1")
+        await kv.put("p", b"v2")
+        with pytest.raises(WrongLastSequenceError):
+            await kv.purge("p", last=first)  # stale
+        current = (await kv.get("p")).revision
+        await kv.purge("p", last=current)
+        with pytest.raises(KeyDeletedError):
+            await kv.get("p")
+        entries = await kv.history("p")
+        assert len(entries) == 1  # only the purge marker survives
+        assert entries[0].operation is Operation.PURGE
+
+
+class TestPurgeDeletes:
+    async def test_removes_markers_drops_count_keeps_live(self, nc: natsio.Client) -> None:
+        """nats.go TestKeyValueDeleteTombstones: purge_deletes(timedelta(0))
+        removes every marker (and its history); live keys are untouched."""
+        js = nc.jetstream()
+        kv = await js.create_key_value(KeyValueConfig(bucket="TOMBS", history=10))
+        for i in range(1, 6):
+            await kv.put(f"key-{i}", b"v")
+        for i in range(1, 6):
+            await kv.delete(f"key-{i}")
+        await kv.put("alive", b"still-here")
+
+        before = (await kv.status()).values
+        await kv.purge_deletes(older_than=timedelta(0))  # remove all markers
+        after = (await kv.status()).values
+        assert after < before
+        for i in range(1, 6):
+            with pytest.raises(KeyNotFoundError):
+                await kv.history(f"key-{i}")  # marker and history both gone
+        assert (await kv.get("alive")).value == b"still-here"
+
+    async def test_fresh_markers_kept_with_default_threshold(self, nc: natsio.Client) -> None:
+        """Default 30-minute threshold: a just-written marker survives, but the
+        history beneath it is rolled away (keep=1)."""
+        js = nc.jetstream()
+        kv = await js.create_key_value(KeyValueConfig(bucket="TOMBSFRESH", history=10))
+        await kv.put("foo", b"foo1")
+        await kv.put("foo", b"foo2")
+        await kv.delete("foo")
+
+        await kv.purge_deletes()  # default older_than -> 30 minutes
+        entries = await kv.history("foo")
+        assert len(entries) == 1
+        assert entries[0].operation is Operation.DELETE
+
+    async def test_marker_threshold_mixed_ages(self, nc: natsio.Client) -> None:
+        """nats.go TestKeyValuePurgeDeletesMarkerThreshold: an older marker is
+        fully removed while a fresher one is kept."""
+        js = nc.jetstream()
+        kv = await js.create_key_value(KeyValueConfig(bucket="TOMBSMIX", history=10))
+        await kv.put("foo", b"foo1")
+        await kv.put("bar", b"bar1")
+        await kv.put("foo", b"foo2")
+        await kv.delete("foo")
+        await asyncio.sleep(0.2)
+        await kv.delete("bar")
+
+        await kv.purge_deletes(older_than=timedelta(milliseconds=100))
+        with pytest.raises(KeyNotFoundError):
+            await kv.history("foo")  # older than threshold: gone entirely
+        bar = await kv.history("bar")  # fresher: marker kept
+        assert len(bar) == 1
+        assert bar[0].operation is Operation.DELETE
+
+
+class TestMultiKeyWatch:
+    async def test_multi_filter_initial_then_live(self, nc: natsio.Client) -> None:
+        """nats.go WatchFiltered: several filter subjects yield only the matching
+        keys in the initial state, then only matching live updates."""
+        js = nc.jetstream()
+        kv = await js.create_key_value(KeyValueConfig(bucket="MULTIW"))
+        await kv.put("name", b"ik")
+        await kv.put("t.name", b"ik")
+        await kv.put("age", b"44")  # outside both filters
+
+        async with kv.watch("name", "t.name") as watcher:
+            iterator = aiter(watcher)
+            initial: dict[str, bytes] = {}
+            async with asyncio.timeout(5):
+                while True:
+                    item = await anext(iterator)
+                    if item is None:
+                        break
+                    initial[item.key] = item.value
+            assert initial == {"name": b"ik", "t.name": b"ik"}
+
+            await kv.put("age", b"45")  # excluded: must not arrive
+            await kv.put("t.name", b"new")
+            async with asyncio.timeout(5):
+                live = await anext(iterator)
+            assert live is not None
+            assert (live.key, live.value) == ("t.name", b"new")
+
+    async def test_no_keys_watches_whole_bucket(self, nc: natsio.Client) -> None:
+        js = nc.jetstream()
+        kv = await js.create_key_value(KeyValueConfig(bucket="ALLW"))
+        await kv.put("a", b"1")
+        await kv.put("b", b"2")
+        seen: set[str] = set()
+        async with kv.watch() as watcher:  # zero keys -> ">"
+            async with asyncio.timeout(5):
+                async for entry in watcher:
+                    if entry is None:
+                        break
+                    seen.add(entry.key)
+        assert seen == {"a", "b"}
+
+
+class TestResumeFromRevision:
+    async def test_resume_delivers_from_revision_onward(self, nc: natsio.Client) -> None:
+        """nats.go 'watcher with start revision': resume_from_revision replays
+        every revision from that stream sequence onward."""
+        js = nc.jetstream()
+        kv = await js.create_key_value(KeyValueConfig(bucket="RESUME"))
+        for i in range(1, 6):
+            await kv.put(f"k{i}", b"v")  # distinct keys -> revisions 1..5 all kept
+
+        seen: list[int] = []
+        async with kv.watch(resume_from_revision=3) as watcher:
+            async with asyncio.timeout(5):
+                async for entry in watcher:
+                    if entry is None:
+                        break
+                    seen.append(entry.revision)
+        assert seen == [3, 4, 5]
+
+    async def test_resume_conflicts_rejected(self, kv) -> None:
+        from natsio.errors import ConfigError
+
+        with pytest.raises(ConfigError, match="mutually exclusive"):
+            kv.watch(resume_from_revision=1, include_history=True)
+        with pytest.raises(ConfigError, match="mutually exclusive"):
+            kv.watch(resume_from_revision=1, updates_only=True)
+
+
+class TestStoreManagement:
+    async def test_update_reflects_new_config(self, nc: natsio.Client) -> None:
+        js = nc.jetstream()
+        await js.create_key_value(KeyValueConfig(bucket="UPD", description="Test KV", history=1))
+        updated = await js.update_key_value(KeyValueConfig(bucket="UPD", description="New KV", history=5))
+        status = await updated.status()
+        assert status.description == "New KV"
+        assert status.history == 5
+
+    async def test_update_missing_bucket_raises(self, nc: natsio.Client) -> None:
+        js = nc.jetstream()
+        with pytest.raises(BucketNotFoundError):
+            await js.update_key_value(KeyValueConfig(bucket="NOPE", description="x"))
+
+    async def test_create_or_update_creates_then_updates(self, nc: natsio.Client) -> None:
+        js = nc.jetstream()
+        # create path (backing stream absent -> create)
+        created = await js.create_or_update_key_value(KeyValueConfig(bucket="COU", description="first"))
+        assert (await created.status()).description == "first"
+        # update path (backing stream present -> update in place)
+        updated = await js.create_or_update_key_value(KeyValueConfig(bucket="COU", description="second"))
+        assert (await updated.status()).description == "second"
+
+    async def test_listings_return_only_kv_buckets(self, nc: natsio.Client) -> None:
+        js = nc.jetstream()
+        # KV_ prefix but no $KV subject -> excluded by the $KV.*.> subject filter.
+        await js.create_stream(StreamConfig(name="KV_FOO", subjects=["foo.*"], storage=StorageType.MEMORY))
+        # $KV subject but no KV_ prefix -> excluded by the client-side prefix check.
+        await js.create_stream(StreamConfig(name="PLAIN", subjects=["$KV.ABC.>"], storage=StorageType.MEMORY))
+        # An object store shares neither prefix nor keyspace -> excluded.
+        await js.create_object_store(ObjectStoreConfig(bucket="OSX"))
+        await js.create_key_value(KeyValueConfig(bucket="KVS1"))
+        await js.create_key_value(KeyValueConfig(bucket="KVS2"))
+
+        names = {n async for n in js.key_value_store_names()}
+        assert names == {"KVS1", "KVS2"}
+
+        statuses = {s.bucket: s async for s in js.key_value_stores()}
+        assert set(statuses) == {"KVS1", "KVS2"}
+        assert all(isinstance(s, KeyValueStatus) for s in statuses.values())

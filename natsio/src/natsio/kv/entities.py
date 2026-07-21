@@ -139,6 +139,16 @@ class KeyValueStatus:
         compression = self.stream_info.config.compression
         return bool(compression and compression.value != "none")
 
+    @property
+    def metadata(self) -> dict[str, str]:
+        """User metadata attached to the bucket (empty when none)."""
+        return self.stream_info.config.metadata or {}
+
+    @property
+    def description(self) -> str | None:
+        """The bucket's description, or ``None`` when unset."""
+        return self.stream_info.config.description
+
 
 class KeyCodec(Protocol):
     """Bidirectional key transformation (identity when not provided).

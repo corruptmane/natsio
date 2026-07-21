@@ -3,11 +3,19 @@ from datetime import timedelta
 import pytest
 
 from natsio.jetstream.context import _kv_stream_config
-from natsio.jetstream.entities import DiscardPolicy, StorageCompression, StorageType
+from natsio.jetstream.entities import (
+    DiscardPolicy,
+    StorageCompression,
+    StorageType,
+    StreamConfig,
+    StreamInfo,
+    StreamState,
+)
 from natsio.kv import (
     InvalidBucketNameError,
     InvalidKeyError,
     KeyValueConfig,
+    KeyValueStatus,
     validate_bucket_name,
     validate_key,
 )
@@ -98,3 +106,27 @@ class TestStreamMapping:
         assert config.compression is StorageCompression.S2
         assert config.allow_msg_ttl is True
         assert config.subject_delete_marker_ttl == timedelta(minutes=1)
+
+
+class TestKeyValueStatus:
+    def _status(self, config: StreamConfig) -> KeyValueStatus:
+        info = StreamInfo(config=config, state=StreamState())
+        return KeyValueStatus(
+            bucket="b",
+            values=0,
+            history=1,
+            ttl=None,
+            bytes=0,
+            storage=StorageType.FILE,
+            stream_info=info,
+        )
+
+    def test_metadata_and_description_surface_from_stream_config(self) -> None:
+        status = self._status(StreamConfig(name="KV_b", description="my bucket", metadata={"foo": "bar"}))
+        assert status.metadata == {"foo": "bar"}
+        assert status.description == "my bucket"
+
+    def test_metadata_defaults_to_empty_and_description_to_none(self) -> None:
+        status = self._status(StreamConfig(name="KV_b"))
+        assert status.metadata == {}
+        assert status.description is None

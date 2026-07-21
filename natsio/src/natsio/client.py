@@ -173,6 +173,21 @@ class Client:
         finally:
             await self.close()
 
+    async def force_reconnect(self) -> None:
+        """Deliberately drop the current transport and reconnect immediately.
+
+        Pending writes are flushed best-effort, then the session is torn down
+        through the normal lost path — subscriptions replay and buffered
+        publishes survive — but the first reconnect attempt bypasses the backoff
+        and the drop is not counted as a server failure. ``Disconnected`` then
+        ``Reconnected`` fire as usual. Non-blocking: it returns once the drop is
+        scheduled, not once the connection is back.
+
+        Raises :class:`~natsio.errors.ConnectionClosedError` if the client is
+        already closed or draining.
+        """
+        await self._conn.force_reconnect()
+
     async def __aenter__(self) -> Self:
         if self.status is ConnectionState.DISCONNECTED:
             await self.connect()
@@ -223,15 +238,28 @@ class Client:
         domain: str | None = None,
         api_prefix: str | None = None,
         timeout: float = 5.0,
+        publish_async_max_pending: int = 4000,
+        publish_async_stall_wait: float = 0.2,
+        publish_async_timeout: float | None = None,
     ) -> "JetStreamContext":
         """A JetStream context over this connection.
 
         ``domain`` routes the control plane through ``$JS.<domain>.API`` (leaf
-        nodes); ``api_prefix`` overrides the prefix entirely (exports).
+        nodes); ``api_prefix`` overrides the prefix entirely (exports). The
+        ``publish_async_*`` knobs tune the async publish window (max in-flight
+        acks, stall wait when full, optional per-message ack timeout).
         """
         from natsio.jetstream import JetStreamContext
 
-        return JetStreamContext(self, domain=domain, api_prefix=api_prefix, timeout=timeout)
+        return JetStreamContext(
+            self,
+            domain=domain,
+            api_prefix=api_prefix,
+            timeout=timeout,
+            publish_async_max_pending=publish_async_max_pending,
+            publish_async_stall_wait=publish_async_stall_wait,
+            publish_async_timeout=publish_async_timeout,
+        )
 
     async def events(self) -> AsyncIterator[ConnectionEvent]:
         """Stream connection lifecycle events (connected, disconnected, errors...)."""
@@ -320,6 +348,7 @@ class Client:
             policy=policy,
         )
         entry.on_complete = subscription._complete_local
+        entry.on_fail = subscription._fail_permanent
         self._subscriptions[entry.sid] = subscription
         if cb is not None:
             subscription._start_callback_reader()

@@ -1,6 +1,7 @@
 """The Key-Value bucket: CRUD, history, and watchers (ADR-8/31/48)."""
 
 from collections.abc import AsyncGenerator
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Final, Self
 
 from natsio.jetstream import headers as js_headers
@@ -163,23 +164,50 @@ class KeyValue:
 
     # -- writes --------------------------------------------------------------
 
-    async def put(self, key: str, value: bytes | str) -> int:
-        """Store a value; returns the new revision."""
+    def _require_msg_ttl(self, ttl: int | str | None) -> None:
+        """Reject a per-message ``ttl`` when the bucket wasn't built for it.
+
+        Mirrors the server's own rejection but with an actionable error, so a
+        ``ttl=`` write against a plain bucket fails client-side instead of
+        surfacing as a raw APIError from the publish.
+        """
+        if ttl is not None and not self._stream.cached_info.config.allow_msg_ttl:
+            from natsio.errors import ConfigError
+
+            raise ConfigError(
+                f"bucket {self.bucket!r} does not allow per-message TTLs; create it "
+                "with KeyValueConfig(allow_msg_ttl=True) or limit_marker_ttl to use a "
+                "per-key ttl"
+            )
+
+    async def put(self, key: str, value: bytes | str, *, ttl: int | str | None = None) -> int:
+        """Store a value; returns the new revision.
+
+        ``ttl`` (whole seconds, or ``"never"`` per ADR-43) makes this single
+        revision self-expire — requires the bucket's ``allow_msg_ttl``
+        (``KeyValueConfig(allow_msg_ttl=True)`` or ``limit_marker_ttl``),
+        otherwise :class:`~natsio.errors.ConfigError`.
+        """
+        self._require_msg_ttl(ttl)
         encoded = self._encode_key(key)
-        ack = await self._ctx.publish(self._subject(encoded), self._encode_value(value))
+        ack = await self._ctx.publish(self._subject(encoded), self._encode_value(value), ttl=ttl)
         return ack.seq
 
-    async def create(self, key: str, value: bytes | str) -> int:
+    async def create(self, key: str, value: bytes | str, *, ttl: int | str | None = None) -> int:
         """Store a value only if the key has no live value.
 
         Succeeds for brand-new keys and for deleted/purged keys; raises
-        :class:`KeyExistsError` when a live value exists.
+        :class:`KeyExistsError` when a live value exists. ``ttl`` (whole
+        seconds, or ``"never"``) makes the created revision self-expire — same
+        ``allow_msg_ttl`` requirement as :meth:`put`; when it expires the key is
+        gone and :meth:`create` succeeds for it again.
         """
+        self._require_msg_ttl(ttl)
         expected = 0
         last_error: WrongLastSequenceError | None = None
         for _ in range(4):  # bounded re-resolve under concurrent marker churn
             try:
-                return await self.update(key, value, last=expected)
+                return await self._update_revision(key, value, last=expected, ttl=ttl)
             except WrongLastSequenceError as exc:
                 last_error = exc
             # The key has revisions. If the latest is a marker, CAS against the
@@ -204,11 +232,15 @@ class KeyValue:
 
         Raises :class:`~natsio.jetstream.WrongLastSequenceError` on conflict.
         """
+        return await self._update_revision(key, value, last=last, ttl=None)
+
+    async def _update_revision(self, key: str, value: bytes | str, *, last: int, ttl: int | str | None) -> int:
         encoded = self._encode_key(key)
         ack = await self._ctx.publish(
             self._subject(encoded),
             self._encode_value(value),
             expected_last_subject_seq=last,
+            ttl=ttl,
         )
         return ack.seq
 
@@ -222,20 +254,17 @@ class KeyValue:
             expected_last_subject_seq=last,
         )
 
-    async def purge(self, key: str, *, ttl: int | str | None = None) -> None:
+    async def purge(self, key: str, *, ttl: int | str | None = None, last: int | None = None) -> None:
         """Write a purge marker and roll up: prior revisions are removed.
 
         ``ttl`` (whole seconds, or ``"never"``) lets the marker itself expire
         — requires per-message TTLs on the bucket
         (``KeyValueConfig(allow_msg_ttl=True)`` or ``limit_marker_ttl``).
+        ``last`` makes the rollup a compare-and-set: it proceeds only if ``last``
+        is the key's latest revision, else
+        :class:`~natsio.jetstream.WrongLastSequenceError`.
         """
-        if ttl is not None and not self._stream.cached_info.config.allow_msg_ttl:
-            from natsio.errors import ConfigError
-
-            raise ConfigError(
-                f"bucket {self.bucket!r} does not allow per-message TTLs; create it "
-                "with KeyValueConfig(allow_msg_ttl=True) or limit_marker_ttl to use purge(ttl=...)"
-            )
+        self._require_msg_ttl(ttl)
         encoded = self._encode_key(key)
         await self._ctx.publish(
             self._subject(encoded),
@@ -245,41 +274,96 @@ class KeyValue:
                 js_headers.ROLLUP: js_headers.ROLLUP_SUBJECT,
             },
             ttl=ttl,
+            expected_last_subject_seq=last,
         )
+
+    async def purge_deletes(self, *, older_than: timedelta | None = None) -> None:
+        """Remove delete/purge markers (and the history they sit atop).
+
+        For each marked key the whole subject is purged, so both the marker and
+        any surviving history below it are erased. A marker YOUNGER than
+        ``older_than`` is kept — its subject is purged only up to the marker
+        (``keep=1``) so the tombstone itself survives for late watchers.
+
+        ``older_than`` defaults to 30 minutes (matching nats.go). Pass
+        ``timedelta(0)`` (or a negative delta) to remove every marker regardless
+        of age.
+        """
+        if older_than is None:
+            older_than = timedelta(minutes=30)
+        limit: datetime | None = None
+        if older_than > timedelta(0):
+            limit = datetime.now(UTC) - older_than
+
+        markers: list[KvEntry] = []
+        async with self.watch(meta_only=True) as watcher:
+            async for entry in watcher:
+                if entry is None:
+                    break  # initial state fully collected
+                if entry.is_marker:
+                    markers.append(entry)
+        # Watcher is stopped (context exit) before purging so its num_pending
+        # bookkeeping can't churn against the rollups we are about to issue.
+        for entry in markers:
+            subject = self._subject(self._encode_key(entry.key))
+            if limit is not None and entry.created is not None and entry.created > limit:
+                await self._stream.purge(subject=subject, keep=1)  # keep the marker
+            else:
+                await self._stream.purge(subject=subject)
 
     # -- enumeration ---------------------------------------------------------
 
     def watch(
         self,
-        key: str = ">",
-        *,
+        *keys: str,
         include_history: bool = False,
         updates_only: bool = False,
         ignore_deletes: bool = False,
         meta_only: bool = False,
+        resume_from_revision: int | None = None,
     ) -> "KvWatcher":
-        """Watch a key (or wildcard) for changes.
+        """Watch one or more keys (or wildcards) for changes.
 
-        Yields :class:`KvEntry` items and exactly one ``None`` marker once the
-        current state has been fully delivered (immediately for
-        ``updates_only``); afterwards it streams live updates. Self-healing —
-        backed by the ordered consumer.
+        With no ``keys`` the whole bucket is watched (``">"``); one key behaves
+        exactly as a single-key watch; several keys install an ordered consumer
+        with one filter subject per key, so the initial state and live updates
+        cover the union of the keys. Yields :class:`KvEntry` items and exactly
+        one ``None`` marker once the current state has been fully delivered
+        (immediately for ``updates_only``); afterwards it streams live updates.
+        Self-healing — backed by the ordered consumer.
+
+        ``resume_from_revision`` replays from that stream revision onward
+        (every revision, not last-per-subject) and is mutually exclusive with
+        ``include_history`` and ``updates_only``.
         """
-        validate_key(key, wildcards=True)
-        encoded = key if key == ">" else self._maybe_encode_watch_key(key)
-        if include_history and updates_only:
-            from natsio.errors import ConfigError
+        from natsio.errors import ConfigError
 
+        if include_history and updates_only:
             raise ConfigError("include_history and updates_only are mutually exclusive")
-        if updates_only:
+        if resume_from_revision is not None and (include_history or updates_only):
+            raise ConfigError("resume_from_revision is mutually exclusive with include_history and updates_only")
+
+        filters = list(keys) if keys else [">"]
+        subjects: list[str] = []
+        for key in filters:
+            validate_key(key, wildcards=True)
+            encoded = key if key == ">" else self._maybe_encode_watch_key(key)
+            subjects.append(self._subject(encoded))
+
+        opt_start_seq: int | None = None
+        if resume_from_revision is not None:
+            deliver = DeliverPolicy.BY_START_SEQUENCE
+            opt_start_seq = resume_from_revision
+        elif updates_only:
             deliver = DeliverPolicy.NEW
         elif include_history:
             deliver = DeliverPolicy.ALL
         else:
             deliver = DeliverPolicy.LAST_PER_SUBJECT
         ordered = self._stream.ordered_consumer(
-            filter_subjects=[self._subject(encoded)],
+            filter_subjects=subjects,
             deliver_policy=deliver,
+            opt_start_seq=opt_start_seq,
             headers_only=meta_only,
         )
         return KvWatcher(

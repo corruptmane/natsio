@@ -448,6 +448,22 @@ class Subscription:
         self._release_pause()
         self._client._subscriptions.pop(self.sid, None)
 
+    def _fail_permanent(self, error: Exception) -> None:
+        """Terminate with an error: parked consumers raise it, the sub is closed.
+
+        Used when the server denies this subscription (permission violation) and
+        ``permission_err_on_subscribe`` is set. Runs on the read path — must not
+        block. Setting ``_failure`` makes ``next_msg`` / iteration raise ``error``
+        (including on every subsequent call), and the ``_closed_event`` latch
+        wakes any consumer already parked in ``_next_or_none``.
+        """
+        if self._failure is None:
+            self._failure = error
+        self._closed = True
+        self._closed_event.set()
+        self._release_pause()
+        self._client._subscriptions.pop(self.sid, None)
+
     async def __aenter__(self) -> Self:
         return self
 

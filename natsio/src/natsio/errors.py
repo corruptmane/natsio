@@ -25,6 +25,7 @@ __all__ = [
     "ParserError",
     "PermissionsViolationError",
     "ProtocolError",
+    "ReconnectBufExceededError",
     "ServerError",
     "SlowConsumerError",
     "StaleConnectionError",
@@ -62,6 +63,15 @@ class ConnectionClosedError(NATSError, ConnectionError):
 
 class NoServersAvailableError(ConnectionClosedError):
     """Every server in the pool is unreachable or exhausted its retry budget."""
+
+
+class ReconnectBufExceededError(NATSError):
+    """A publish issued while disconnected exceeded ``reconnect_buf_size``.
+
+    Non-fatal: the connection stays alive and reconnect continues; only this
+    publish is rejected. Raised immediately for every disconnected publish when
+    buffering is disabled (``reconnect_buf_size=-1``).
+    """
 
 
 class ProtocolError(NATSError):

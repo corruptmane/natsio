@@ -12,7 +12,11 @@ async with consumer.consume() as messages:
 
 from natsio.jetstream import headers
 from natsio.jetstream.consumer import Consumer, Consumption, OrderedConsumer
-from natsio.jetstream.context import JetStreamContext
+from natsio.jetstream.context import (
+    AsyncPublishTimeoutError,
+    JetStreamContext,
+    TooManyStalledMsgsError,
+)
 from natsio.jetstream.entities import (
     AccountInfo,
     AckPolicy,
@@ -59,6 +63,7 @@ __all__ = [
     "AccountInfo",
     "AckMetadata",
     "AckPolicy",
+    "AsyncPublishTimeoutError",
     "ClusterInfo",
     "Consumer",
     "ConsumerConfig",
@@ -98,6 +103,7 @@ __all__ = [
     "StreamSource",
     "StreamState",
     "SubjectTransform",
+    "TooManyStalledMsgsError",
     "WrongLastSequenceError",
     "headers",
 ]

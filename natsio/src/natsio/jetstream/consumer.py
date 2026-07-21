@@ -29,6 +29,7 @@ if TYPE_CHECKING:
 
 from .entities import ConsumerConfig, ConsumerInfo, DeliverPolicy
 from .errors import ConsumerDeletedError, JetStreamError, NoMessagesError
+from .headers import PIN_ID
 from .message import JsMsg
 
 __all__ = ["Consumer", "Consumption", "OrderedConsumer"]
@@ -44,11 +45,16 @@ class _RequestGoneError(Exception):
 class Consumer:
     """A handle to a pull consumer. Spawns fetches and consume sessions."""
 
-    __slots__ = ("_stream", "cached_info")
+    __slots__ = ("_pin_ids", "_stream", "cached_info")
 
     def __init__(self, stream: "Stream", info: ConsumerInfo) -> None:
         self._stream = stream
         self.cached_info = info
+        # Latest priority-group pin id (ADR-42 pinned_client), keyed by group.
+        # The server pins one client per (consumer, group) and echoes the id on
+        # delivered messages; we replay it on subsequent pulls so the server
+        # keeps delivering to us, and drop it on a pin-mismatch (423) status.
+        self._pin_ids: dict[str, str] = {}
 
     @property
     def name(self) -> str:
@@ -68,9 +74,53 @@ class Consumer:
     async def delete(self) -> None:
         await self._stream.delete_consumer(self.name)
 
+    async def unpin(self, group: str) -> None:
+        """Release the pinned client for ``group`` (ADR-42 ``pinned_client``).
+
+        The server drops the current pin; the next pull request from any client
+        in the group becomes the new pinned client. Raises
+        :class:`ConsumerNotFoundError` if the consumer no longer exists.
+        """
+        await self._stream._ctx._api_request(
+            f"CONSUMER.UNPIN.{self._stream.name}.{self.name}",
+            {"group": group},
+        )
+        self._forget_pin(group)
+
     def _pull_subject(self) -> str:
         ctx = self._stream._ctx
         return f"{ctx.api_prefix}.CONSUMER.MSG.NEXT.{self._stream.name}.{self.name}"
+
+    # -- priority groups (ADR-42) --------------------------------------------
+
+    def _validate_group(self, group: str | None) -> None:
+        """Client-side priority-group check, mirroring nats.go's Consume/Messages.
+
+        A consumer configured with priority groups requires every pull to name
+        one of them; a plain consumer rejects a group it can't honour.
+        """
+        configured = self.cached_info.config.priority_groups
+        if configured:
+            if group is None:
+                raise ConfigError("priority group is required for this consumer")
+            if group not in configured:
+                raise ConfigError(f"invalid priority group {group!r} (configured: {configured})")
+        elif group is not None:
+            raise ConfigError("priority group is not supported for this consumer")
+
+    def _pin_id(self, group: str | None) -> str | None:
+        return self._pin_ids.get(group) if group is not None else None
+
+    def _remember_pin(self, group: str | None, msg: Msg) -> None:
+        if group is None or msg.headers is None:
+            return
+        pin = msg.headers.get(PIN_ID)
+        if pin:
+            self._pin_ids[group] = pin
+
+    def _forget_pin(self, group: str | None) -> None:
+        if group is not None:
+            self._pin_ids.pop(group, None)
 
     # -- fetch / next --------------------------------------------------------
 
@@ -82,6 +132,9 @@ class Consumer:
         timeout: float = 5.0,  # noqa: ASYNC109
         idle_heartbeat: float | None = None,
         no_wait: bool = False,
+        group: str | None = None,
+        min_pending: int | None = None,
+        min_ack_pending: int | None = None,
     ) -> list[JsMsg]:
         """One bounded pull: up to ``max_messages`` within ``timeout`` seconds.
 
@@ -90,11 +143,22 @@ class Consumer:
         list is a normal outcome. ``no_wait`` returns only immediately-available
         messages. Raises :class:`ConnectionClosedError` if the connection closes
         mid-fetch with the batch still incomplete.
+
+        ``group`` selects an ADR-42 priority group (required, and validated, when
+        the consumer is configured with priority groups). ``min_pending`` /
+        ``min_ack_pending`` gate delivery on an ``overflow``-policy consumer:
+        the server only serves this request when the consumer has at least that
+        many pending messages / unacked messages (server-enforced).
         """
         if max_messages <= 0:
             raise ConfigError("fetch max_messages must be positive")
         if timeout < 0:
             raise ConfigError("fetch timeout must not be negative")
+        self._validate_group(group)
+        if min_pending is not None and min_pending < 1:
+            raise ConfigError("fetch min_pending must be positive")
+        if min_ack_pending is not None and min_ack_pending < 1:
+            raise ConfigError("fetch min_ack_pending must be positive")
         client = self._stream._ctx.client
         conn = client._conn
         inbox = f"_INBOX.{next_nuid()}"
@@ -122,6 +186,15 @@ class Consumer:
                 request["max_bytes"] = max_bytes
             if idle_heartbeat is not None and not no_wait:
                 request["idle_heartbeat"] = int(idle_heartbeat * _NANOSECOND)
+            if group is not None:
+                request["group"] = group
+                pin = self._pin_id(group)
+                if pin:
+                    request["id"] = pin  # wire field for the pin id is "id"
+            if min_pending is not None:
+                request["min_pending"] = min_pending
+            if min_ack_pending is not None:
+                request["min_ack_pending"] = min_ack_pending
             await client.publish(self._pull_subject(), json.dumps(request).encode(), reply=inbox)
 
             messages: list[JsMsg] = []
@@ -153,11 +226,14 @@ class Consumer:
                         msg = getter.result()
                     else:
                         continue  # close fired: re-check the queue, then raise
+                if msg.status is not None and msg.status.code == 423:
+                    self._forget_pin(group)  # stale pin: next fetch re-pulls unpinned
                 try:
                     if self._classify(msg):
                         continue  # heartbeat
                 except _RequestGoneError:
                     break
+                self._remember_pin(group, msg)
                 messages.append(JsMsg(msg, client))
             return messages
         finally:
@@ -165,9 +241,26 @@ class Consumer:
             with suppress(ConnectionClosedError):
                 conn.unsubscribe(entry.sid)
 
-    async def next(self, *, timeout: float = 5.0) -> JsMsg:  # noqa: ASYNC109
-        """The next available message, or :class:`NoMessagesError` on expiry."""
-        messages = await self.fetch(1, timeout=timeout)
+    async def next(
+        self,
+        *,
+        timeout: float = 5.0,  # noqa: ASYNC109
+        group: str | None = None,
+        min_pending: int | None = None,
+        min_ack_pending: int | None = None,
+    ) -> JsMsg:
+        """The next available message, or :class:`NoMessagesError` on expiry.
+
+        ``group`` / ``min_pending`` / ``min_ack_pending`` carry the same ADR-42
+        priority-group semantics as :meth:`fetch`.
+        """
+        messages = await self.fetch(
+            1,
+            timeout=timeout,
+            group=group,
+            min_pending=min_pending,
+            min_ack_pending=min_ack_pending,
+        )
         if not messages:
             raise NoMessagesError(f"no message on consumer {self.name!r} within {timeout}s")
         return messages[0]
@@ -204,6 +297,9 @@ class Consumer:
         expires: float = 30.0,
         idle_heartbeat: float | None = None,
         threshold: float = 0.5,
+        group: str | None = None,
+        min_pending: int | None = None,
+        min_ack_pending: int | None = None,
     ) -> "Consumption":
         """A continuous, self-refilling message stream (ADR-37 ``consume``).
 
@@ -214,7 +310,16 @@ class Consumer:
             async with consumer.consume() as messages:
                 async for msg in messages:
                     await msg.ack()
+
+        ``group`` / ``min_pending`` / ``min_ack_pending`` carry ADR-42 priority-
+        group semantics (see :meth:`fetch`); the group, when the consumer has
+        priority groups configured, is validated here before the session starts.
         """
+        self._validate_group(group)
+        if min_pending is not None and min_pending < 1:
+            raise ConfigError("consume min_pending must be positive")
+        if min_ack_pending is not None and min_ack_pending < 1:
+            raise ConfigError("consume min_ack_pending must be positive")
         heartbeat = idle_heartbeat if idle_heartbeat is not None else min(expires / 2, 30.0)
         return Consumption(
             self,
@@ -223,6 +328,9 @@ class Consumer:
             expires=expires,
             idle_heartbeat=heartbeat,
             threshold_msgs=max(1, int(max_messages * threshold)),
+            group=group,
+            min_pending=min_pending,
+            min_ack_pending=min_ack_pending,
         )
 
 
@@ -236,11 +344,14 @@ class Consumption:
         "_entry",
         "_expires",
         "_failure",
+        "_group",
         "_heartbeat",
         "_inbox_base",
         "_last_frame_at",
         "_max_bytes",
         "_max_messages",
+        "_min_ack_pending",
+        "_min_pending",
         "_pulls",
         "_queue",
         "_rapid_ends",
@@ -260,6 +371,9 @@ class Consumption:
         expires: float,
         idle_heartbeat: float,
         threshold_msgs: int,
+        group: str | None = None,
+        min_pending: int | None = None,
+        min_ack_pending: int | None = None,
     ) -> None:
         self._consumer = consumer
         self._max_messages = max_messages
@@ -267,6 +381,9 @@ class Consumption:
         self._expires = expires
         self._heartbeat = idle_heartbeat
         self._threshold_msgs = threshold_msgs
+        self._group = group
+        self._min_pending = min_pending
+        self._min_ack_pending = min_ack_pending
         self._inbox_base = f"_INBOX.{next_nuid()}"
         self._queue: asyncio.Queue[JsMsg] = asyncio.Queue()
         self._pulls: dict[str, tuple[int, float]] = {}  # token -> (still expected, issued at)
@@ -345,6 +462,10 @@ class Consumption:
         msg = client._build_msg(event)
         status = msg.status
         if status is None:
+            # Pinned-client delivery (ADR-42): the server stamps every message
+            # with the current Nats-Pin-Id; remember the latest so subsequent
+            # pulls replay it and stay pinned. No-op for non-priority sessions.
+            self._consumer._remember_pin(self._group, msg)
             # Data deliveries carry the message's ORIGINAL subject — the reply
             # inbox (and its token) appears only on status frames. Attribute
             # the delivery to the oldest outstanding pull: the server serves
@@ -405,6 +526,10 @@ class Consumption:
                 )
             )
             return
+        if status.code == 423:
+            # Pin lost (ADR-42): our stored id is stale. Drop it so the re-pull
+            # goes out unpinned and the server can re-pin (or hand us over).
+            self._consumer._forget_pin(self._group)
         self._wake.set()  # benign end (404/408/limits/leadership/pin): re-pull
 
     def _fail(self, error: Exception) -> None:
@@ -463,6 +588,15 @@ class Consumption:
         }
         if self._max_bytes is not None:
             request["max_bytes"] = self._max_bytes
+        if self._group is not None:
+            request["group"] = self._group
+            pin = self._consumer._pin_id(self._group)
+            if pin:
+                request["id"] = pin  # wire field for the pin id is "id"
+        if self._min_pending is not None:
+            request["min_pending"] = self._min_pending
+        if self._min_ack_pending is not None:
+            request["min_ack_pending"] = self._min_ack_pending
         self._pulls[token] = (batch, asyncio.get_running_loop().time())
         self._total_pending += batch
         client = self._consumer._stream._ctx.client

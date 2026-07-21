@@ -11,11 +11,32 @@ MSG_ID: Final = "Nats-Msg-Id"
 EXPECTED_STREAM: Final = "Nats-Expected-Stream"
 EXPECTED_LAST_SEQUENCE: Final = "Nats-Expected-Last-Sequence"
 EXPECTED_LAST_SUBJECT_SEQUENCE: Final = "Nats-Expected-Last-Subject-Sequence"
+# 2.12+: scopes EXPECTED_LAST_SUBJECT_SEQUENCE to a (wildcard) subject filter
+# other than the one being published to (nats.go WithExpectLastSequenceForSubject).
+EXPECTED_LAST_SUBJECT_SEQUENCE_SUBJECT: Final = "Nats-Expected-Last-Subject-Sequence-Subject"
 EXPECTED_LAST_MSG_ID: Final = "Nats-Expected-Last-Msg-Id"
 
 # -- per-message TTL (ADR-43, server 2.11+) --
 TTL: Final = "Nats-TTL"
 TTL_NEVER: Final = "never"
+
+# -- message schedules (server 2.12+, requires StreamConfig.allow_msg_schedules) --
+# Client-set. SCHEDULE holds the schedule expression: "@at <RFC3339>",
+# "@every <duration>", a 6-field cron expression, or a predefined value below.
+SCHEDULE: Final = "Nats-Schedule"
+SCHEDULE_TARGET: Final = "Nats-Schedule-Target"  # subject scheduled messages are delivered to
+SCHEDULE_SOURCE: Final = "Nats-Schedule-Source"  # subject to sample the latest message from
+SCHEDULE_TTL: Final = "Nats-Schedule-TTL"  # TTL for generated messages (needs allow_msg_ttl)
+SCHEDULE_TIME_ZONE: Final = "Nats-Schedule-Time-Zone"  # IANA zone, cron schedules only
+# Predefined SCHEDULE values (cron aliases).
+SCHEDULE_YEARLY: Final = "@yearly"
+SCHEDULE_MONTHLY: Final = "@monthly"
+SCHEDULE_WEEKLY: Final = "@weekly"
+SCHEDULE_DAILY: Final = "@daily"
+SCHEDULE_HOURLY: Final = "@hourly"
+# Server-set on generated messages (do not set these when publishing).
+SCHEDULER: Final = "Nats-Scheduler"  # subject holding the schedule definition
+SCHEDULE_NEXT: Final = "Nats-Schedule-Next"  # next invocation timestamp, or "purge"
 
 # -- rollup (ADR-8 KV purge and friends) --
 ROLLUP: Final = "Nats-Rollup"

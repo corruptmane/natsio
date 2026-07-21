@@ -11,6 +11,7 @@ from natsio.errors import (
     MaxPayloadExceededError,
     NoReplySubjectError,
     NoRespondersError,
+    PermissionsViolationError,
     SlowConsumerError,
     SubscriptionClosedError,
     TimeoutError,
@@ -530,6 +531,115 @@ class TestEvents:
         finally:
             await client.close()
             await asyncio.wait_for(task, timeout=1)
+
+
+class TestForceReconnect:
+    async def test_force_reconnect_increments_stats_and_keeps_subs(self) -> None:
+        env = FakeEnv()
+        recorder = EventRecorder()
+        # Long backoff: only the first-attempt bypass lets Reconnected arrive fast.
+        client = await connected_client(env, reconnect_time_wait=10.0, reconnect_time_wait_max=10.0)
+        client._conn.bus.subscribe(recorder.hook)
+        try:
+            sub = client.subscribe("foo")
+            await client.flush()
+            await client.force_reconnect()
+            await recorder.wait_for(Reconnected)
+            assert client.status is ConnectionState.CONNECTED
+            assert client.stats.reconnects == 1
+            deliver_msg(env, sub.sid, "foo", b"after")
+            assert (await sub.next_msg(timeout=1)).payload == b"after"
+        finally:
+            await client.close()
+
+    async def test_force_reconnect_raises_after_close(self) -> None:
+        env = FakeEnv()
+        client = await connected_client(env)
+        await client.close()
+        with pytest.raises(natsio.ConnectionClosedError):
+            await client.force_reconnect()
+
+
+class TestPermissionErrOnSubscribe:
+    @staticmethod
+    def _deny(subject: str, queue: str | None = None) -> bytes:
+        q = f' using queue "{queue}"' if queue else ""
+        return f"-ERR 'Permissions Violation for Subscription to \"{subject}\"{q}'\r\n".encode()
+
+    async def test_routes_to_subscription_and_terminates_it(self) -> None:
+        env = FakeEnv()
+        client = await connected_client(env, permission_err_on_subscribe=True)
+        try:
+            forbidden = client.subscribe("forbidden")
+            allowed = client.subscribe("allowed")
+            await client.flush()
+            env.current.deliver(self._deny("forbidden"))
+            with pytest.raises(PermissionsViolationError):
+                await forbidden.next_msg(timeout=1)
+            assert forbidden.is_closed
+            assert forbidden.sid not in client._subscriptions
+            # Subsequent calls keep raising the same error.
+            with pytest.raises(PermissionsViolationError):
+                await forbidden.next_msg(timeout=1)
+            # A different subscription is untouched.
+            deliver_msg(env, allowed.sid, "allowed", b"hi")
+            assert (await allowed.next_msg(timeout=1)).payload == b"hi"
+        finally:
+            await client.close()
+
+    async def test_iterator_raises_permission_error(self) -> None:
+        env = FakeEnv()
+        client = await connected_client(env, permission_err_on_subscribe=True)
+        try:
+            sub = client.subscribe("forbidden")
+            await client.flush()
+            env.current.deliver(self._deny("forbidden"))
+            with pytest.raises(PermissionsViolationError):
+                async for _ in sub:
+                    pass
+        finally:
+            await client.close()
+
+    async def test_queue_variant_matches_only_same_queue(self) -> None:
+        env = FakeEnv()
+        client = await connected_client(env, permission_err_on_subscribe=True)
+        try:
+            workers = client.subscribe("task", queue="workers")
+            others = client.subscribe("task", queue="others")
+            await client.flush()
+            env.current.deliver(self._deny("task", queue="workers"))
+            with pytest.raises(PermissionsViolationError):
+                await workers.next_msg(timeout=1)
+            assert workers.is_closed
+            # Same subject, different queue: not matched.
+            assert not others.is_closed
+            deliver_msg(env, others.sid, "task", b"still-here")
+            assert (await others.next_msg(timeout=1)).payload == b"still-here"
+        finally:
+            await client.close()
+
+    async def test_without_option_error_goes_to_error_path_only(self) -> None:
+        env = FakeEnv()
+        errors: list[Exception] = []
+        client = await connected_client(env)  # option off (default)
+        client._conn.bus.subscribe(
+            lambda e: errors.append(e.error) if hasattr(e, "error") and e.error is not None else None
+        )
+        try:
+            forbidden = client.subscribe("forbidden")
+            await client.flush()
+            env.current.deliver(self._deny("forbidden"))
+            for _ in range(20):
+                await asyncio.sleep(0)
+                if errors:
+                    break
+            assert any(isinstance(e, PermissionsViolationError) for e in errors)
+            # The subscription is untouched: next_msg keeps waiting, then times out.
+            assert not forbidden.is_closed
+            with pytest.raises(TimeoutError):
+                await forbidden.next_msg(timeout=0.05)
+        finally:
+            await client.close()
 
 
 class TestConnectFactory:

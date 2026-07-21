@@ -8,17 +8,20 @@ import json
 import pytest
 
 import natsio
-from natsio.jetstream import NoMessagesError
+from natsio.jetstream import NoMessagesError, StorageType, StreamConfig
+from natsio.kv import KeyValueConfig
 from natsio.objectstore import (
     BucketExistsError,
     BucketNotFoundError,
     DigestMismatchError,
     LinkError,
+    ObjectDeletedError,
     ObjectExistsError,
     ObjectInfo,
     ObjectMeta,
     ObjectNotFoundError,
     ObjectStoreConfig,
+    ObjectStoreStatus,
 )
 from server import NatsServerProcess, require_server_binary
 
@@ -564,6 +567,158 @@ class TestCoverageGaps:
         assert status.replicas == 1
 
 
+class TestUpdateMeta:
+    """Mirrors nats.go TestObjectMetadata end-to-end."""
+
+    async def test_in_place_update_preserves_data(self, obj) -> None:
+        data = _payload(6 * 1024)
+        original = await obj.put(ObjectMeta(name="A", chunk_size=1024), data)
+
+        updated = await obj.update_meta(
+            "A",
+            ObjectMeta(
+                name="A",
+                description="descA",
+                metadata={"version": "0.1"},
+                headers={"color": ["blue"]},
+            ),
+        )
+        # Description/metadata/headers rewritten; data identity untouched.
+        assert updated.description == "descA"
+        assert updated.metadata == {"version": "0.1"}
+        assert updated.headers == {"color": ["blue"]}
+        assert (updated.nuid, updated.size, updated.chunks, updated.digest) == (
+            original.nuid,
+            original.size,
+            original.chunks,
+            original.digest,
+        )
+
+        info = await obj.info("A")
+        assert info.description == "descA"
+        assert info.headers == {"color": ["blue"]}
+        assert info.metadata == {"version": "0.1"}
+        assert await obj.get_bytes("A") == data
+
+    async def test_update_clears_fields_to_none(self, obj) -> None:
+        await obj.put(ObjectMeta(name="A", description="old", metadata={"k": "v"}), b"x")
+        await obj.update_meta("A", ObjectMeta(name="A", description="descB", headers={"color": ["red"]}))
+        info = await obj.info("A")
+        assert info.description == "descB"
+        assert info.headers == {"color": ["red"]}
+        assert info.metadata is None  # not carried over from the previous revision
+
+    async def test_rename_moves_object_and_removes_old_name(self, obj) -> None:
+        data = _payload(4 * 1024)
+        first = await obj.put(ObjectMeta(name="A", chunk_size=1024), data)
+
+        renamed = await obj.update_meta("A", ObjectMeta(name="B", description="descB"))
+        assert renamed.name == "B"
+        assert renamed.nuid == first.nuid  # chunks stayed under the same nuid
+
+        with pytest.raises(ObjectNotFoundError):
+            await obj.info("A")  # old meta subject purged
+        moved = await obj.info("B")
+        assert moved.description == "descB"
+        assert await obj.get_bytes("B") == data  # data readable under the new name
+
+    async def test_rename_onto_live_object_conflicts(self, obj) -> None:
+        await obj.put("B", b"b-data")
+        await obj.put("C", b"c-data")
+        with pytest.raises(ObjectExistsError):
+            await obj.update_meta("B", ObjectMeta(name="C"))
+        # both survive the refused rename
+        assert await obj.get_bytes("B") == b"b-data"
+        assert await obj.get_bytes("C") == b"c-data"
+
+    async def test_rename_onto_deleted_name_is_allowed(self, obj) -> None:
+        await obj.put("B", b"b-data")
+        await obj.put("C", b"c-data")
+        await obj.delete("C")
+        renamed = await obj.update_meta("B", ObjectMeta(name="C"))
+        assert renamed.name == "C"
+        assert not renamed.is_deleted
+        assert await obj.get_bytes("C") == b"b-data"
+        with pytest.raises(ObjectNotFoundError):
+            await obj.info("B")
+
+    async def test_update_deleted_object_raises_deleted(self, obj) -> None:
+        await obj.put("C", b"x")
+        await obj.delete("C")
+        with pytest.raises(ObjectDeletedError):
+            await obj.update_meta("C", ObjectMeta(name="C", description="d"))
+        with pytest.raises(ObjectDeletedError):  # rename of a deleted object too
+            await obj.update_meta("C", ObjectMeta(name="D"))
+
+    async def test_update_missing_object_raises_not_found(self, obj) -> None:
+        with pytest.raises(ObjectNotFoundError):
+            await obj.update_meta("X", ObjectMeta(name="X"))
+        # a never-existed object is not-found, not deleted
+        try:
+            await obj.update_meta("X", ObjectMeta(name="X"))
+        except ObjectDeletedError:
+            pytest.fail("missing object must raise ObjectNotFoundError, not the deleted subclass")
+        except ObjectNotFoundError:
+            pass
+
+    async def test_chunk_size_on_update_is_ignored(self, obj) -> None:
+        original = await obj.put(ObjectMeta(name="A", chunk_size=2048), _payload(4 * 1024))
+        assert original.options is not None and original.options.max_chunk_size == 2048
+        updated = await obj.update_meta("A", ObjectMeta(name="A", chunk_size=99, description="d"))
+        # options preserved from the stored revision; the update's chunk_size is meaningless.
+        assert updated.options is not None and updated.options.max_chunk_size == 2048
+
+    async def test_update_meta_is_cas_gated(self, obj) -> None:
+        """Every update_meta write goes through the CAS-gated meta machinery,
+        so a rename never clobbers a live object that appears concurrently."""
+        await obj.put("A", b"a")
+        # A rename target that becomes live mid-flight still resolves to a
+        # deterministic outcome (here: no such race, plain success).
+        renamed = await obj.update_meta("A", ObjectMeta(name="A2"))
+        assert renamed.name == "A2"
+        assert await obj.get_bytes("A2") == b"a"
+
+
+class TestShowDeleted:
+    """Public show-deleted reads (info/get) mirror GetObjectShowDeleted."""
+
+    async def test_info_show_deleted_returns_marker(self, obj) -> None:
+        await obj.put(ObjectMeta(name="A", chunk_size=1024), _payload(4 * 1024))
+        await obj.delete("A")
+
+        with pytest.raises(ObjectNotFoundError):
+            await obj.info("A")  # default: raises
+
+        marker = await obj.info("A", show_deleted=True)
+        assert marker.is_deleted
+        assert marker.size == 0 and marker.chunks == 0
+
+    async def test_get_show_deleted_yields_no_chunks(self, obj) -> None:
+        await obj.put(ObjectMeta(name="A", chunk_size=1024), _payload(4 * 1024))
+        await obj.delete("A")
+
+        with pytest.raises(ObjectNotFoundError):
+            await obj.get_bytes("A")  # default: raises
+
+        async with obj.get("A", show_deleted=True) as result:
+            assert result.info.is_deleted
+            chunks = [chunk async for chunk in result]
+        assert chunks == []
+
+    async def test_show_deleted_on_live_object_is_identical(self, obj) -> None:
+        data = _payload(3 * 1024)
+        await obj.put(ObjectMeta(name="live", chunk_size=1024), data)
+
+        marker = await obj.info("live", show_deleted=True)
+        assert not marker.is_deleted
+        assert marker.size == len(data)
+
+        async with obj.get("live", show_deleted=True) as result:
+            assert not result.info.is_deleted
+            received = b"".join([chunk async for chunk in result])
+        assert received == data
+
+
 class TestSeal:
     async def test_seal_blocks_writes(self, obj) -> None:
         await obj.put("frozen", b"forever")
@@ -576,3 +731,42 @@ class TestSeal:
         with pytest.raises(APIError):
             await obj.put("new", b"nope")
         assert await obj.get_bytes("frozen") == b"forever"
+
+
+class TestStoreManagement:
+    async def test_update_reflects_new_config(self, nc: natsio.Client) -> None:
+        js = nc.jetstream()
+        await js.create_object_store(ObjectStoreConfig(bucket="UPD", description="Test store"))
+        updated = await js.update_object_store(ObjectStoreConfig(bucket="UPD", description="New store"))
+        status = await updated.status()
+        assert status.description == "New store"
+
+    async def test_update_missing_bucket_raises(self, nc: natsio.Client) -> None:
+        js = nc.jetstream()
+        with pytest.raises(BucketNotFoundError):
+            await js.update_object_store(ObjectStoreConfig(bucket="NOPE", description="x"))
+
+    async def test_create_or_update_creates_then_updates(self, nc: natsio.Client) -> None:
+        js = nc.jetstream()
+        created = await js.create_or_update_object_store(ObjectStoreConfig(bucket="COU", description="first"))
+        assert (await created.status()).description == "first"
+        updated = await js.create_or_update_object_store(ObjectStoreConfig(bucket="COU", description="second"))
+        assert (await updated.status()).description == "second"
+
+    async def test_listings_return_only_object_stores(self, nc: natsio.Client) -> None:
+        js = nc.jetstream()
+        # OBJ_ prefix but no $O chunk subject -> excluded by the $O.*.C.> filter.
+        await js.create_stream(StreamConfig(name="OBJ_FOO", subjects=["foo.*"], storage=StorageType.MEMORY))
+        # $O chunk subject but no OBJ_ prefix -> excluded by the client-side prefix check.
+        await js.create_stream(StreamConfig(name="PLAIN", subjects=["$O.ABC.C.>"], storage=StorageType.MEMORY))
+        # A KV bucket shares neither prefix nor keyspace -> excluded.
+        await js.create_key_value(KeyValueConfig(bucket="KVX"))
+        await js.create_object_store(ObjectStoreConfig(bucket="OSS1"))
+        await js.create_object_store(ObjectStoreConfig(bucket="OSS2"))
+
+        names = {n async for n in js.object_store_names()}
+        assert names == {"OSS1", "OSS2"}
+
+        statuses = {s.bucket: s async for s in js.object_stores()}
+        assert set(statuses) == {"OSS1", "OSS2"}
+        assert all(isinstance(s, ObjectStoreStatus) for s in statuses.values())

@@ -22,6 +22,7 @@ from natsio.errors import (
     ConnectionClosedError,
     NoServersAvailableError,
     PermissionsViolationError,
+    ReconnectBufExceededError,
     StaleConnectionError,
     TimeoutError,
 )
@@ -576,3 +577,223 @@ class TestOptionsValidation:
     def test_unlimited_and_positive_accepted(self) -> None:
         assert make_options(max_reconnect_attempts=-1).max_reconnect_attempts == -1
         assert make_options(max_reconnect_attempts=1).max_reconnect_attempts == 1
+
+
+class TestForceReconnect:
+    async def test_force_reconnect_on_healthy_connection(self) -> None:
+        env = FakeEnv()
+        recorder = EventRecorder()
+        # A long backoff proves the first attempt bypasses it: without the bypass
+        # the Reconnected wait (2s default) would expire before the 10s delay.
+        conn = await connected_conn(env, recorder, reconnect_time_wait=10.0, reconnect_time_wait_max=10.0)
+        received: list[MsgEvent | HMsgEvent] = []
+        try:
+            entry = conn.subscribe("foo", None, received.append)
+            await conn.flush()
+            await conn.force_reconnect()
+            disconnected = await recorder.wait_for(Disconnected)
+            assert isinstance(disconnected, Disconnected)
+            assert disconnected.error is None  # a deliberate drop, not a failure
+            await recorder.wait_for(Reconnected)
+            assert conn.state is ConnectionState.CONNECTED
+            assert len(env.transports) == 2
+            # The drop was not counted as a server failure.
+            assert all(s.consecutive_failures == 0 for s in conn._pool.servers)
+            # Subscription replays on the fresh transport and still delivers.
+            await conn.flush()
+            assert f"SUB foo {entry.sid}\r\n".encode() in frames_written(env.current)
+            env.current.deliver(f"MSG foo {entry.sid} 2\r\nhi\r\n".encode())
+            assert len(received) == 1
+        finally:
+            await conn.close(flush=False)
+
+    async def test_force_reconnect_raises_when_closed(self) -> None:
+        env = FakeEnv()
+        conn = await connected_conn(env)
+        await conn.close(flush=False)
+        with pytest.raises(ConnectionClosedError):
+            await conn.force_reconnect()
+
+    async def test_repeated_force_reconnect_collapses_to_one_cycle(self) -> None:
+        env = FakeEnv()
+        recorder = EventRecorder()
+        conn = await connected_conn(env, recorder, reconnect_time_wait=10.0, reconnect_time_wait_max=10.0)
+        try:
+            for _ in range(5):
+                await conn.force_reconnect()
+            await recorder.wait_for(Reconnected)
+            assert conn.state is ConnectionState.CONNECTED
+            # The five rapid calls tore down exactly one session, not five.
+            assert len(env.transports) == 2
+            assert conn._reconnect_count == 1
+        finally:
+            await conn.close(flush=False)
+
+    async def test_stale_force_flag_does_not_skip_a_later_real_backoff(self) -> None:
+        """Review regression: a force issued while no session existed (e.g.
+        during the retry_on_failed_connect phase) must not survive the next
+        successful connect and silently skip a future real backoff."""
+        env = FakeEnv()
+        recorder = EventRecorder()
+        env.refuse_next(1)
+        conn = Connection(
+            make_options(
+                retry_on_failed_connect=True,
+                reconnect_time_wait=0.3,
+                reconnect_time_wait_max=0.3,
+            ),
+            transport_factory=env.factory,
+        )
+        conn.bus.subscribe(recorder.hook)
+        await conn.connect()  # returns while RECONNECTING
+        try:
+            await conn.force_reconnect()  # no session to drop: only arms the flag
+            await recorder.wait_for(Connected, timeout=5.0)
+            assert conn._force_reconnect is False  # honored by the connect
+            loop = asyncio.get_running_loop()
+            dropped_at = loop.time()
+            env.current.drop()
+            await recorder.wait_for(Reconnected, timeout=5.0)
+            # The real disconnect respected the configured backoff.
+            assert loop.time() - dropped_at >= 0.25
+        finally:
+            await conn.close(flush=False)
+
+
+class TestRetryOnFailedConnect:
+    async def test_initial_failure_enters_reconnecting_then_connects(self) -> None:
+        env = FakeEnv()
+        env.refuse_next(1)  # the initial connect finds no server
+        recorder = EventRecorder()
+        conn = Connection(
+            make_options(retry_on_failed_connect=True, max_reconnect_attempts=-1),
+            transport_factory=env.factory,
+        )
+        conn.bus.subscribe(recorder.hook)
+        received: list[MsgEvent | HMsgEvent] = []
+        try:
+            await conn.connect()  # returns instead of raising
+            assert conn.state is ConnectionState.RECONNECTING
+            # Registered and published while still waiting for the first connect.
+            entry = conn.subscribe("pending.sub", None, received.append)
+            await conn.publish_frame(b"PUB buffered 3\r\nyes\r\n")
+            # The next attempt succeeds; the first success fires Connected, not Reconnected.
+            await recorder.wait_for(Connected)
+            assert conn.state is ConnectionState.CONNECTED
+            assert recorder.count(Reconnected) == 0
+            await conn.flush()
+            written = frames_written(env.current)
+            assert f"SUB pending.sub {entry.sid}\r\n".encode() in written
+            assert b"PUB buffered 3\r\nyes\r\n" in written
+            env.current.deliver(f"MSG pending.sub {entry.sid} 2\r\nok\r\n".encode())
+            assert len(received) == 1
+        finally:
+            await conn.close(flush=False)
+
+    async def test_without_option_initial_failure_raises(self) -> None:
+        env = FakeEnv()
+        env.refuse_next(1)
+        conn = Connection(make_options(), transport_factory=env.factory)
+        with pytest.raises(NoServersAvailableError):
+            await conn.connect()
+        assert conn.state is ConnectionState.CLOSED
+
+    async def test_repeated_auth_error_aborts_and_closes(self) -> None:
+        env = FakeEnv()
+        recorder = EventRecorder()
+        budget = {"n": 1000}  # every handshake is rejected with the same auth error
+        _reject_auth_after_connect(env, budget, b"-ERR 'Authorization Violation'\r\n")
+        conn = Connection(
+            make_options(retry_on_failed_connect=True, max_reconnect_attempts=-1),
+            transport_factory=env.factory,
+        )
+        conn.bus.subscribe(recorder.hook)
+        await conn.connect()  # returns (RECONNECTING) despite the rejection
+        # Two identical auth rejections during retry abort the loop and close.
+        await recorder.wait_for(Closed, timeout=5.0)
+        assert conn.state is ConnectionState.CLOSED
+        assert recorder.count(Connected) == 0
+
+
+class TestReconnectBufSize:
+    async def test_overflow_raises_and_connection_survives(self) -> None:
+        env = FakeEnv()
+        recorder = EventRecorder()
+        frame = b"PUB x 1\r\na\r\n"
+        # Cap == one frame: the first publish fills it, the second overflows.
+        conn = await connected_conn(env, recorder, reconnect_buf_size=len(frame))
+        try:
+            env.refuse_next(1)  # widen the reconnect window
+            env.current.drop()
+            await recorder.wait_for(Disconnected)
+            await conn.publish_frame(frame)  # buffered == cap now
+            with pytest.raises(ReconnectBufExceededError):
+                await conn.publish_frame(frame)
+            # The overflow is not fatal: the connection still reconnects.
+            await recorder.wait_for(Reconnected)
+            assert conn.state is ConnectionState.CONNECTED
+        finally:
+            await conn.close(flush=False)
+
+    async def test_minus_one_disables_buffering(self) -> None:
+        env = FakeEnv()
+        recorder = EventRecorder()
+        conn = await connected_conn(env, recorder, reconnect_buf_size=-1)
+        try:
+            # While connected, publishing is unaffected.
+            await conn.publish_frame(b"PUB ok 1\r\na\r\n")
+            env.refuse_next(1)
+            env.current.drop()
+            await recorder.wait_for(Disconnected)
+            # While disconnected, every publish fails immediately (nothing buffers).
+            with pytest.raises(ReconnectBufExceededError):
+                await conn.publish_frame(b"PUB down 1\r\na\r\n")
+            assert conn._reconnect_buffer_size == 0
+            await recorder.wait_for(Reconnected)
+            assert conn.state is ConnectionState.CONNECTED
+        finally:
+            await conn.close(flush=False)
+
+    async def test_minus_one_drop_in_lost_window_is_loud(self) -> None:
+        """Review regression: a publish that races the CONNECTED->lost window
+        lands on the dead session; with buffering disabled it is lost by
+        contract, but the loss must be REPORTED, never silent."""
+        env = FakeEnv()
+        recorder = EventRecorder()
+        conn = await connected_conn(env, recorder, reconnect_buf_size=-1)
+        try:
+            env.refuse_next(1)
+            frame = b"PUB win 3\r\nabc\r\n"
+            # A fatal -ERR marks the session lost synchronously; the supervisor
+            # has not flipped the state yet, so the publish takes the CONNECTED
+            # path onto the dead session.
+            env.current.deliver(b"-ERR 'Stale Connection'\r\n")
+            assert conn.state is ConnectionState.CONNECTED
+            await conn.publish_frame(frame)
+            await recorder.wait_for(Reconnected, timeout=3.0)
+            drops = [
+                event
+                for event in recorder.events
+                if isinstance(event, ErrorOccurred) and isinstance(event.error, ReconnectBufExceededError)
+            ]
+            assert len(drops) == 1
+            await conn.flush()
+            assert frame not in frames_written(env.current)  # lost by contract, loudly
+        finally:
+            await conn.close(flush=False)
+
+    async def test_buffered_bytes_flush_on_reconnect(self) -> None:
+        env = FakeEnv()
+        recorder = EventRecorder()
+        conn = await connected_conn(env, recorder, reconnect_buf_size=1024)
+        try:
+            env.refuse_next(1)
+            env.current.drop()
+            await recorder.wait_for(Disconnected)
+            frame = b"PUB survive 3\r\nyes\r\n"
+            await conn.publish_frame(frame)
+            await recorder.wait_for(Reconnected)
+            await conn.flush()
+            assert frame in frames_written(env.current)
+        finally:
+            await conn.close(flush=False)

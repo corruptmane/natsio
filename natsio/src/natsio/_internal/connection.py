@@ -17,6 +17,7 @@ import builtins
 import json
 import logging
 import random
+import re
 from collections import deque
 from collections.abc import Callable
 from typing import Any
@@ -29,6 +30,8 @@ from natsio.errors import (
     NATSError,
     NoServersAvailableError,
     ParserError,
+    PermissionsViolationError,
+    ReconnectBufExceededError,
     ServerError,
     StaleConnectionError,
     TimeoutError,
@@ -76,6 +79,15 @@ __all__ = ["Connection", "TransportFactory"]
 log = logging.getLogger("natsio.connection")
 
 type TransportFactory = Callable[..., Transport]
+
+# nats.go DefaultReconnectBufSize (8MB); reconnect_buf_size=0 resolves to this.
+_DEFAULT_RECONNECT_BUF_SIZE = 8 * 1024 * 1024
+
+# Subject/queue tokens inside a "Permissions Violation for Subscription to
+# "<subject>" [using queue "<queue>"]" -ERR (parity with nats.go permissionsRe /
+# permissionsQueueRe). The publish variant carries no "Subscription to" token.
+_PERM_SUBJECT_RE = re.compile(r'Subscription to "(\S+)"')
+_PERM_QUEUE_RE = re.compile(r'using queue "(\S+)"')
 
 
 class _SafeInstrumentation:
@@ -212,6 +224,10 @@ class _Session:
         error = classify_server_error(message)
         if not error.fatal:
             self._conn.background_error(error)
+            if isinstance(error, PermissionsViolationError):
+                # A subscription-permission -ERR additionally terminates the
+                # denied subscription(s) when permission_err_on_subscribe is set.
+                self._conn.route_permission_error(message)
             return
         if self.running and isinstance(error, AuthorizationViolationError | AuthenticationExpiredError):
             # Parity with nats.go processAuthError: a fatal auth error on a live
@@ -406,7 +422,17 @@ class Connection:
         self._first_connect: asyncio.Future[None] | None = None
         self._reconnect_buffer: list[bytes] = []
         self._reconnect_buffer_size = 0
+        # Dedicated cap for bytes buffered while disconnected (feature: dedicated
+        # reconnect buffer). 0 means "use the default"; -1 disables buffering.
+        self._reconnect_buf_limit = (
+            options.reconnect_buf_size if options.reconnect_buf_size != 0 else _DEFAULT_RECONNECT_BUF_SIZE
+        )
         self._reconnect_count = 0
+        # Set by force_reconnect(): consumed by the first _backoff to skip it, so
+        # a forced reconnect attempts immediately without counting a failure.
+        self._force_reconnect = False
+        # Wakes an in-progress reconnect backoff sleep on force_reconnect().
+        self._force_wake = asyncio.Event()
 
     # -- public surface ------------------------------------------------------
 
@@ -481,6 +507,29 @@ class Connection:
         """Graceful shutdown. (Subscription draining arrives with the client layer.)"""
         await self.close(flush=True)
 
+    async def force_reconnect(self) -> None:
+        """Drop the current transport and reconnect immediately.
+
+        Flushes pending writes best-effort, then tears the session down through
+        the normal lost path (subscriptions replay, buffered publishes survive,
+        Disconnected+Reconnected fire) but bypassing the backoff for the first
+        attempt and without counting a server failure. Non-blocking. Raises
+        while the client is closed or draining.
+        """
+        if self._closing or self._state in (ConnectionState.CLOSED, ConnectionState.DRAINING):
+            raise ConnectionClosedError(f"cannot force_reconnect while {self._state.name}")
+        # Break any in-progress reconnect backoff and skip the next one.
+        self._force_reconnect = True
+        self._force_wake.set()
+        session = self._session
+        if self.is_connected and session is not None and not session.lost_future.done():
+            # Flush to the doomed socket first (nats.go bw.flush before Close),
+            # then tear down with error=None so the drop counts as deliberate.
+            await session.final_flush()
+            session.mark_lost(None)
+        # Otherwise we are already between sessions (CONNECTING/RECONNECTING):
+        # the flag + wake above are enough to hurry the pending attempt along.
+
     async def flush(self, timeout: float | None = None) -> None:  # noqa: ASYNC109
         session = self._require_session()
         waiter: asyncio.Future[None] = asyncio.get_running_loop().create_future()
@@ -534,13 +583,37 @@ class Connection:
     # -- supervisor ----------------------------------------------------------
 
     async def _supervise(self) -> None:
-        initial = True
+        # `first_connect_pending` mirrors nats.go initc: it controls Connected vs
+        # Reconnected and stays true across retry_on_failed_connect attempts, so
+        # the first success still fires Connected. `use_backoff` is decoupled from
+        # it: the very first attempt is immediate; every attempt after enters via
+        # the backoff (parity with doReconnect vs the initial connect loop).
+        first_connect_pending = True
+        use_backoff = False
+        retrying_initial = False
         last_error: Exception | None = None
         try:
             while not self._closing:
                 try:
-                    session = await self._establish_any(initial=initial)
+                    session = await self._establish_any(initial=not use_backoff)
                 except _ClosingError:
+                    break
+                except NoServersAvailableError as exc:
+                    if (
+                        first_connect_pending
+                        and not retrying_initial
+                        and self.options.retry_on_failed_connect
+                        and self.options.allow_reconnect
+                    ):
+                        # Initial pool exhausted, but retry_on_failed_connect is
+                        # set: go RECONNECTING, let connect() return, and keep
+                        # retrying with backoff. The first success fires Connected.
+                        retrying_initial = True
+                        use_backoff = True
+                        last_error = exc
+                        self._enter_retry_on_failed_connect()
+                        continue
+                    last_error = exc
                     break
                 except Exception as exc:
                     last_error = exc
@@ -550,12 +623,17 @@ class Connection:
                     break
                 self._session = session
                 self._state = ConnectionState.CONNECTED
-                if initial:
-                    initial = False
+                # Any pending force has been honored by reaching a fresh
+                # connect; a residual flag would skip a future real backoff.
+                self._force_reconnect = False
+                self._force_wake.clear()
+                use_backoff = True
+                if first_connect_pending:
+                    first_connect_pending = False
                     assert self._first_connect is not None
                     if not self._first_connect.done():
                         self._first_connect.set_result(None)
-                    # Anything registered or published while still CONNECTING.
+                    # Anything registered or published while still (re)connecting.
                     self._replay_subscriptions(session)
                     self._flush_reconnect_buffer(session)
                     self.instrumentation.on_connect(session.server.url)
@@ -570,15 +648,16 @@ class Connection:
                 self._session = None
                 if self._closing:
                     break
+                # A forced drop reconnects even when allow_reconnect is off (the
+                # force flag is consumed by the first _backoff below).
+                reconnect_now = self.options.allow_reconnect or self._force_reconnect
                 self._carry_over_unsent(session)
                 # Move out of CONNECTED *before* notifying: a hook that calls
                 # back in must not observe state=CONNECTED with no session.
-                self._state = (
-                    ConnectionState.RECONNECTING if self.options.allow_reconnect else ConnectionState.DISCONNECTED
-                )
+                self._state = ConnectionState.RECONNECTING if reconnect_now else ConnectionState.DISCONNECTED
                 self.instrumentation.on_disconnect(error)
                 self._emit(Disconnected(error))
-                if not self.options.allow_reconnect:
+                if not reconnect_now:
                     last_error = error
                     break
         finally:
@@ -590,6 +669,17 @@ class Connection:
                 self.background_error(last_error)
             self._supervisor = None
             self._finalize_closed()
+
+    def _enter_retry_on_failed_connect(self) -> None:
+        """Initial connect exhausted the pool but retry_on_failed_connect is set.
+
+        Move to RECONNECTING and resolve first_connect so connect() returns a
+        client that keeps retrying in the background. The first success still
+        fires Connected (parity with nats.go initc / ConnectedCB)."""
+        self._state = ConnectionState.RECONNECTING
+        assert self._first_connect is not None
+        if not self._first_connect.done():
+            self._first_connect.set_result(None)
 
     async def _run_session(self, session: _Session) -> Exception | None:
         # NOTE: `return` is a SyntaxError inside `except*` blocks — collect into
@@ -662,7 +752,17 @@ class Connection:
             return False
         return previous is not None and type(previous) is type(exc) and str(previous) == str(exc)
 
+    def _consume_force(self) -> bool:
+        """True (and clears the flag) if a force_reconnect is pending."""
+        if self._force_reconnect:
+            self._force_reconnect = False
+            return True
+        return False
+
     async def _backoff(self, server: ParsedServer) -> None:
+        # A pending force_reconnect skips the backoff for this attempt entirely.
+        if self._consume_force():
+            return
         options = self.options
         uses_tls = server.tls_required or options.tls is not None
         jitter_cap = options.reconnect_jitter_tls if uses_tls else options.reconnect_jitter
@@ -678,11 +778,19 @@ class Connection:
         delay = max(delay, options.reconnect_time_wait - elapsed)
         if delay <= 0:
             return
+        self._force_wake.clear()
+        closed = asyncio.ensure_future(self._closed_event.wait())
+        forced = asyncio.ensure_future(self._force_wake.wait())
         try:
             async with asyncio.timeout(delay):
-                await self._closed_event.wait()
+                await asyncio.wait({closed, forced}, return_when=asyncio.FIRST_COMPLETED)
         except builtins.TimeoutError:
-            return
+            pass
+        finally:
+            closed.cancel()
+            forced.cancel()
+        # Woken early by force_reconnect(): consume so this attempt is immediate.
+        self._consume_force()
 
     async def _establish(self, server: ParsedServer) -> _Session:
         options = self.options
@@ -794,8 +902,13 @@ class Connection:
     def _buffer_for_reconnect(self, frame: bytes) -> None:
         if not self.options.allow_reconnect:
             raise ConnectionClosedError("disconnected and reconnect is disabled")
-        if self._reconnect_buffer_size + len(frame) > self.options.max_pending_size:
-            raise ConnectionClosedError("reconnect buffer is full")
+        # reconnect_buf_size governs while disconnected (max_pending_size only
+        # applies to the live write path). A limit of -1 disables buffering, so a
+        # publish while down fails at once; otherwise reject once the buffer has
+        # reached the cap (parity with nats.go atLimitIfUsingPending, checked
+        # before the frame is appended).
+        if self._reconnect_buffer_size >= self._reconnect_buf_limit:
+            raise ReconnectBufExceededError("reconnect buffer limit exceeded")
         self._reconnect_buffer.append(frame)
         self._reconnect_buffer_size += len(frame)
 
@@ -803,8 +916,18 @@ class Connection:
         """Preserve unflushed user publishes across the reconnect (bounded)."""
         if not self.options.allow_reconnect:
             return
+        if self._reconnect_buf_limit < 0:
+            # Buffering disabled: frames that raced the CONNECTED->lost window
+            # landed on the dead session. Losing them is the -1 contract, but
+            # losing them SILENTLY is not — report the drop.
+            dropped = session.take_unsent_user_frames()
+            if dropped:
+                self.background_error(
+                    ReconnectBufExceededError(f"buffering disabled: dropped {len(dropped)} unflushed publish(es)")
+                )
+            return
         for position, frame in enumerate(session.take_unsent_user_frames()):
-            if self._reconnect_buffer_size + len(frame) > self.options.max_pending_size:
+            if self._reconnect_buffer_size + len(frame) > self._reconnect_buf_limit:
                 self.background_error(ConnectionClosedError("reconnect buffer full: dropping unflushed publishes"))
                 break
             self._reconnect_buffer.insert(position, frame)
@@ -856,6 +979,23 @@ class Connection:
         if isinstance(error, ServerError) and not error.fatal:
             log.warning("server error: %s", error)
         self._emit(ErrorOccurred(error))
+
+    def route_permission_error(self, message: str) -> None:
+        """Terminate subscriptions denied a SUB permission (opt-in).
+
+        Only active under permission_err_on_subscribe. The subject (and optional
+        queue) token is extracted the way nats.go processTransientError does; the
+        publish-permission variant carries no "Subscription to" token and so
+        matches nothing here — it reaches the user only via the error callback."""
+        if not self.options.permission_err_on_subscribe:
+            return
+        match = _PERM_SUBJECT_RE.search(message)
+        if match is None:
+            return
+        subject = match.group(1)
+        queue_match = _PERM_QUEUE_RE.search(message)
+        queue = queue_match.group(1) if queue_match is not None else None
+        self.dispatcher.fail_by_subject(subject, queue, PermissionsViolationError(message))
 
     # -- misc ----------------------------------------------------------------
 
