@@ -72,7 +72,7 @@ from .protocol import (
     encode_sub,
     encode_unsub,
 )
-from .transport import TCPTransport, Transport
+from .transport import TCPTransport, Transport, WSTransport
 
 __all__ = ["Connection", "TransportFactory"]
 
@@ -841,20 +841,30 @@ class Connection:
         server.last_attempt = asyncio.get_running_loop().time()
         session = _Session(self, server)
         self._establishing = session
-        transport = self._transport_factory(on_bytes=session.feed, on_close=session.mark_lost)
+        # WebSocket servers always use the WS transport; the injectable factory
+        # (default TCP, or a test double) drives plain nats/tls servers.
+        if server.websocket:
+            transport: Transport = WSTransport(on_bytes=session.feed, on_close=session.mark_lost, path=server.ws_path)
+        else:
+            transport = self._transport_factory(on_bytes=session.feed, on_close=session.mark_lost)
         session.transport = transport
 
         tls_config = options.tls
         wants_tls = server.tls_required or tls_config is not None
         handshake_first = tls_config is not None and tls_config.handshake_first
         tls_hostname = (tls_config.hostname if tls_config else None) or server.host
+        # WebSocket wraps TLS around the socket BEFORE the HTTP Upgrade, so wss is
+        # always TLS-first and plain ws never upgrades in-band even when INFO says
+        # tls_required (parity with nats.go wsInitHandshake, which decides TLS
+        # purely from scheme/options and ignores the INFO for the ws path).
+        tls_first = wants_tls if server.websocket else handshake_first
 
         async with asyncio.timeout(options.connect_timeout):
             await transport.connect(
                 server.host,
                 server.port,
-                tls=(tls_config or TLSConfig()).resolve_context() if handshake_first else None,
-                tls_hostname=tls_hostname if handshake_first else None,
+                tls=(tls_config or TLSConfig()).resolve_context() if tls_first else None,
+                tls_hostname=tls_hostname if tls_first else None,
             )
             try:
                 raw_info = await session.info_future
@@ -867,7 +877,7 @@ class Connection:
                 # INFO; async INFO frames only follow on membership changes.
                 self._merge_connect_urls(info, server)
 
-                if (wants_tls or info.get("tls_required")) and not handshake_first:
+                if not server.websocket and (wants_tls or info.get("tls_required")) and not handshake_first:
                     context = (tls_config or TLSConfig()).resolve_context()
                     await transport.upgrade_tls(context, tls_hostname)
 
@@ -1020,7 +1030,20 @@ class Connection:
         urls = info.get("connect_urls")
         if not isinstance(urls, list) or not urls:
             return
-        added = self._pool.merge_discovered([u for u in urls if isinstance(u, str)], keep_key=current.key)
+        entries = [u for u in urls if isinstance(u, str)]
+        if current.websocket:
+            # connect_urls are bare host:port. Over a WebSocket connection the
+            # server still gossips them bare, so we re-scheme them to match the
+            # current connection (ws/wss) — mirroring nats.go connScheme(), which
+            # prefixes discovered URLs with the active scheme. This keeps the pool
+            # single-scheme and reachable (bare -> nats:// would be unusable here).
+            scheme = current.scheme  # "ws" or "wss"
+            # Unconditional re-scheme (nats.go connScheme()): even a gossiped
+            # url that arrives WITH a scheme is forced onto the connection's —
+            # anything else could smuggle a TCP server into a ws-only pool,
+            # which the construction-time mixing guard cannot catch here.
+            entries = [f"{scheme}://{u.partition('://')[2]}" if "://" in u else f"{scheme}://{u}" for u in entries]
+        added = self._pool.merge_discovered(entries, keep_key=current.key)
         if added:
             self._emit(ServersDiscovered(tuple(s.url for s in added)))
 

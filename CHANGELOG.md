@@ -3,6 +3,38 @@
 All notable changes to the `natsio` core client are documented here.
 Extension packages under `extensions/` keep their own changelogs.
 
+## Unreleased
+
+### Microservices (ADR-32)
+
+- New core subpackage `natsio.micro`: `add_service()` with endpoints, nested
+  groups (queue-group inheritance, default `"q"`), and `$SRV`
+  `PING`/`INFO`/`STATS` monitoring in all three subject variants —
+  queue-group-less, so every instance answers monitoring while endpoint
+  traffic load-balances. Wire contract pinned byte-level against nats.go
+  (`io.nats.micro.v1.*` response types, `Nats-Service-Error`/`-Code`
+  headers). Per-endpoint stats in nanoseconds with custom `stats_handler`
+  data; unhandled handler exceptions auto-respond with a 500-class error,
+  count into stats, and reach the `error_handler`; a deliberate
+  `respond_error` followed by a raise keeps the handler's error as
+  `last_error`. `async with` lifecycle, awaitable `service.stopped`,
+  drain-based `stop()` that lets in-flight handlers finish.
+
+### WebSocket transport
+
+- `ws://` and `wss://` connections over an in-house, zero-dependency
+  RFC 6455 client: a sans-io handshake+frame core (chunk-boundary-safe pull
+  decoder, differential-split tested like the NATS parser; 20k-iteration
+  mutation fuzz clean) under the existing transport interface — the NATS
+  protocol core is untouched. Client frames masked per RFC; server pings
+  answered transparently; close frames surface as clean EOF; frames above
+  64MiB rejected as hostile (nats.go parity) instead of buffered. wss wraps
+  TLS before the HTTP upgrade using the existing TLS machinery (certificate
+  verification enforced). Mixed ws/non-ws server lists rejected; gossiped
+  `connect_urls` are unconditionally re-schemed onto the connection's
+  scheme (nats.go `connScheme()` behavior). Declined for v1: permessage-
+  deflate compression, proxy paths, custom upgrade headers.
+
 ## 0.10.0 — 2026-07-21
 
 - `await` is now optional (a no-op) on the session-factory returns —

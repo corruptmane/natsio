@@ -10,7 +10,10 @@ __all__ = ["ParsedServer", "ServerPool"]
 
 _DEFAULT_PORT = 4222
 _TLS_SCHEMES = frozenset({"tls", "nats+tls", "wss"})
-_KNOWN_SCHEMES = frozenset({"nats", "tls", "nats+tls"})
+_WS_SCHEMES = frozenset({"ws", "wss"})
+_KNOWN_SCHEMES = frozenset({"nats", "tls", "nats+tls", "ws", "wss"})
+# WebSocket default ports mirror nats.go (defaultWSPortString / defaultWSSPortString).
+_DEFAULT_PORTS = {"ws": 80, "wss": 443}
 
 
 @dataclass(slots=True)
@@ -19,6 +22,14 @@ class ParsedServer:
     port: int
     tls_required: bool
     url: str
+    # Original URL scheme ("nats"/"tls"/"ws"/"wss"): drives transport selection
+    # and the scheme prepended to gossiped bare host:port connect_urls.
+    scheme: str = "nats"
+    # True for ws:// and wss://: a WebSocket transport is used and INFO
+    # tls_required never triggers an in-band TLS upgrade (wss is TLS-first).
+    websocket: bool = False
+    # HTTP request path for the WebSocket Upgrade (ignored for non-ws schemes).
+    ws_path: str = "/"
     # Credentials embedded in the URL (nats://user:pass@host) — these take
     # precedence over option-derived auth (parity with nats.go).
     username: str | None = None
@@ -46,14 +57,23 @@ def parse_server_url(url: str, *, discovered: bool = False) -> ParsedServer:
     if not parsed.hostname:
         raise ConfigError(f"server URL has no host: {url!r}")
     try:
-        port = parsed.port or _DEFAULT_PORT
+        port = parsed.port or _DEFAULT_PORTS.get(parsed.scheme, _DEFAULT_PORT)
     except ValueError as exc:
         raise ConfigError(f"invalid port in server URL {url!r}: {exc}") from None
+    websocket = parsed.scheme in _WS_SCHEMES
+    ws_path = "/"
+    if websocket:
+        ws_path = parsed.path or "/"
+        if parsed.query:
+            ws_path = f"{ws_path}?{parsed.query}"
     return ParsedServer(
         host=parsed.hostname,
         port=port,
         tls_required=parsed.scheme in _TLS_SCHEMES,
         url=text,
+        scheme=parsed.scheme,
+        websocket=websocket,
+        ws_path=ws_path,
         username=unquote(parsed.username) if parsed.username else None,
         password=unquote(parsed.password) if parsed.password else None,
         discovered=discovered,
@@ -74,6 +94,11 @@ class ServerPool:
         self._servers = [parse_server_url(u) for u in urls]
         if not self._servers:
             raise ConfigError("empty server pool")
+        # WebSocket and non-WebSocket URLs cannot be mixed in one pool (parity
+        # with nats.go ErrMixingWebsocketSchemes): the whole connection is either
+        # WebSocket or not, and gossiped servers inherit that decision.
+        if len({s.websocket for s in self._servers}) > 1:
+            raise ConfigError("mixing of websocket and non-websocket server URLs is not allowed")
         self._randomize = randomize
         self._max_failures = max_consecutive_failures
         self._accept_discovered = accept_discovered

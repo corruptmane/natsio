@@ -31,6 +31,7 @@ __all__ = [
     "StaleConnectionError",
     "SubscriptionClosedError",
     "TimeoutError",
+    "WebsocketError",
 ]
 
 
@@ -88,6 +89,14 @@ class ParserError(ProtocolError):
 
 class MaxControlLineExceededError(ParserError):
     """A control line exceeded the configured maximum length."""
+
+
+class WebsocketError(ProtocolError):
+    """A WebSocket (RFC 6455) handshake or framing violation.
+
+    Fatal like a framing error: a WebSocket stream cannot be resynchronized
+    mid-frame, so the transport must be torn down.
+    """
 
 
 class MaxPayloadExceededError(ProtocolError):
