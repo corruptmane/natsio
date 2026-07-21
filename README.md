@@ -62,6 +62,7 @@ This repository is a [uv](https://docs.astral.sh/uv/) workspace:
 uv sync              # create venv, install workspace + dev tools
 just gates           # format check, lint, types, full test suite
 just bench --quick   # benchmark against nats-py / nats-core
+just release 0.12.0  # version bump + gates; prints the tag/publish ritual
 ```
 
 ## License

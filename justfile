@@ -62,6 +62,13 @@ server port="4222":
 bench *ARGS:
     uv run natsio-bench {{ARGS}}
 
+# Bump the version everywhere + refresh the lock + run gates: just release 0.12.0
+# (Requires a '## Unreleased' section in CHANGELOG.md; prints the commit/tag ritual.)
+release version:
+    uv run python tools/release.py {{version}}
+    uv sync
+    just gates
+
 # Build the documentation site (strict: broken links fail)
 docs:
     uv run --group docs mkdocs build --strict
