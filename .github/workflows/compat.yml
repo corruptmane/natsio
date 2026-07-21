@@ -1,0 +1,44 @@
+name: Server compatibility
+
+# Early-warning radar, not a merge gate: the pinned server version in ci.yml
+# decides what we *support*; this tracks what's *coming*. A failure here means
+# an upstream nats-server change broke us before any user hit it.
+
+on:
+  schedule:
+    - cron: "17 6 * * *" # daily, 06:17 UTC (off the top-of-hour rush)
+  workflow_dispatch:
+
+jobs:
+  latest-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - uses: extractions/setup-just@v3
+      - name: Install latest released nats-server
+        run: |
+          TAG=$(curl -sfL https://api.github.com/repos/nats-io/nats-server/releases/latest | jq -r .tag_name)
+          echo "Testing against nats-server ${TAG}"
+          curl -sfL "https://github.com/nats-io/nats-server/releases/download/${TAG}/nats-server-${TAG}-linux-amd64.tar.gz" \
+            | tar -xz --strip-components=1 -C /usr/local/bin --wildcards '*/nats-server'
+          nats-server --version
+      - run: uv sync --locked
+      - run: just integration -q
+
+  server-main:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - uses: extractions/setup-just@v3
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - name: Build nats-server from main
+        run: |
+          go install github.com/nats-io/nats-server/v2@main
+          sudo cp "$(go env GOPATH)/bin/nats-server" /usr/local/bin/
+          nats-server --version
+      - run: uv sync --locked
+      - run: just integration -q
