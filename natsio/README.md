@@ -7,5 +7,6 @@ Zero-dependency asyncio NATS client for modern Python.
 - Sans-io protocol core under a structured-concurrency asyncio shell
 - JetStream (ADR-37 simplified API), Key-Value, and Object Store included
 
-> ⚠️ Under active development — a ground-up rewrite. Not yet usable.
-> The previous implementation is preserved on the `legacy` branch.
+> **0.9.0 — public beta.** The API surface is complete and adversarially
+> tested (1000+ tests, live-server conformance against nats.go's suite);
+> 1.0 will freeze it. The pre-rewrite implementation lives on the `legacy` branch.

@@ -3,7 +3,7 @@
 All notable changes to the `natsio` core client are documented here.
 Extension packages under `extensions/` keep their own changelogs.
 
-## Unreleased
+## 0.9.0 — 2026-07-21
 
 Ground-up rewrite. The previous implementation is retired to the `legacy` branch.
 
