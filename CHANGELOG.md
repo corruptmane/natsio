@@ -3,7 +3,7 @@
 All notable changes to the `natsio` core client are documented here.
 Extension packages under `extensions/` keep their own changelogs.
 
-## Unreleased
+## 0.11.0 — 2026-07-21
 
 ### Microservices (ADR-32)
 
