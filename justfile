@@ -32,11 +32,14 @@ integration *ARGS:
 test *ARGS:
     uv run pytest {{ARGS}}
 
-# Everything CI runs: format check, lint, types, all tests
-gates:
+# Non-mutating verification: format check, lint, types (CI's lint job)
+check:
     uv run ruff format --check natsio extensions
     uv run ruff check natsio extensions
     uv run ty check
+
+# Everything CI runs: check + the full test suite
+gates: check
     uv run pytest -q
 
 # Like `gates` but formats instead of just checking

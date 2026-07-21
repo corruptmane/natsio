@@ -9,16 +9,17 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# All check/test/build commands live in the justfile — CI only does
+# environment setup, then runs the same recipes developers run locally.
 jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
+      - uses: extractions/setup-just@v3
       - run: uv sync --locked
-      - run: uv run ruff format --check .
-      - run: uv run ruff check .
-      - run: uv run ty check
+      - run: just check
 
   test:
     strategy:
@@ -32,8 +33,11 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: ${{ matrix.python }}
+      - uses: extractions/setup-just@v3
       - run: uv sync --locked
-      - run: uv run pytest
+      # Integration tests skip themselves when no nats-server binary is
+      # present; the dedicated job below runs them against a real server.
+      - run: just test -q
 
   integration:
     runs-on: ubuntu-latest
@@ -42,20 +46,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
+      - uses: extractions/setup-just@v3
       - name: Install nats-server
         run: |
           curl -sfL "https://github.com/nats-io/nats-server/releases/download/${NATS_SERVER_VERSION}/nats-server-${NATS_SERVER_VERSION}-linux-amd64.tar.gz" \
             | tar -xz --strip-components=1 -C /usr/local/bin --wildcards '*/nats-server'
           nats-server --version
       - run: uv sync --locked
-      - run: uv run pytest natsio/tests/integration -q
+      - run: just integration -q
 
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
-      - run: uv build --package natsio
+      - uses: extractions/setup-just@v3
+      - run: just build
       - uses: actions/upload-artifact@v4
         with:
           name: dist
