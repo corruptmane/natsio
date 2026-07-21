@@ -1,0 +1,16 @@
+{
+  "$schema": "https://context7.com/schema/context7.json",
+  "projectTitle": "natsio",
+  "description": "Zero-dependency asyncio NATS client for modern Python — JetStream, Key-Value, Object Store",
+  "folders": ["docs", "examples"],
+  "excludeFolders": [],
+  "excludeFiles": [],
+  "rules": [
+    "Requires Python 3.13+ and NATS server 2.14+",
+    "Use 'async with await natsio.connect(...)' for connection lifecycle; subscriptions are async context managers and async iterators",
+    "JetStream uses only the ADR-37 simplified API: consumer.fetch()/next()/consume() and stream.ordered_consumer(); there are no push consumers",
+    "Install natsio[nkeys] for NKey or .creds authentication; the core package has zero runtime dependencies",
+    "Per-message TTLs and durations accept datetime.timedelta; whole-second ints and the string 'never' also work for TTLs"
+  ],
+  "previousVersions": [{ "tag": "v0.9.0" }]
+}

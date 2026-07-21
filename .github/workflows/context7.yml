@@ -1,0 +1,30 @@
+name: Context7 refresh
+
+# Re-index the docs on context7.com whenever documentation changes land.
+# No-ops quietly until the CONTEXT7_API_KEY repo secret exists.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "examples/**"
+      - "context7.json"
+  workflow_dispatch:
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Context7 refresh
+        env:
+          CONTEXT7_API_KEY: ${{ secrets.CONTEXT7_API_KEY }}
+        run: |
+          if [ -z "${CONTEXT7_API_KEY}" ]; then
+            echo "CONTEXT7_API_KEY secret not set - skipping refresh"
+            exit 0
+          fi
+          curl -sf -X POST https://context7.com/api/v1/refresh \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${CONTEXT7_API_KEY}" \
+            -d '{"libraryName": "/${{ github.repository }}"}'
