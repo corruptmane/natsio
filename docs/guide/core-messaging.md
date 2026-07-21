@@ -66,6 +66,14 @@ msg.headers.get_all("X-Tag")       # ['red', 'blue']
 
 ## Subscriptions
 
+!!! tip "`await` is optional on `subscribe()`"
+    Subscribing performs no I/O — the SUB frame is buffered and flushed with
+    everything else — so `nc.subscribe(...)` is synchronous. For nats-py
+    muscle memory, `await nc.subscribe(...)` also works: awaiting a
+    `Subscription` is a no-op that returns the subscription. The same applies
+    to `consumer.consume()`, `stream.ordered_consumer()`, `kv.watch()`, and
+    Object Store `watch()`.
+
 `nc.subscribe(subject)` returns a `Subscription`. It is synchronous by design:
 registration takes effect immediately, so no message can be missed between
 subscribing and consuming. Subjects may contain wildcards (`*` for one token,

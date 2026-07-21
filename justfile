@@ -64,11 +64,11 @@ bench *ARGS:
 
 # Build the documentation site (strict: broken links fail)
 docs:
-    uv run mkdocs build --strict
+    uv run --group docs mkdocs build --strict
 
 # Serve the documentation site locally with live reload
 docs-serve:
-    uv run mkdocs serve
+    uv run --group docs mkdocs serve
 
 # Remove caches and build artifacts
 clean:

@@ -156,3 +156,40 @@ class TestDrainTimeoutErrorReported:
         assert client.status is ConnectionState.CLOSED
         assert any(isinstance(e, DrainTimeoutError) for e in errors)
         stuck.set()
+
+
+class TestOptionalAwait:
+    """`await` on subscribe is optional and a no-op — nats-py muscle-memory
+    (and LLM-generated code) support."""
+
+    async def test_await_subscribe_returns_same_subscription(self) -> None:
+        env = FakeEnv()
+        client = await connected_client(env)
+        try:
+            sub = client.subscribe("opt.await")
+            assert (await sub) is sub
+            assert (await sub) is sub  # idempotent
+        finally:
+            await client.close()
+
+    async def test_awaited_subscription_still_iterates(self) -> None:
+        env = FakeEnv()
+        client = await connected_client(env)
+        try:
+            sub = await client.subscribe("opt.iter")
+            await client.flush()
+            deliver_msg(env, sub.sid, "opt.iter", b"hi")
+            msg = await sub.next_msg(timeout=1.0)
+            assert msg.payload == b"hi"
+        finally:
+            await client.close()
+
+    async def test_await_composes_with_context_manager(self) -> None:
+        env = FakeEnv()
+        client = await connected_client(env)
+        try:
+            async with await client.subscribe("opt.cm") as sub:
+                assert not sub.is_closed
+            assert sub.is_closed
+        finally:
+            await client.close()

@@ -1,6 +1,6 @@
 """The Key-Value bucket: CRUD, history, and watchers (ADR-8/31/48)."""
 
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Generator
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Final, Self
 
@@ -475,6 +475,12 @@ class KvWatcher:
         self._ignore_deletes = ignore_deletes
         self._init_done = False
         self._stopped = False
+
+    def __await__(self) -> Generator[None, None, "KvWatcher"]:
+        """``await`` is optional and completes immediately (no I/O) — nats-py
+        muscle memory support; see :meth:`Subscription.__await__`."""
+        return self
+        yield  # unreachable: makes this a generator that never suspends
 
     async def __aenter__(self) -> Self:
         return self

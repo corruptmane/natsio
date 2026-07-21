@@ -337,6 +337,23 @@ class TestConsume:
                 await first.stop()
 
 
+class TestOptionalAwait:
+    async def test_consume_and_ordered_tolerate_await(self, nc) -> None:
+        """nats-py muscle memory: awaiting the session factories is a no-op."""
+        js = nc.jetstream()
+        stream = await js.create_stream(StreamConfig(name="OPTAW", subjects=["oa.>"]))
+        await js.publish("oa.m", b"x")
+        consumer = await stream.create_consumer(ConsumerConfig(durable_name="oa"))
+        async with await consumer.consume(max_messages=5, expires=2) as session:
+            msg = await session.next(timeout=5)
+            await msg.ack()
+            assert msg.payload == b"x"
+        ordered = await stream.ordered_consumer()
+        async with ordered:
+            got = [m.payload async for m in ordered.messages(until_drained=True)]
+        assert got == [b"x"]
+
+
 class TestUntilDrained:
     """messages(until_drained=True): finite reads end normally, not by exception."""
 

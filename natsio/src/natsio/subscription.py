@@ -21,7 +21,7 @@ that cancellation would make the deadline unenforceable.
 
 import asyncio
 import builtins
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Generator
 from contextlib import suppress
 from enum import Enum
 from types import TracebackType
@@ -463,6 +463,14 @@ class Subscription:
         self._closed_event.set()
         self._release_pause()
         self._client._subscriptions.pop(self.sid, None)
+
+    def __await__(self) -> Generator[None, None, "Subscription"]:
+        """``await`` is optional and completes immediately: subscribing does no
+        I/O (the SUB frame is buffered and flushed with everything else).
+        Supported so nats-py muscle memory — ``sub = await nc.subscribe(...)``
+        — works unchanged."""
+        return self
+        yield  # unreachable: makes this a generator that never suspends
 
     async def __aenter__(self) -> Self:
         return self

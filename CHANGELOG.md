@@ -3,6 +3,15 @@
 All notable changes to the `natsio` core client are documented here.
 Extension packages under `extensions/` keep their own changelogs.
 
+## Unreleased
+
+- `await` is now optional (a no-op) on the session-factory returns —
+  `subscribe()`, `consume()`, `ordered_consumer()`, KV/Object Store
+  `watch()` — so nats-py muscle memory like `await nc.subscribe(...)`
+  works unchanged. `ObjectStore.get()` deliberately stays non-awaitable:
+  `await obj.get(...)` looks like it should yield bytes, and a loud
+  `TypeError` beats silently handing back a result object.
+
 ## 0.9.0 — 2026-07-21
 
 Ground-up rewrite. The previous implementation is retired to the `legacy` branch.

@@ -411,6 +411,18 @@ async def _fill(kv, count: int) -> None:
         await asyncio.gather(*(kv.put(f"key-{i}", b"v") for i in range(start, min(start + 200, count))))
 
 
+class TestOptionalAwait:
+    async def test_watch_tolerates_await(self, kv) -> None:
+        await kv.put("k", b"v")
+        async with await kv.watch() as watcher:
+            entries = []
+            async for entry in watcher:
+                if entry is None:
+                    break
+                entries.append(entry.key)
+        assert entries == ["k"]
+
+
 class TestPurgedStreamSnapshot:
     """nats.go TestListKeysFromPurgedStream: a purge (or emptying) mid-snapshot
     must not deadlock keys()/watch — the initial snapshot is idle-bounded."""

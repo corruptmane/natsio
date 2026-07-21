@@ -197,7 +197,8 @@ sub = await nc.subscribe("greet.>")
 async for msg in sub.messages:      # .messages property
     print(msg.data)
 
-# natsio — subscribe is NOT awaited; iterate the Subscription directly
+# natsio — subscribe needs no await (buffered, no I/O); awaiting is a
+# tolerated no-op for muscle memory. Iterate the Subscription directly:
 sub = nc.subscribe("greet.>")
 async for msg in sub:               # the Subscription IS the async iterator
     print(msg.data)
@@ -736,9 +737,11 @@ differently at runtime.
    lets the server reject them as `BadSubjectError`/`-ERR`. If you relied on
    catching `BadSubjectError`, catch `ConfigError` instead.
 
-2. **`subscribe()` is synchronous.** No `await`. It returns a `Subscription`
-   immediately (the SUB is buffered). `await nc.subscribe(...)` will fail —
-   you'd be awaiting a `Subscription`.
+2. **`subscribe()` is synchronous — but `await` is tolerated.** It returns a
+   `Subscription` immediately (the SUB is buffered; no I/O to wait for).
+   `await nc.subscribe(...)` also works as a no-op for nats-py muscle memory,
+   so existing code migrates without edits; the idiomatic form drops the
+   `await`.
 
 3. **A subscription is callback OR iterator, never both.** Passing `cb=` and then
    iterating raises `SubscriptionClosedError`; so does calling `next_msg()` on a

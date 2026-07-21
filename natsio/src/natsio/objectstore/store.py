@@ -5,7 +5,7 @@ import base64
 import contextlib
 import hashlib
 import json
-from collections.abc import AsyncGenerator, AsyncIterable
+from collections.abc import AsyncGenerator, AsyncIterable, Generator
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Final, Self
 
@@ -686,6 +686,12 @@ class ObjectWatcher:
         self._ignore_deletes = ignore_deletes
         self._init_done = False
         self._stopped = False
+
+    def __await__(self) -> Generator[None, None, "ObjectWatcher"]:
+        """``await`` is optional and completes immediately (no I/O) — nats-py
+        muscle memory support; see :meth:`Subscription.__await__`."""
+        return self
+        yield  # unreachable: makes this a generator that never suspends
 
     async def __aenter__(self) -> Self:
         return self

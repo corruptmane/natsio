@@ -719,6 +719,18 @@ class TestShowDeleted:
         assert received == data
 
 
+class TestOptionalAwait:
+    async def test_watch_tolerates_await(self, obj) -> None:
+        await obj.put("o", b"v")
+        async with await obj.watch() as watcher:
+            names = []
+            async for info in watcher:
+                if info is None:
+                    break
+                names.append(info.name)
+        assert names == ["o"]
+
+
 class TestSeal:
     async def test_seal_blocks_writes(self, obj) -> None:
         await obj.put("frozen", b"forever")

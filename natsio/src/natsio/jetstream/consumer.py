@@ -11,7 +11,7 @@ liveness timer, 404/408 end a pull quietly, 409 splits into benign
 import asyncio
 import builtins
 import json
-from collections.abc import AsyncGenerator, AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator, Generator
 from contextlib import suppress
 from typing import TYPE_CHECKING, Any, Self
 
@@ -400,6 +400,12 @@ class Consumption:
 
     # -- lifecycle -----------------------------------------------------------
 
+    def __await__(self) -> Generator[None, None, "Consumption"]:
+        """``await`` is optional and completes immediately (no I/O) — nats-py
+        muscle memory support; see :meth:`Subscription.__await__`."""
+        return self
+        yield  # unreachable: makes this a generator that never suspends
+
     async def __aenter__(self) -> Self:
         self._start()
         return self
@@ -702,6 +708,12 @@ class OrderedConsumer:
         self._expected_cseq = 1
         self._last_sseq = 0
         self._recreate_failures = 0
+
+    def __await__(self) -> Generator[None, None, "OrderedConsumer"]:
+        """``await`` is optional and completes immediately (no I/O) — nats-py
+        muscle memory support; see :meth:`Subscription.__await__`."""
+        return self
+        yield  # unreachable: makes this a generator that never suspends
 
     async def __aenter__(self) -> Self:
         return self
