@@ -5,6 +5,8 @@ caller's frame rather than becoming a server ``-ERR`` (or, worse, a wire-framing
 hazard) later on.
 """
 
+import re
+
 from natsio.errors import ConfigError
 
 __all__ = [
@@ -19,6 +21,15 @@ _ILLEGAL = frozenset(" \t\r\n")
 # that would break routing (mirrors nats.go jetstream.validateStreamName).
 _ILLEGAL_NAME = frozenset(">*. /\\\t\r\n")
 
+# Fast-reject probe for validate_subject: a subject containing NONE of these
+# characters is a plain dotted name (no whitespace, no wildcard markers), so only
+# the empty-token checks can still reject it. The class MUST include ``*`` and
+# ``>`` for BOTH wildcard modes — a whitespace-only probe would wrongly let the
+# fast path accept ``foo.*bar`` / ``fo>o`` (mid-token wildcards) in wildcards
+# mode, which the full scan below rejects. Any hit here falls through to the
+# unchanged full scan, so every error message stays byte-identical.
+_SUBJECT_SPECIAL = re.compile(r"[ \t\r\n*>]")
+
 
 def validate_subject(subject: str, *, wildcards: bool = False, argument: str = "subject") -> None:
     """Validate a subject.
@@ -29,6 +40,13 @@ def validate_subject(subject: str, *, wildcards: bool = False, argument: str = "
     """
     if not subject:
         raise ConfigError(f"{argument} must not be empty")
+    if _SUBJECT_SPECIAL.search(subject) is None:
+        # Plain dotted name: no whitespace, no wildcard markers. The only way the
+        # full scan below could still reject it is an empty token (leading dot,
+        # trailing dot, or ``..``), and it reaches the identical error there.
+        if subject[0] == "." or subject[-1] == "." or ".." in subject:
+            raise ConfigError(f"{argument} must not contain empty tokens: {subject!r}")
+        return
     if any(char in _ILLEGAL for char in subject):
         raise ConfigError(f"{argument} must not contain whitespace or line breaks: {subject!r}")
 

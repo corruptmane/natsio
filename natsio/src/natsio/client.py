@@ -221,8 +221,7 @@ class Client:
 
     @property
     def max_payload(self) -> int:
-        value = self._conn.server_info.get("max_payload")
-        return int(value) if value else 1024 * 1024
+        return self._conn.max_payload
 
     @property
     def stats(self) -> ClientStatistics:
@@ -283,11 +282,18 @@ class Client:
         *,
         reply: str | None = None,
         headers: HeadersInput | None = None,
+        _validate_reply: bool = True,
     ) -> None:
-        """Publish a message. Returns once the frame is buffered, not delivered."""
+        """Publish a message. Returns once the frame is buffered, not delivered.
+
+        ``_validate_reply`` is a private escape hatch: internal callers that
+        build their own reply inbox (``request``/``request_many``, JetStream
+        async publish) pass ``False`` to skip re-validating a subject they just
+        generated. User-supplied replies are always validated.
+        """
         data = payload.encode() if isinstance(payload, str) else payload
         validate_subject(subject)
-        if reply is not None:
+        if reply is not None and _validate_reply:
             validate_subject(reply, argument="reply subject")
         limit = self.max_payload
         if len(data) > limit:
@@ -374,7 +380,9 @@ class Client:
             # Outside the timeout-catch: a publish failure (e.g. the write
             # buffer's own TimeoutError) must surface as itself, not be
             # relabeled as "no reply within deadline".
-            await self.publish(subject, payload, reply=f"{self._inbox_prefix}.{token}", headers=headers)
+            await self.publish(
+                subject, payload, reply=f"{self._inbox_prefix}.{token}", headers=headers, _validate_reply=False
+            )
             try:
                 async with asyncio.timeout(deadline):
                     assert sink.future is not None
@@ -413,7 +421,9 @@ class Client:
         assert sink.queue is not None
         received = 0
         try:
-            await self.publish(subject, payload, reply=f"{self._inbox_prefix}.{token}", headers=headers)
+            await self.publish(
+                subject, payload, reply=f"{self._inbox_prefix}.{token}", headers=headers, _validate_reply=False
+            )
             while True:
                 # The deadline is armed ONLY around the queue wait. Arming it
                 # across the `yield` would tie the timer to the consumer's

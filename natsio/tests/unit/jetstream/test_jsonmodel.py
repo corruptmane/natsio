@@ -112,6 +112,25 @@ class TestJsonModel:
         ack = PubAck.from_wire({"stream": "S", "seq": 7, "duplicate": True, "domain": "hub"})
         assert (ack.stream, ack.seq, ack.duplicate, ack.domain) == ("S", 7, True, "hub")
 
+    def test_pub_ack_round_trip_preserves_error_and_extra_keys(self) -> None:
+        # Guards the plan-based decode fast path: unknown keys (including a nested
+        # "error" object) land in extra and survive the round-trip unchanged.
+        wire = {
+            "stream": "S",
+            "seq": 7,
+            "duplicate": True,
+            "error": {"code": 400, "description": "bad request"},
+            "misc": "x",
+        }
+        ack = PubAck.from_wire(wire)
+        assert (ack.stream, ack.seq, ack.duplicate) == ("S", 7, True)
+        assert ack.extra["error"] == {"code": 400, "description": "bad request"}
+        assert ack.extra["misc"] == "x"
+        back = ack.to_wire()
+        assert back["stream"] == "S"
+        assert back["error"] == {"code": 400, "description": "bad request"}
+        assert back["misc"] == "x"
+
     def test_item_level_annotations_in_lists(self) -> None:
         @dataclass(slots=True, kw_only=True)
         class WithTimes(JsonModel):

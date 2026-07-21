@@ -73,6 +73,21 @@ class TestLifecycle:
         finally:
             await client.close()
 
+    async def test_async_info_updates_enforced_max_payload(self) -> None:
+        env = FakeEnv()
+        env.info["max_payload"] = 4096
+        client = await connected_client(env)
+        try:
+            assert client.max_payload == 4096
+            # A later async INFO carrying a smaller ceiling tightens the limit
+            # that publish enforces (parsed synchronously on the read path).
+            env.current.deliver_info({"max_payload": 16})
+            assert client.max_payload == 16
+            with pytest.raises(MaxPayloadExceededError, match="exceeds"):
+                await client.publish("foo", b"x" * 17)
+        finally:
+            await client.close()
+
 
 class TestPublish:
     async def test_publish_bytes_and_str(self) -> None:
@@ -108,6 +123,17 @@ class TestPublish:
                 await client.publish("foo.*", b"x")
             with pytest.raises(ConfigError, match="empty"):
                 await client.publish("", b"x")
+        finally:
+            await client.close()
+
+    async def test_publish_still_validates_user_supplied_reply(self) -> None:
+        # request()/publish_async() skip re-validating their own generated reply
+        # inbox, but a user-supplied reply on publish() is always validated.
+        env = FakeEnv()
+        client = await connected_client(env)
+        try:
+            with pytest.raises(ConfigError, match="reply subject"):
+                await client.publish("foo", b"x", reply="bad reply.*")
         finally:
             await client.close()
 

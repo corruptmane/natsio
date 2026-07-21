@@ -7,6 +7,38 @@ Extension packages under `extensions/` keep their own changelogs.
 
 Ground-up rewrite. The previous implementation is retired to the `legacy` branch.
 
+### Performance
+
+Profiling against nats-py 2.15.0 and nats-core 0.2.0 (see `tools/natsio-bench`)
+found the hot-path gaps were allocation and indirection, not architecture.
+Five contract-preserving fixes, each patch-measured before landing:
+
+- `validate_subject` fast-path: compiled-regex fast-reject for plain dotted
+  subjects; any special character falls through to the unchanged full scan,
+  so every rejection and error message is byte-identical (differential-tested
+  against the previous implementation). Internally generated reply inboxes
+  (request/publish_async) skip re-validation.
+- The instrumentation seam costs nothing when unused: the default Noop is no
+  longer wrapped, and real backends get their guard wrappers pre-bound once
+  instead of a closure per call ("a broken metrics backend cannot kill the
+  connection" still holds and is still tested).
+- `max_payload` is a cached int refreshed from INFO (including async INFO,
+  which previously did not update the publish ceiling), not a per-publish
+  `server_info` dict copy.
+- The per-message `Msg` / parser-event objects dropped `frozen=True` (kept
+  slots and identity equality): read-only by convention, ~420ns cheaper per
+  delivered message.
+- The JSON model precomputes per-field decode/encode strategies at class-plan
+  time — zero `typing` reflection per message; `PubAck.from_wire` is 1.9x
+  faster, and every JetStream/KV/ObjectStore entity benefits.
+
+Result (same machine, full bench): pub 16B 724k → 1.40M msgs/s, pubsub 16B
+211k → 313k, request/reply 48k → 64k req/s (ahead of nats-py), JS async
+publish 87k → 143k msgs/s (ahead), JS consume 133k → 206k msgs/s. natsio now
+leads nats-py on 11 of 13 scenarios and ties the rest within ~9%; nats-core's
+remaining raw-publish lead comes from a 5ms write-coalescing floor that costs
+it 36x on request/reply latency.
+
 ### nats.go parity features
 
 Feature-surface parity with nats.go, each mirrored from its source contract:

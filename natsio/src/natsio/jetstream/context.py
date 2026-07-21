@@ -646,7 +646,7 @@ class JetStreamContext:
 
         self._arm_ack_timeout(pending)
         try:
-            await self._client.publish(subject, payload, reply=reply, headers=merged)
+            await self._client.publish(subject, payload, reply=reply, headers=merged, _validate_reply=False)
         except Exception:
             removed = self._acks.pop(token, None)
             if removed is not None:
@@ -740,7 +740,9 @@ class JetStreamContext:
             return
         self._arm_ack_timeout(pending)
         try:
-            await self._client.publish(pending.subject, pending.payload, reply=pending.reply, headers=pending.headers)
+            await self._client.publish(
+                pending.subject, pending.payload, reply=pending.reply, headers=pending.headers, _validate_reply=False
+            )
         except Exception as exc:
             self._resolve(token, exc=exc)
 

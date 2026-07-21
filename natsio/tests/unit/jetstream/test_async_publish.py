@@ -82,7 +82,7 @@ class _FakeClient:
     def inbox_prefix(self) -> str:
         return "_INBOX.testbox"
 
-    async def publish(self, subject, payload=b"", *, reply=None, headers=None) -> None:
+    async def publish(self, subject, payload=b"", *, reply=None, headers=None, _validate_reply=True) -> None:
         if self.publish_error is not None:
             raise self.publish_error
         self.published.append((subject, payload, reply, headers))

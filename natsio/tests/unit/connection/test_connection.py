@@ -3,7 +3,7 @@ import asyncio
 import pytest
 
 from fake import EventRecorder, FakeEnv, FakeTransport, connect_payload, frames_written
-from natsio._internal.connection import Connection
+from natsio._internal.connection import Connection, _SafeInstrumentation
 from natsio._internal.lifecycle import (
     Closed,
     Connected,
@@ -26,6 +26,7 @@ from natsio.errors import (
     StaleConnectionError,
     TimeoutError,
 )
+from natsio.instrumentation import NoopInstrumentation
 from natsio.options import ConnectOptions
 
 
@@ -797,3 +798,41 @@ class TestReconnectBufSize:
             assert frame in frames_written(env.current)
         finally:
             await conn.close(flush=False)
+
+
+class TestInstrumentationWiring:
+    """The default Noop is stored bare; user backends get pre-bound guards."""
+
+    def test_default_instrumentation_is_bare_noop(self) -> None:
+        # No wrapper for the default: NoopInstrumentation's hooks cannot raise,
+        # so the guard would only add per-call overhead on the read path.
+        conn = Connection(make_options(), transport_factory=FakeEnv().factory)
+        assert type(conn.instrumentation) is NoopInstrumentation
+
+    def test_supplied_instrumentation_is_wrapped(self) -> None:
+        conn = Connection(make_options(instrumentation=NoopInstrumentation()), transport_factory=FakeEnv().factory)
+        assert isinstance(conn.instrumentation, _SafeInstrumentation)
+
+    def test_guards_are_prebound_once(self) -> None:
+        # With a per-__getattr__ closure the two reads would differ; pre-binding
+        # returns the identical bound wrapper from its slot every time.
+        safe = _SafeInstrumentation(NoopInstrumentation())
+        assert safe.on_bytes_received is safe.on_bytes_received
+        assert safe.on_message_delivered is safe.on_message_delivered
+
+    def test_raising_backend_is_swallowed(self) -> None:
+        class RaisingBackend(NoopInstrumentation):
+            def on_error(self, error: Exception) -> None:
+                raise RuntimeError("metrics backend is down")
+
+            def on_bytes_received(self, count: int) -> None:
+                raise RuntimeError("metrics backend is down")
+
+            def on_message_delivered(self, subject: str, payload_size: int) -> None:
+                raise RuntimeError("metrics backend is down")
+
+        safe = _SafeInstrumentation(RaisingBackend())
+        # Every guarded hook swallows the failure instead of propagating it.
+        safe.on_error(RuntimeError("boom"))
+        safe.on_bytes_received(42)
+        safe.on_message_delivered("subj", 3)

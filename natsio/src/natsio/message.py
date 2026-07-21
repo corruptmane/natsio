@@ -12,12 +12,15 @@ if TYPE_CHECKING:
 __all__ = ["Msg"]
 
 
-@dataclass(frozen=True, slots=True, eq=False)
+@dataclass(slots=True, eq=False)
 class Msg:
     """A message received from the server.
 
     Compares and hashes by identity: two deliveries are distinct events even
-    when byte-identical (and ``Headers`` is intentionally unhashable).
+    when byte-identical (and ``Headers`` is intentionally unhashable). Treat an
+    instance as read-only; it is deliberately not frozen (the immutability
+    enforcement is skipped to keep per-message construction cheap on the hot
+    delivery path).
 
     ``headers`` is ``None`` when the message carried no header block. ``status``
     is set only for the server's control messages (e.g. a 503 no-responders

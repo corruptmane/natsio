@@ -90,19 +90,49 @@ _PERM_SUBJECT_RE = re.compile(r'Subscription to "(\S+)"')
 _PERM_QUEUE_RE = re.compile(r'using queue "(\S+)"')
 
 
+# Every hook on the Instrumentation protocol, pre-bound once per _SafeInstrumentation.
+_HOOK_NAMES = (
+    "on_connect",
+    "on_disconnect",
+    "on_reconnect",
+    "on_close",
+    "on_bytes_sent",
+    "on_bytes_received",
+    "on_message_published",
+    "on_message_delivered",
+    "on_slow_consumer",
+    "on_error",
+)
+
+
 class _SafeInstrumentation:
     """Wraps user instrumentation so a broken metrics backend cannot kill the
     connection. Hooks fire on the read path, where an escaping exception would
-    reach ``data_received`` and make asyncio abort the socket."""
+    reach ``data_received`` and make asyncio abort the socket.
 
-    __slots__ = ("_inner",)
+    Each guarded wrapper is bound ONCE in ``__init__`` and stored in its own
+    slot, so hot-path hook access is a plain attribute read — no per-call
+    closure allocation and no ``__getattr__`` round-trip."""
+
+    __slots__ = _HOOK_NAMES
+
+    on_connect: Callable[..., None]
+    on_disconnect: Callable[..., None]
+    on_reconnect: Callable[..., None]
+    on_close: Callable[..., None]
+    on_bytes_sent: Callable[..., None]
+    on_bytes_received: Callable[..., None]
+    on_message_published: Callable[..., None]
+    on_message_delivered: Callable[..., None]
+    on_slow_consumer: Callable[..., None]
+    on_error: Callable[..., None]
 
     def __init__(self, inner: Instrumentation) -> None:
-        self._inner = inner
+        for name in _HOOK_NAMES:
+            setattr(self, name, self._guard(name, getattr(inner, name)))
 
-    def __getattr__(self, name: str) -> Callable[..., None]:
-        hook = getattr(self._inner, name)
-
+    @staticmethod
+    def _guard(name: str, hook: Callable[..., None]) -> Callable[..., None]:
         def guarded(*args: Any, **kwargs: Any) -> None:
             try:
                 hook(*args, **kwargs)
@@ -400,7 +430,11 @@ class Connection:
         transport_factory: TransportFactory | None = None,
     ) -> None:
         self.options = options
-        self.instrumentation: Any = _SafeInstrumentation(options.instrumentation or NoopInstrumentation())
+        # The default Noop is stored bare: its hooks provably cannot raise, so
+        # wrapping it in the guard would only add per-call overhead on the hot
+        # read path. User-supplied backends get the guarded wrappers.
+        supplied = options.instrumentation
+        self.instrumentation: Any = _SafeInstrumentation(supplied) if supplied is not None else NoopInstrumentation()
         self.dispatcher = Dispatcher()
         self.bus = EventBus()
         self._authenticator = options.resolve_authenticator()
@@ -413,6 +447,11 @@ class Connection:
         )
         self._state = ConnectionState.DISCONNECTED
         self._session: _Session | None = None
+        # Server-advertised publish ceiling, cached as a plain int off the hot
+        # path. Defaults to the NATS server default (1 MiB) so pre-connect reads
+        # match what Client.max_payload historically returned; refreshed from the
+        # handshake INFO and from any async INFO that carries a new max_payload.
+        self._max_payload: int = 1024 * 1024
         # Published while _establish runs, so close() can interrupt a handshake
         # that is parked waiting for INFO instead of blocking for connect_timeout.
         self._establishing: _Session | None = None
@@ -447,6 +486,11 @@ class Connection:
     @property
     def server_info(self) -> dict[str, Any]:
         return dict(self._session.server_info) if self._session else {}
+
+    @property
+    def max_payload(self) -> int:
+        """The server's advertised publish ceiling (cached int)."""
+        return self._max_payload
 
     @property
     def connected_url(self) -> str | None:
@@ -817,7 +861,8 @@ class Connection:
                 info: dict[str, Any] = json.loads(raw_info)
                 session.server_info = info
                 if info.get("max_payload"):
-                    session.parser.set_max_payload(int(info["max_payload"]))
+                    self._max_payload = int(info["max_payload"])
+                    session.parser.set_max_payload(self._max_payload)
                 # A real server advertises the whole cluster in the very first
                 # INFO; async INFO frames only follow on membership changes.
                 self._merge_connect_urls(info, server)
@@ -956,6 +1001,11 @@ class Connection:
             log.warning("ignoring malformed async INFO")
             return
         session.server_info.update(info)
+        if info.get("max_payload"):
+            # A membership/config change can carry a new ceiling; keep the cached
+            # publish limit and the inbound parser ceiling in step with it.
+            self._max_payload = int(info["max_payload"])
+            session.parser.set_max_payload(self._max_payload)
         self._merge_connect_urls(info, session.server)
         if info.get("ldm"):
             self._emit(LameDuck(session.server.url))

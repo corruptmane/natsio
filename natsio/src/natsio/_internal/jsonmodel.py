@@ -73,7 +73,21 @@ class _Rfc3339:
 NS_DURATION: Converter[timedelta, int] = _NsDuration()
 RFC3339: Converter[datetime, str] = _Rfc3339()
 
-type _FieldPlan = tuple[str, Any, Any]  # (name, converter | None, base_type)
+# A field's decode/encode strategy, classified ONCE when the per-class plan is
+# built so from_wire/to_wire never call typing.get_origin/get_args again. Each
+# strategy is ``(kind, payload)``:
+#   _PLAIN -> passthrough           (payload: None)
+#   _CONV  -> two-way Converter      (payload: the converter)
+#   _MODEL -> nested JsonModel       (payload: the model class)
+#   _ENUM  -> Enum                   (payload: the enum class)
+#   _LIST  -> list/tuple of items    (payload: the item strategy, recursively)
+#   _DICT  -> dict of values         (payload: the value strategy, recursively)
+_PLAIN, _CONV, _MODEL, _ENUM, _LIST, _DICT = range(6)
+
+type _Strategy = tuple[int, Any]
+type _FieldPlan = tuple[str, _Strategy]  # (name, strategy)
+
+_PLAIN_STRATEGY: _Strategy = (_PLAIN, None)
 
 _PLANS: dict[type, list[_FieldPlan]] = {}
 
@@ -98,6 +112,30 @@ def _unwrap(annotation: Any) -> tuple[Any, Any]:
     return converter, annotation
 
 
+def _build_strategy(converter: Any, base: Any) -> _Strategy:
+    """Classify one (already Annotated/Optional-unwrapped) field type ONCE.
+
+    The branch order mirrors the old per-call ``_decode`` — converter, nested
+    model, enum, list/tuple, dict, then passthrough — so the wire contract is
+    unchanged; only the reflection moves from per-call to per-class.
+    """
+    if converter is not None:
+        return (_CONV, converter)
+    if isinstance(base, type):
+        if issubclass(base, JsonModel):
+            return (_MODEL, base)
+        if issubclass(base, Enum):
+            return (_ENUM, base)
+    origin = get_origin(base)
+    if origin in (list, tuple):
+        args = get_args(base)
+        return (_LIST, _build_strategy(*_unwrap(args[0])) if args else _PLAIN_STRATEGY)
+    if origin is dict:
+        args = get_args(base)
+        return (_DICT, _build_strategy(*_unwrap(args[1])) if len(args) == 2 else _PLAIN_STRATEGY)
+    return _PLAIN_STRATEGY
+
+
 def _plan(cls: "type[JsonModel]") -> list[_FieldPlan]:
     plan = _PLANS.get(cls)
     if plan is None:
@@ -106,56 +144,49 @@ def _plan(cls: "type[JsonModel]") -> list[_FieldPlan]:
         for spec in fields(cls):
             if spec.name == "extra":
                 continue
-            converter, base = _unwrap(hints[spec.name])
-            plan.append((spec.name, converter, base))
+            plan.append((spec.name, _build_strategy(*_unwrap(hints[spec.name]))))
         _PLANS[cls] = plan
     return plan
 
 
-def _encode(value: Any, converter: Any, base: Any = Any) -> Any:
-    if converter is not None:
-        return converter.to_wire(value)
+def _encode(value: Any, strategy: _Strategy) -> Any:
+    """Encode one value against its precomputed strategy.
+
+    Deliberately value-driven with the exact branch order of the pre-plan
+    version (converter, model, enum, list, dict, passthrough), descending
+    through the precomputed nested strategies rather than reflecting again.
+    """
+    kind, payload = strategy
+    if kind == _CONV:
+        return payload.to_wire(value)
     if isinstance(value, JsonModel):
         return value.to_wire()
     if isinstance(value, Enum):
         return value.value
-    origin = get_origin(base)
     if isinstance(value, list):
-        item_conv, item_base = (None, Any)
-        if origin in (list, tuple):
-            args = get_args(base)
-            if args:
-                item_conv, item_base = _unwrap(args[0])
-        return [_encode(item, item_conv, item_base) for item in value]
+        item = payload if kind == _LIST else _PLAIN_STRATEGY
+        return [_encode(element, item) for element in value]
     if isinstance(value, dict):
-        value_conv, value_base = (None, Any)
-        if origin is dict:
-            args = get_args(base)
-            if len(args) == 2:
-                value_conv, value_base = _unwrap(args[1])
-        return {key: _encode(item, value_conv, value_base) for key, item in value.items()}
+        item = payload if kind == _DICT else _PLAIN_STRATEGY
+        return {key: _encode(element, item) for key, element in value.items()}
     return value
 
 
-def _decode(raw: Any, converter: Any, base: Any) -> Any:
+def _decode(raw: Any, strategy: _Strategy) -> Any:
     if raw is None:
         return None
-    if converter is not None:
-        return converter.from_wire(raw)
-    if isinstance(base, type) and issubclass(base, JsonModel):
-        return base.from_wire(raw)
-    if isinstance(base, type) and issubclass(base, Enum):
-        return base(raw)
-    origin = get_origin(base)
-    if origin in (list, tuple):
-        (item_type,) = get_args(base) or (Any,)
-        item_conv, item_base = _unwrap(item_type)
-        return [_decode(item, item_conv, item_base) for item in raw]
-    if origin is dict:
-        args = get_args(base)
-        value_conv, value_base = _unwrap(args[1]) if len(args) == 2 else (None, Any)
-        return {key: _decode(item, value_conv, value_base) for key, item in raw.items()}
-    return raw
+    kind, payload = strategy
+    if kind == _PLAIN:
+        return raw
+    if kind == _CONV:
+        return payload.from_wire(raw)
+    if kind == _MODEL:
+        return payload.from_wire(raw)
+    if kind == _ENUM:
+        return payload(raw)
+    if kind == _LIST:
+        return [_decode(element, payload) for element in raw]
+    return {key: _decode(element, payload) for key, element in raw.items()}
 
 
 @dataclass(slots=True, kw_only=True)
@@ -166,11 +197,11 @@ class JsonModel:
 
     def to_wire(self) -> dict[str, Any]:
         out: dict[str, Any] = {}
-        for name, converter, base in _plan(type(self)):
+        for name, strategy in _plan(type(self)):
             value = getattr(self, name)
             if value is None:
                 continue
-            out[name] = _encode(value, converter, base)
+            out[name] = _encode(value, strategy)
         out.update(self.extra)
         return out
 
@@ -178,9 +209,9 @@ class JsonModel:
     def from_wire(cls, data: dict[str, Any]) -> Self:
         known: dict[str, Any] = {}
         consumed: set[str] = set()
-        for name, converter, base in _plan(cls):
+        for name, strategy in _plan(cls):
             if name in data:
-                known[name] = _decode(data[name], converter, base)
+                known[name] = _decode(data[name], strategy)
                 consumed.add(name)
         extra = {key: value for key, value in data.items() if key not in consumed}
         return cls(**known, extra=extra)

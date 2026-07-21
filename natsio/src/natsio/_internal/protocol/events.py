@@ -1,7 +1,9 @@
 """Typed events emitted by the sans-io protocol parser.
 
-One event corresponds to one complete server operation. Events are plain
-immutable data; nothing here knows about sockets or asyncio.
+One event corresponds to one complete server operation. Events are plain data;
+nothing here knows about sockets or asyncio. The two hot-path deliveries
+(``MsgEvent``/``HMsgEvent``) are not frozen — they are treated as read-only, but
+skip the immutability enforcement to keep per-message construction cheap.
 """
 
 from dataclasses import dataclass
@@ -23,7 +25,7 @@ class NeedData(Enum):
 NEED_DATA: Final = NeedData.NEED_DATA
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(slots=True)
 class MsgEvent:
     subject: str
     sid: int
@@ -31,7 +33,7 @@ class MsgEvent:
     payload: bytes
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(slots=True)
 class HMsgEvent:
     subject: str
     sid: int
