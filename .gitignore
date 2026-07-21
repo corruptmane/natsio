@@ -23,3 +23,7 @@ tools/.bin/
 # OS
 .DS_Store
 site/
+
+# Secrets — never committed (a real key once slipped in via git add -A)
+.env
+.env.*
