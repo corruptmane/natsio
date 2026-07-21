@@ -71,6 +71,8 @@ nav:
       - JetStream: guide/jetstream.md
       - Key-Value: guide/key-value.md
       - Object Store: guide/object-store.md
+      - Microservices: guide/micro.md
+      - WebSocket: guide/websocket.md
   - Migrating from nats-py: migration-from-nats-py.md
   - Benchmarks: benchmarks.md
   - Extensions: extensions.md
@@ -79,4 +81,5 @@ nav:
       - JetStream: reference/jetstream.md
       - Key-Value: reference/kv.md
       - Object Store: reference/objectstore.md
+      - Microservices: reference/micro.md
       - Errors: reference/errors.md

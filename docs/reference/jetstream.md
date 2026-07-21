@@ -9,3 +9,9 @@
 ::: natsio.jetstream.OrderedConsumer
 
 ::: natsio.jetstream.JsMsg
+
+::: natsio.jetstream.StreamConfig
+
+::: natsio.jetstream.ConsumerConfig
+
+::: natsio.jetstream.PubAck

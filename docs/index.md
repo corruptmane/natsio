@@ -36,6 +36,10 @@ asyncio.run(main())
 - **Modern JetStream only.** The ADR-37 simplified consumer API
   (`fetch()` / `next()` / `consume()`, ordered consumers) — plus Key-Value and
   Object Store. No deprecated push/pull-subscribe workflow.
+- **Microservices built in.** The ADR-32 service framework — endpoints, groups,
+  and the standard `$SRV` discovery/stats control plane the `nats` CLI speaks.
+- **WebSocket transport.** `ws://` and `wss://` with the same client API, over an
+  in-house zero-dependency RFC 6455 core — for browsers, edges, and firewalls.
 - **Loud backpressure.** Bounded delivery queues with configurable policies;
   dropped messages are always counted and reported, never lost in silence.
 - **Fully typed.** PEP 695 generics, `py.typed`, checked with `ty`.
@@ -76,6 +80,8 @@ need nothing extra.
   TLS via `ssl.SSLContext`.
 - **[JetStream](guide/jetstream.md)**, **[Key-Value](guide/key-value.md)**,
   **[Object Store](guide/object-store.md)** — the persistence layer.
+- **[Microservices](guide/micro.md)** — request/reply services with `$SRV`
+  discovery, and **[WebSocket](guide/websocket.md)** — the same client over `ws`.
 - **[Migrating from nats-py](migration-from-nats-py.md)** — side-by-side API
   mappings and the behavioral differences that will actually bite.
 

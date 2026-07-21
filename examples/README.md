@@ -32,9 +32,16 @@ NATS_URL=nats://127.0.0.1:4222 python examples/06_jetstream_streams.py
 | 08 | `08_key_value.py` | KV put/get, `create`/`update` CAS, delete/purge, history, watch (the `None` marker), per-key TTL |
 | 09 | `09_object_store.py` | Chunked put/get streaming, `get_bytes`, links, `update_meta` rename, watch/list, seal |
 | 10 | `10_graceful_shutdown.py` | Drain semantics, in-flight work on close, signal-driven shutdown (`asyncio.Runner` + signal handlers) |
+| 11 | `11_micro_service.py` | `natsio.micro` (ADR-32): endpoints, nested groups, `respond`/`respond_error`, `$SRV.PING`/`$SRV.STATS` monitoring, `service.stats()` |
+| 12 | `12_websocket.py` | WebSocket transport: identical pub/sub + request/reply over `ws://` (self-starts a server), `wss://` + `TLSConfig`, the mixed-scheme `ConfigError` |
 
 Examples 06–10 require a JetStream-enabled server (`just server` enables it).
 Example 05's credential-specific sections only run when the matching
 environment variable is set (`NATS_USER`/`NATS_PASSWORD`, `NATS_TOKEN`,
 `NATS_NKEY_SEED`, `NATS_CREDS`, `NATS_TLS_URL`); NKey and `.creds` auth also
 need the `natsio[nkeys]` extra.
+
+Example 11 needs only a core (non-JetStream) server. Example 12 is
+self-contained: it starts its own throwaway WebSocket server (via the
+`natsio.testing` dev extension) unless you point `NATS_WS_URL` at a running
+`ws://`/`wss://` endpoint, so it runs with no server and no env vars.
