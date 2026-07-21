@@ -3,11 +3,6 @@
 A zero-dependency, pure-asyncio NATS client for modern Python — built from scratch for
 Python 3.13+ and NATS server 2.14+.
 
-> **Status: 0.9.0 public beta.** Feature-complete — core NATS, JetStream
-> (ADR-37), Key-Value, and Object Store — with 1000+ tests including live-server
-> conformance runs against the nats.go test suite. The API freezes at 1.0.
-> The pre-rewrite implementation is preserved on the [`legacy`](../../tree/legacy) branch.
-
 ## Design
 
 - **Zero runtime dependencies** — stdlib only. NKey/JWT auth is the single exception and

@@ -41,5 +41,7 @@ cryptography = ["cryptography>=41.0.0"]
 
 [project.urls]
 Homepage = "https://github.com/corruptmane/natsio"
+Documentation = "https://corruptmane.github.io/natsio/"
 Repository = "https://github.com/corruptmane/natsio"
+Issues = "https://github.com/corruptmane/natsio/issues"
 Changelog = "https://github.com/corruptmane/natsio/blob/main/CHANGELOG.md"
