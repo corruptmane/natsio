@@ -233,5 +233,5 @@ class TestTTLValidation:
         await js.create_stream(
             StreamConfig(name="TTLV", subjects=["tv.>"], storage=StorageType.MEMORY, allow_msg_ttl=True)
         )
-        with pytest.raises(ConfigError, match="whole seconds"):
+        with pytest.raises(ConfigError, match="at least 1 second"):
             await js.publish("tv.a", b"x", ttl=0)

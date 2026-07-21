@@ -7,6 +7,22 @@ Extension packages under `extensions/` keep their own changelogs.
 
 Ground-up rewrite. The previous implementation is retired to the `legacy` branch.
 
+### API polish
+
+- Per-message TTLs (ADR-43) accept `timedelta` everywhere a TTL is taken
+  (`publish`, `publish_async`, KV `put`/`create`/`purge`), alongside the
+  existing whole-second ints and `"never"`. The wire stays second-granular;
+  sub-second timedeltas are rejected loudly instead of rounded.
+- `create_or_update_stream()` is public: the idempotent way to assert a
+  stream from scripts and services (was internal, used by the KV/Object
+  Store management APIs).
+- `OrderedConsumer.messages(until_drained=True)`: finite reads end the
+  iteration normally the moment the consumer is caught up (exact, via the
+  server's per-delivery `num_pending` — no timeout wait, no
+  `NoMessagesError` to catch). Resumable: a second drained read continues
+  from the consumer's position; a purge mid-drain ends the read instead of
+  hanging.
+
 ### Performance
 
 Profiling against nats-py 2.15.0 and nats-core 0.2.0 (see `tools/natsio-bench`)

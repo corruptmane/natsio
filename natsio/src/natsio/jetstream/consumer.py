@@ -732,18 +732,28 @@ class OrderedConsumer:
         expires: float = 30.0,
         idle_heartbeat: float | None = None,
         idle_timeout: float | None = None,
+        until_drained: bool = False,
     ) -> AsyncGenerator[JsMsg]:
         """The ordered message stream (an async generator — ``aclose()`` to stop).
 
         ``idle_timeout`` bounds the wait for each message: on expiry the stream
         raises :class:`NoMessagesError` instead of silently self-healing
         forever, letting callers distinguish a quiet stream from a dead one.
+
+        ``until_drained=True`` is the finite-read mode: iteration ends
+        *normally* once the consumer is caught up (the server's per-delivery
+        ``num_pending`` reaches zero — exact and immediate, no timeout wait).
+        Messages published while draining are still delivered; "caught up"
+        means caught up at delivery time. An empty stream yields nothing.
+        Combine with ``idle_timeout`` if you also want a liveness bound while
+        draining (it raises, as above).
         """
         return self._iterate(
             max_messages=max_messages,
             expires=expires,
             idle_heartbeat=idle_heartbeat,
             idle_timeout=idle_timeout,
+            until_drained=until_drained,
         )
 
     def __aiter__(self) -> AsyncIterator[JsMsg]:
@@ -756,6 +766,7 @@ class OrderedConsumer:
         expires: float,
         idle_heartbeat: float | None,
         idle_timeout: float | None = None,
+        until_drained: bool = False,
     ) -> AsyncGenerator[JsMsg]:
         try:
             while True:
@@ -766,9 +777,19 @@ class OrderedConsumer:
                     except Exception:
                         self._recreate_failures = min(self._recreate_failures + 1, 8)
                         raise
+                    # Drained-check on every (re)creation: catches both the
+                    # initially-empty stream and a purge/expiry mid-drain that
+                    # a heal would otherwise wait on forever.
+                    if until_drained and self._consumer is not None and self._consumer.cached_info.num_pending == 0:
+                        return
                 assert self._session is not None
+                # until_drained needs SOME wake-up to re-check pending after a
+                # mid-drain purge/expiry (nothing is delivered and nothing
+                # errors) — probe on a quiet interval when the caller didn't
+                # set an explicit liveness bound.
+                probe = idle_timeout if idle_timeout is not None else (5.0 if until_drained else None)
                 try:
-                    msg = await self._session.next(timeout=idle_timeout)
+                    msg = await self._session.next(timeout=probe)
                 except NoMessagesError:
                     if idle_timeout is not None:
                         raise  # the caller asked for a liveness bound
@@ -787,6 +808,8 @@ class OrderedConsumer:
                 self._expected_cseq += 1
                 self._last_sseq = metadata.stream_seq
                 yield msg
+                if until_drained and metadata.num_pending == 0:
+                    return  # caught up: end the iteration normally
         finally:
             await self._teardown()
 

@@ -164,7 +164,7 @@ class KeyValue:
 
     # -- writes --------------------------------------------------------------
 
-    def _require_msg_ttl(self, ttl: int | str | None) -> None:
+    def _require_msg_ttl(self, ttl: js_headers.TTLInput | None) -> None:
         """Reject a per-message ``ttl`` when the bucket wasn't built for it.
 
         Mirrors the server's own rejection but with an actionable error, so a
@@ -180,10 +180,10 @@ class KeyValue:
                 "per-key ttl"
             )
 
-    async def put(self, key: str, value: bytes | str, *, ttl: int | str | None = None) -> int:
+    async def put(self, key: str, value: bytes | str, *, ttl: js_headers.TTLInput | None = None) -> int:
         """Store a value; returns the new revision.
 
-        ``ttl`` (whole seconds, or ``"never"`` per ADR-43) makes this single
+        ``ttl`` (a ``timedelta``, whole seconds, or ``"never"`` — ADR-43) makes this single
         revision self-expire — requires the bucket's ``allow_msg_ttl``
         (``KeyValueConfig(allow_msg_ttl=True)`` or ``limit_marker_ttl``),
         otherwise :class:`~natsio.errors.ConfigError`.
@@ -193,7 +193,7 @@ class KeyValue:
         ack = await self._ctx.publish(self._subject(encoded), self._encode_value(value), ttl=ttl)
         return ack.seq
 
-    async def create(self, key: str, value: bytes | str, *, ttl: int | str | None = None) -> int:
+    async def create(self, key: str, value: bytes | str, *, ttl: js_headers.TTLInput | None = None) -> int:
         """Store a value only if the key has no live value.
 
         Succeeds for brand-new keys and for deleted/purged keys; raises
@@ -234,7 +234,9 @@ class KeyValue:
         """
         return await self._update_revision(key, value, last=last, ttl=None)
 
-    async def _update_revision(self, key: str, value: bytes | str, *, last: int, ttl: int | str | None) -> int:
+    async def _update_revision(
+        self, key: str, value: bytes | str, *, last: int, ttl: js_headers.TTLInput | None
+    ) -> int:
         encoded = self._encode_key(key)
         ack = await self._ctx.publish(
             self._subject(encoded),
@@ -254,10 +256,10 @@ class KeyValue:
             expected_last_subject_seq=last,
         )
 
-    async def purge(self, key: str, *, ttl: int | str | None = None, last: int | None = None) -> None:
+    async def purge(self, key: str, *, ttl: js_headers.TTLInput | None = None, last: int | None = None) -> None:
         """Write a purge marker and roll up: prior revisions are removed.
 
-        ``ttl`` (whole seconds, or ``"never"``) lets the marker itself expire
+        ``ttl`` (a ``timedelta``, whole seconds, or ``"never"``) lets the marker itself expire
         — requires per-message TTLs on the bucket
         (``KeyValueConfig(allow_msg_ttl=True)`` or ``limit_marker_ttl``).
         ``last`` makes the rollup a compare-and-set: it proceeds only if ``last``

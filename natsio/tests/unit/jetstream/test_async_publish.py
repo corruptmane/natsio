@@ -119,6 +119,46 @@ def _no_responders_event(reply: str) -> _FakeEvent:
     return _FakeEvent(subject=reply, payload=b"", status=InlineStatus(503, "No Responders"))
 
 
+class TestTtlEncoding:
+    def test_timedelta_whole_seconds(self) -> None:
+        from datetime import timedelta
+
+        assert js_headers.encode_ttl(timedelta(seconds=5)) == "5"
+        assert js_headers.encode_ttl(timedelta(minutes=2)) == "120"
+
+    def test_int_and_never_pass_through(self) -> None:
+        assert js_headers.encode_ttl(3) == "3"
+        assert js_headers.encode_ttl("never") == "never"
+
+    def test_subsecond_timedelta_rejected(self) -> None:
+        from datetime import timedelta
+
+        with pytest.raises(ConfigError, match="second-granular"):
+            js_headers.encode_ttl(timedelta(milliseconds=1500))
+
+    def test_below_one_second_rejected(self) -> None:
+        from datetime import timedelta
+
+        with pytest.raises(ConfigError):
+            js_headers.encode_ttl(0)
+        with pytest.raises(ConfigError):
+            js_headers.encode_ttl(timedelta(0))
+
+    def test_publish_headers_accept_timedelta(self) -> None:
+        from datetime import timedelta
+
+        extra = _build_publish_headers(
+            msg_id=None,
+            expected_stream=None,
+            expected_last_seq=None,
+            expected_last_subject_seq=None,
+            expected_last_subject_seq_subject=None,
+            expected_last_msg_id=None,
+            ttl=timedelta(seconds=7),
+        )
+        assert extra[js_headers.TTL] == "7"
+
+
 class TestHeaderBuilding:
     def test_expected_last_subject_seq_subject_sets_header(self) -> None:
         extra = _build_publish_headers(

@@ -337,6 +337,54 @@ class TestConsume:
                 await first.stop()
 
 
+class TestUntilDrained:
+    """messages(until_drained=True): finite reads end normally, not by exception."""
+
+    async def _stream_with(self, nc, name: str, count: int):
+        js = nc.jetstream()
+        stream = await js.create_stream(StreamConfig(name=name, subjects=[f"{name.lower()}.>"]))
+        for i in range(count):
+            await js.publish(f"{name.lower()}.m", f"{i}".encode())
+        return js, stream
+
+    async def test_finite_read_ends_normally(self, nc) -> None:
+        _js, stream = await self._stream_with(nc, "DRAIN", 25)
+        async with stream.ordered_consumer() as ordered:
+            got = [msg.payload async for msg in ordered.messages(until_drained=True)]
+        # No NoMessagesError, no timeout wait — exactly the stream contents.
+        assert got == [f"{i}".encode() for i in range(25)]
+
+    async def test_empty_stream_yields_nothing(self, nc) -> None:
+        _js, stream = await self._stream_with(nc, "EMPTYD", 0)
+        async with stream.ordered_consumer() as ordered:
+            got = [msg async for msg in ordered.messages(until_drained=True)]
+        assert got == []
+
+    async def test_second_drain_resumes_from_position(self, nc) -> None:
+        js, stream = await self._stream_with(nc, "RESUME", 3)
+        async with stream.ordered_consumer() as ordered:
+            first = [msg.payload async for msg in ordered.messages(until_drained=True)]
+            assert first == [b"0", b"1", b"2"]
+            for i in range(3, 5):
+                await js.publish("resume.m", f"{i}".encode())
+            second = [msg.payload async for msg in ordered.messages(until_drained=True)]
+        # The ordered consumer keeps its position: only the new messages.
+        assert second == [b"3", b"4"]
+
+    async def test_purge_mid_drain_ends_instead_of_hanging(self, nc) -> None:
+        js, stream = await self._stream_with(nc, "PURGED", 400)
+        drained = 0
+        async with stream.ordered_consumer() as ordered:
+            async with asyncio.timeout(30.0):
+                async for _msg in ordered.messages(until_drained=True):
+                    drained += 1
+                    if drained == 5:
+                        await js.purge_stream("PURGED")
+        # Ended normally (via the internal probe + pending recheck), possibly
+        # after a partial read — never a hang, never NoMessagesError.
+        assert drained >= 5
+
+
 class TestOrderedConsumer:
     async def test_in_order_delivery(self, nc: natsio.Client) -> None:
         js = nc.jetstream()
@@ -500,6 +548,22 @@ class TestConnectionCloseWakesConsumers:
                 fetching.cancel()
         finally:
             await nc.close()
+
+
+class TestCreateOrUpdateStream:
+    async def test_create_then_update_then_noop(self, nc) -> None:
+        js = nc.jetstream()
+        config = StreamConfig(name="COU", subjects=["cou.>"])
+        created = await js.create_or_update_stream(config)
+        assert created.name == "COU"
+
+        config.description = "second pass"
+        updated = await js.create_or_update_stream(config)
+        assert updated.cached_info.config.description == "second pass"
+
+        # Identical config: idempotent, never StreamNameInUseError.
+        again = await js.create_or_update_stream(config)
+        assert again.cached_info.config.description == "second pass"
 
 
 class TestStreamListing:

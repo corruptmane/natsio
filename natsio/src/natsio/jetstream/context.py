@@ -185,12 +185,15 @@ class JetStreamContext:
         data = await self._api_request(f"STREAM.UPDATE.{config.name}", config.to_wire())
         return Stream(self, StreamInfo.from_wire(data))
 
-    async def _create_or_update_stream(self, config: StreamConfig) -> Stream:
+    async def create_or_update_stream(self, config: StreamConfig) -> Stream:
         """Update the stream, creating it when absent (nats.go CreateOrUpdateStream).
 
-        Update-then-create mirrors nats.go's order. A create that loses a race to
-        a concurrent creator surfaces as :class:`StreamNameInUseError`; we absorb
-        it and re-update, so the call is idempotent under contention.
+        The idempotent way to assert a stream in scripts and services:
+        re-running never raises :class:`StreamNameInUseError` — an existing
+        stream is updated to ``config`` (a no-op when identical), a missing
+        one is created. Update-then-create mirrors nats.go's order, and a
+        create that loses a race to a concurrent creator is absorbed by a
+        re-update, so the call stays idempotent under contention.
         """
         from .errors import StreamNameInUseError, StreamNotFoundError
 
@@ -331,11 +334,11 @@ class JetStreamContext:
 
         Mirrors nats.go ``CreateOrUpdateStream``: attempt the update first and
         fall back to a create when the backing stream is absent. Race-tolerant
-        under concurrent creators (see :meth:`_create_or_update_stream`).
+        under concurrent creators (see :meth:`create_or_update_stream`).
         """
         from natsio.kv.bucket import KeyValue
 
-        stream = await self._create_or_update_stream(_kv_stream_config(config))
+        stream = await self.create_or_update_stream(_kv_stream_config(config))
         return KeyValue(self, config.bucket, stream, key_codec=key_codec, value_codec=value_codec)
 
     async def key_value(
@@ -444,11 +447,11 @@ class JetStreamContext:
 
         Mirrors nats.go ``CreateOrUpdateStream``: update first, create on absence.
         Race-tolerant under concurrent creators (see
-        :meth:`_create_or_update_stream`).
+        :meth:`create_or_update_stream`).
         """
         from natsio.objectstore.store import ObjectStore
 
-        stream = await self._create_or_update_stream(_obj_stream_config(config))
+        stream = await self.create_or_update_stream(_obj_stream_config(config))
         return ObjectStore(self, config.bucket, stream)
 
     async def object_store(self, bucket: str) -> "ObjectStore":
@@ -521,12 +524,12 @@ class JetStreamContext:
         expected_last_subject_seq: int | None = None,
         expected_last_subject_seq_subject: str | None = None,
         expected_last_msg_id: str | None = None,
-        ttl: int | str | None = None,
+        ttl: js_headers.TTLInput | None = None,
         timeout: float | None = None,  # noqa: ASYNC109
     ) -> PubAck:
         """Publish to a stream and await its PubAck.
 
-        ``ttl`` is whole seconds (or the string ``"never"``) per ADR-43 and
+        ``ttl`` is a ``timedelta``, whole seconds, or ``"never"`` (ADR-43) and
         needs the stream's ``allow_msg_ttl``. A 503 (no stream bound / leader election in
         progress) is retried briefly per ADR-22 before raising
         :class:`NoStreamResponseError`.
@@ -576,7 +579,7 @@ class JetStreamContext:
         expected_last_subject_seq: int | None = None,
         expected_last_subject_seq_subject: str | None = None,
         expected_last_msg_id: str | None = None,
-        ttl: int | str | None = None,
+        ttl: js_headers.TTLInput | None = None,
     ) -> "asyncio.Future[PubAck]":
         """Publish without waiting; return a future that resolves to the PubAck.
 
@@ -805,7 +808,7 @@ def _build_publish_headers(
     expected_last_subject_seq: int | None,
     expected_last_subject_seq_subject: str | None,
     expected_last_msg_id: str | None,
-    ttl: int | str | None,
+    ttl: js_headers.TTLInput | None,
 ) -> dict[str, str]:
     """The ``Nats-*`` publish-expectation headers implied by the keyword args.
 
@@ -831,12 +834,7 @@ def _build_publish_headers(
     if expected_last_msg_id is not None:
         extra[js_headers.EXPECTED_LAST_MSG_ID] = expected_last_msg_id
     if ttl is not None:
-        if isinstance(ttl, str):
-            extra[js_headers.TTL] = ttl
-        elif ttl < 1:
-            raise ConfigError("ttl is whole seconds and must be >= 1 (or the string 'never')")
-        else:
-            extra[js_headers.TTL] = str(ttl)
+        extra[js_headers.TTL] = js_headers.encode_ttl(ttl)
     return extra
 
 

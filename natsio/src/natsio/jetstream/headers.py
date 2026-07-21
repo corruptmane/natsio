@@ -4,7 +4,34 @@ These go straight onto the wire as header keys/values; keeping them ``str``
 constants rules out the classic ``f"{Enum.MEMBER}"`` class of bugs.
 """
 
+from datetime import timedelta
 from typing import Final
+
+type TTLInput = timedelta | int | str
+"""A per-message TTL (ADR-43): a ``timedelta``, whole seconds, or ``"never"``."""
+
+
+def encode_ttl(ttl: TTLInput) -> str:
+    """Normalize a per-message TTL to its wire value (whole seconds or ``"never"``).
+
+    The wire format is second-granular, so a ``timedelta`` with sub-second
+    precision is rejected rather than silently rounded.
+    """
+    from natsio.errors import ConfigError
+
+    if isinstance(ttl, str):
+        return ttl
+    if isinstance(ttl, timedelta):
+        fractional = ttl.total_seconds()
+        seconds = int(fractional)
+        if seconds != fractional:
+            raise ConfigError("per-message TTLs are second-granular on the wire; use a whole-second timedelta")
+    else:
+        seconds = ttl
+    if seconds < 1:
+        raise ConfigError("ttl must be at least 1 second (or the string 'never')")
+    return str(seconds)
+
 
 # -- publish expectations / identity --
 MSG_ID: Final = "Nats-Msg-Id"
