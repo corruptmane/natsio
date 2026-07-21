@@ -75,6 +75,7 @@ nav:
       - WebSocket: guide/websocket.md
   - Migrating from nats-py: migration-from-nats-py.md
   - Benchmarks: benchmarks.md
+  - Design decisions: decisions.md
   - Extensions: extensions.md
   - API reference:
       - Client: reference/client.md
