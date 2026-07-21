@@ -1,0 +1,82 @@
+site_name: natsio
+site_description: Zero-dependency asyncio NATS client for modern Python
+site_url: https://corruptmane.github.io/natsio/
+repo_url: https://github.com/corruptmane/natsio
+repo_name: corruptmane/natsio
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: teal
+      accent: teal
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: teal
+      accent: teal
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - content.code.copy
+    - search.suggest
+    - toc.follow
+  icon:
+    repo: fontawesome/brands/github
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.superfences
+  - pymdownx.details
+  - pymdownx.tabbed:
+      alternate_style: true
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [natsio/src]
+          options:
+            show_source: false
+            show_root_heading: true
+            members_order: source
+            docstring_style: sphinx
+            separate_signature: true
+            show_signature_annotations: true
+            merge_init_into_class: true
+
+nav:
+  - Home: index.md
+  - Getting started: getting-started.md
+  - Guide:
+      - Core messaging: guide/core-messaging.md
+      - Connection & lifecycle: guide/connection.md
+      - Authentication & TLS: guide/auth-tls.md
+      - JetStream: guide/jetstream.md
+      - Key-Value: guide/key-value.md
+      - Object Store: guide/object-store.md
+  - Migrating from nats-py: migration-from-nats-py.md
+  - Benchmarks: benchmarks.md
+  - Extensions: extensions.md
+  - API reference:
+      - Client: reference/client.md
+      - JetStream: reference/jetstream.md
+      - Key-Value: reference/kv.md
+      - Object Store: reference/objectstore.md
+      - Errors: reference/errors.md
