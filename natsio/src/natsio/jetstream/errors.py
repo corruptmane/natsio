@@ -21,6 +21,8 @@ __all__ = [
     "StreamNameInUseError",
     "StreamNotFoundError",
     "WrongLastSequenceError",
+    "error_for",
+    "register_error",
 ]
 
 
@@ -112,6 +114,3 @@ def error_for(err_code: int) -> type[APIError]:
 def register_error(err_code: int, exc_type: type[APIError]) -> None:
     """Extension hook: bind an err_code to a dedicated exception type."""
     _BY_ERR_CODE[err_code] = exc_type
-
-
-__all__ += ["error_for", "register_error"]
