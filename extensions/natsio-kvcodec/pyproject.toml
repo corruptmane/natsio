@@ -1,0 +1,29 @@
+[build-system]
+requires = ["uv_build>=0.10,<0.11"]
+build-backend = "uv_build"
+
+[project]
+name = "natsio-kvcodec"
+version = "0.1.0"
+description = "natsio extension: transparent KV key/value codecs (base64, path, zlib, chaining) over the core codec seam"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.13"
+authors = [{ name = "Corrupt Mane", email = "corruptmane@gmail.com" }]
+keywords = ["nats", "nats.io", "jetstream", "key-value", "kv", "codec"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Framework :: AsyncIO",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.13",
+    "Typing :: Typed",
+]
+dependencies = ["natsio"]
+
+[tool.uv.sources]
+natsio = { workspace = true }
+
+[tool.uv.build-backend]
+module-name = "natsio.kvcodec"
+namespace = true

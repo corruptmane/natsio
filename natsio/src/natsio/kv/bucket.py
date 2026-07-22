@@ -90,11 +90,16 @@ class KeyValue:
     # -- codec plumbing ------------------------------------------------------
 
     def _encode_key(self, key: str) -> str:
-        validate_key(key)
-        if self._key_codec is not None:
-            key = self._key_codec.encode(key)
+        if self._key_codec is None:
             validate_key(key)
-        return key
+            return key
+        # With a codec, the RAW key is the caller's domain — exotic characters
+        # are exactly what key codecs exist for (kvcodec finding: validating
+        # the raw key first defeated Base64KeyCodec's headline use case).
+        # Only the encoded form must be a legal NATS subject.
+        encoded = self._key_codec.encode(key)
+        validate_key(encoded)
+        return encoded
 
     def _decode_key(self, key: str) -> str:
         return self._key_codec.decode(key) if self._key_codec is not None else key
@@ -440,10 +445,16 @@ class KeyValue:
                 if marker is not None:
                     operation = _MARKER_OPERATIONS.get(marker, Operation.PURGE)
         metadata = msg.metadata
+        # Empty payload short-circuit: meta_only watches deliver PUT entries
+        # with the payload stripped by the server, and a framing value codec
+        # (zlib, encryption) would raise decoding b"" (kvcodec finding). A
+        # genuinely-empty stored value is b"" with no codec (passthrough) and
+        # never b"" with a framing codec, so the skip is always correct.
+        payload = msg.payload
         return KvEntry(
             bucket=self.bucket,
             key=self._key_from_subject(msg.subject),
-            value=self._decode_value(msg.payload) if operation is Operation.PUT else b"",
+            value=self._decode_value(payload) if operation is Operation.PUT and payload else b"",
             revision=metadata.stream_seq,
             operation=operation,
             created=metadata.timestamp,

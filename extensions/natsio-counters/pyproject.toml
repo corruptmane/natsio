@@ -1,0 +1,34 @@
+[build-system]
+requires = ["uv_build>=0.10,<0.11"]
+build-backend = "uv_build"
+
+[project]
+name = "natsio-counters"
+version = "0.1.0"
+description = "natsio extension: distributed counters (ADR-49) over JetStream counter streams"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.13"
+authors = [{ name = "Corrupt Mane", email = "corruptmane@gmail.com" }]
+keywords = ["nats", "nats.io", "jetstream", "counters", "distributed-counter", "adr-49"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Framework :: AsyncIO",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.13",
+    "Typing :: Typed",
+]
+dependencies = ["natsio"]
+
+[project.urls]
+Homepage = "https://github.com/corruptmane/natsio"
+Repository = "https://github.com/corruptmane/natsio"
+Changelog = "https://github.com/corruptmane/natsio/blob/main/extensions/natsio-counters/CHANGELOG.md"
+
+[tool.uv.sources]
+natsio = { workspace = true }
+
+[tool.uv.build-backend]
+module-name = "natsio.counters"
+namespace = true

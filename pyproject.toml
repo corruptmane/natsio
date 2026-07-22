@@ -8,12 +8,22 @@ members = ["natsio", "extensions/natsio-*", "tools/natsio-*"]
 natsio = { workspace = true }
 natsio-testing = { workspace = true }
 natsio-bench = { workspace = true }
+natsio-otel = { workspace = true }
+natsio-kvcodec = { workspace = true }
+natsio-counters = { workspace = true }
+natsio-natscontext = { workspace = true }
 
 [dependency-groups]
 dev = [
     "natsio",
     "natsio-testing",
     "natsio-bench",
+    "natsio-otel",
+    "natsio-kvcodec",
+    "natsio-counters",
+    "natsio-natscontext",
+    # asserting spans/metrics in natsio-otel's tests
+    "opentelemetry-sdk>=1.20",
     # Ed25519 backends: both are exercised, and the official `nkeys` package is
     # used to differential-test our own NKey codec against the reference.
     "pynacl>=1.6.2",
@@ -60,4 +70,4 @@ extra-paths = ["natsio/tests"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
-testpaths = ["natsio/tests"]
+testpaths = ["natsio/tests", "extensions"]

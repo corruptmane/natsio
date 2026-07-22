@@ -1,0 +1,35 @@
+[build-system]
+requires = ["uv_build>=0.10,<0.11"]
+build-backend = "uv_build"
+
+[project]
+name = "natsio-otel"
+version = "0.1.0"
+description = "OpenTelemetry metrics + trace-context propagation for natsio, over its instrumentation seam"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.13"
+authors = [{ name = "Corrupt Mane", email = "corruptmane@gmail.com" }]
+keywords = ["nats", "nats.io", "opentelemetry", "otel", "observability", "metrics", "tracing"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Framework :: AsyncIO",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: System :: Monitoring",
+    "Typing :: Typed",
+]
+dependencies = ["natsio", "opentelemetry-api>=1.20"]
+
+[project.urls]
+Homepage = "https://github.com/corruptmane/natsio"
+Repository = "https://github.com/corruptmane/natsio"
+Changelog = "https://github.com/corruptmane/natsio/blob/main/extensions/natsio-otel/CHANGELOG.md"
+
+[tool.uv.sources]
+natsio = { workspace = true }
+
+[tool.uv.build-backend]
+module-name = "natsio.otel"
+namespace = true
