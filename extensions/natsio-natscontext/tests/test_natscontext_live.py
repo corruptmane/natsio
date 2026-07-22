@@ -10,7 +10,7 @@ import natsio.natscontext as natscontext  # ty: ignore[unresolved-import]
 #   user: ctxuser / password: s3cret
 
 
-async def _roundtrip(nc) -> None:  # type: ignore[no-untyped-def]
+async def _roundtrip(nc) -> None:
     async with nc.subscribe("ctx.ping") as sub:
         await nc.publish("ctx.ping", b"hello")
         msg = await sub.next_msg(timeout=2.0)
@@ -18,7 +18,7 @@ async def _roundtrip(nc) -> None:  # type: ignore[no-untyped-def]
 
 
 async def test_connect_via_named_context(
-    server,  # type: ignore[no-untyped-def]
+    server,
     write_context: Callable[..., Path],
     select_context: Callable[[str], None],
 ) -> None:
@@ -32,7 +32,7 @@ async def test_connect_via_named_context(
 
 
 async def test_connect_uses_selected_context(
-    server,  # type: ignore[no-untyped-def]
+    server,
     write_context: Callable[..., Path],
     select_context: Callable[[str], None],
 ) -> None:
@@ -46,7 +46,7 @@ async def test_connect_uses_selected_context(
 
 
 async def test_connect_via_absolute_path(
-    server,  # type: ignore[no-untyped-def]
+    server,
     tmp_path: Path,
 ) -> None:
     path = tmp_path / "abs.json"
@@ -62,7 +62,7 @@ async def test_connect_via_absolute_path(
 
 
 async def test_overrides_win_over_context(
-    server,  # type: ignore[no-untyped-def]
+    server,
     write_context: Callable[..., Path],
 ) -> None:
     write_context("named", url=server.url, user="ctxuser", password="s3cret")

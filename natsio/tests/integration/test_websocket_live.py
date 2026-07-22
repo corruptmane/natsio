@@ -53,14 +53,14 @@ async def ws_server():
     config = f'websocket {{ host: "127.0.0.1", port: {wsport}, no_tls: true }}\n'
     process = NatsServerProcess(binary, config=config)
     await process.start()
-    process.ws_port = wsport  # type: ignore[attr-defined]
+    process.ws_port = wsport
     yield process
     await process.stop()
 
 
 class TestWebSocketHandshake:
     async def test_connect_info_and_close(self, ws_server: NatsServerProcess) -> None:
-        url = ws_url("127.0.0.1", ws_server.ws_port)  # type: ignore[attr-defined]
+        url = ws_url("127.0.0.1", ws_server.ws_port)
         conn = Connection(ws_options(url))
         await conn.connect()
         try:
@@ -73,7 +73,7 @@ class TestWebSocketHandshake:
         assert conn.state is ConnectionState.CLOSED
 
     async def test_pub_sub_roundtrip(self, ws_server: NatsServerProcess) -> None:
-        url = ws_url("127.0.0.1", ws_server.ws_port)  # type: ignore[attr-defined]
+        url = ws_url("127.0.0.1", ws_server.ws_port)
         conn = Connection(ws_options(url))
         await conn.connect()
         received: asyncio.Queue[MsgEvent | HMsgEvent] = asyncio.Queue()
@@ -88,7 +88,7 @@ class TestWebSocketHandshake:
             await conn.close()
 
     async def test_request_reply(self, ws_server: NatsServerProcess) -> None:
-        url = ws_url("127.0.0.1", ws_server.ws_port)  # type: ignore[attr-defined]
+        url = ws_url("127.0.0.1", ws_server.ws_port)
         nc = await natsio.connect(url, connect_timeout=5.0, request_timeout=5.0)
 
         async def responder(msg) -> None:
@@ -103,7 +103,7 @@ class TestWebSocketHandshake:
             await nc.close()
 
     async def test_large_payload_forces_64bit_frame(self, ws_server: NatsServerProcess) -> None:
-        url = ws_url("127.0.0.1", ws_server.ws_port)  # type: ignore[attr-defined]
+        url = ws_url("127.0.0.1", ws_server.ws_port)
         conn = Connection(ws_options(url))
         await conn.connect()
         received: asyncio.Queue[MsgEvent | HMsgEvent] = asyncio.Queue()
@@ -120,7 +120,7 @@ class TestWebSocketHandshake:
             await conn.close()
 
     async def test_clean_close_leaves_no_tasks(self, ws_server: NatsServerProcess) -> None:
-        url = ws_url("127.0.0.1", ws_server.ws_port)  # type: ignore[attr-defined]
+        url = ws_url("127.0.0.1", ws_server.ws_port)
         conn = Connection(ws_options(url))
         await conn.connect()
         await conn.flush()

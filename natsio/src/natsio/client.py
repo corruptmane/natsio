@@ -225,7 +225,7 @@ class Client:
 
     @property
     def stats(self) -> ClientStatistics:
-        return ClientStatistics(**self._stats)  # type: ignore[arg-type]
+        return ClientStatistics(**self._stats)
 
     @property
     def inbox_prefix(self) -> str:
