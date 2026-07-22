@@ -1,0 +1,28 @@
+name: Feature request
+description: Propose a capability or an API change
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do that natsio makes hard or impossible today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed API / behavior
+      description: What would it look like? A code sketch of the call site helps.
+      render: python
+  - type: textarea
+    id: prior-art
+    attributes:
+      label: Prior art
+      description: How do nats.go / nats-py handle this, if they do? Relevant ADR?
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope
+      options:
+        - label: This could be an extension (`natsio-<name>`) rather than core

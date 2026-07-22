@@ -1,0 +1,50 @@
+name: Bug report
+description: Something in natsio behaves incorrectly
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. A minimal reproduction is worth ten paragraphs —
+        please include the smallest script that shows the problem.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you expected, and what natsio did instead. Full traceback if there is one.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction
+      description: A minimal, runnable script (and, if relevant, the nats-server config).
+      render: python
+    validations:
+      required: true
+  - type: input
+    id: natsio-version
+    attributes:
+      label: natsio version
+      placeholder: "e.g. 0.12.0 (or a commit SHA)"
+    validations:
+      required: true
+  - type: input
+    id: server-version
+    attributes:
+      label: nats-server version
+      placeholder: "e.g. 2.14.3"
+    validations:
+      required: true
+  - type: input
+    id: python-version
+    attributes:
+      label: Python version
+      placeholder: "e.g. 3.13.2 (CPython)"
+    validations:
+      required: true
+  - type: textarea
+    id: extras
+    attributes:
+      label: Extras / extensions in use
+      description: "e.g. natsio[nkeys], natsio-otel — and their versions, if relevant."

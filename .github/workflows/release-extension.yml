@@ -1,0 +1,50 @@
+# Publishes an extension distribution to PyPI via trusted publishing (OIDC),
+# triggered by a tag of the form `<name>/vX.Y.Z` (e.g. `otel/v0.1.0`, which
+# builds and publishes `natsio-otel`). The core `natsio` release is a separate
+# workflow keyed on `v*` tags.
+#
+# One-time PyPI setup PER EXTENSION: add a trusted publisher to each PyPI
+# project (natsio-otel, natsio-kvcodec, natsio-counters, natsio-natscontext,
+# natsio-testing) pointing at this repository, workflow `release-extension.yml`,
+# environment `pypi`. Unclaimed names use a *pending* publisher.
+
+name: Release extension
+
+on:
+  push:
+    tags: ["*/v*"]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      package: ${{ steps.parse.outputs.package }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: parse
+        # tag = <name>/vX.Y.Z  ->  package natsio-<name>
+        run: |
+          name="${GITHUB_REF_NAME%/v*}"
+          echo "package=natsio-${name}" >> "$GITHUB_OUTPUT"
+          echo "Building natsio-${name} from tag ${GITHUB_REF_NAME}"
+      - uses: astral-sh/setup-uv@v6
+      - run: uv build --package "${{ steps.parse.outputs.package }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          attestations: true

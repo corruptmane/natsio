@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions & discussion
+    url: https://github.com/corruptmane/natsio/discussions
+    about: How-to questions and open-ended discussion belong in Discussions, not issues.
+  - name: Security vulnerability
+    url: https://github.com/corruptmane/natsio/security/advisories/new
+    about: Report privately via a security advisory — never a public issue.
