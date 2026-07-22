@@ -30,6 +30,14 @@ namespace = true
   `extensions/natsio-<name>/` with its own version, changelog, and release
   tags (`<name>/vX.Y.Z`), depending on `natsio` (never the reverse).
 - Pre-1.0 extensions make no API-stability promises.
+- **Releasing.** Pushing a `<name>/vX.Y.Z` tag builds and publishes
+  `natsio-<name>` to PyPI (`.github/workflows/release-extension.yml`,
+  trusted publishing via the `pypi` environment). The tag is all that's
+  required. **GitHub Releases are core-only**: don't create a Release object
+  for extension tags — they clutter the Releases tab and can steal the
+  "Latest" badge from the core `natsio` release. PyPI plus each extension's
+  `CHANGELOG.md` is the record. Revisit per-extension only if one gets real
+  traction (and then mark those Releases as *not* latest).
 - If a module is ever adopted into the official orbit.py workspace, the
   transplant is mechanical: rename the distribution to `orbit-<name>` and move
   `natsio/<name>/` to `orbit/<name>/` (orbit is a pure PEP 420 namespace).
