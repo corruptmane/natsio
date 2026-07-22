@@ -8,8 +8,6 @@ this is not enough — the core validates the *raw* key too, which blocks
 Base64's escape-exotic-characters use case.
 """
 
-from __future__ import annotations
-
 import base64
 import binascii
 from typing import cast
@@ -218,5 +216,5 @@ class ChainKeyCodec(FilterableKeyCodec):
                     f"codec {index} ({type(codec).__name__}) does not support wildcard filtering"
                 )
         for codec in self._codecs:
-            key_filter = cast(FilterableKeyCodec, codec).encode_filter(key_filter)
+            key_filter = cast("FilterableKeyCodec", codec).encode_filter(key_filter)
         return key_filter

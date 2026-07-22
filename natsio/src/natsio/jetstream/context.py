@@ -5,10 +5,12 @@ import builtins
 import json
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
+from natsio._internal.lifecycle import Closed, Disconnected
 from natsio._internal.nuid import next_nuid
-from natsio._internal.protocol import HeadersInput, StatusCode
+from natsio._internal.protocol import Headers, HeadersInput, StatusCode
 from natsio._internal.validation import validate_stream_name, validate_subject
 from natsio.errors import ConfigError, ConnectionClosedError, NoRespondersError
 from natsio.errors import TimeoutError as NATSTimeoutError
@@ -18,8 +20,15 @@ if TYPE_CHECKING:
     from natsio.client import Client
 
 from . import headers as js_headers
-from .entities import AccountInfo, DiscardPolicy, PubAck, StreamConfig, StreamInfo
-from .errors import APIError, JetStreamError, JetStreamNotEnabledError, NoStreamResponseError
+from .entities import AccountInfo, DiscardPolicy, PubAck, StorageCompression, StreamConfig, StreamInfo
+from .errors import (
+    APIError,
+    JetStreamError,
+    JetStreamNotEnabledError,
+    NoStreamResponseError,
+    StreamNameInUseError,
+    StreamNotFoundError,
+)
 from .stream import Stream
 
 if TYPE_CHECKING:
@@ -195,8 +204,6 @@ class JetStreamContext:
         create that loses a race to a concurrent creator is absorbed by a
         re-update, so the call stays idempotent under contention.
         """
-        from .errors import StreamNameInUseError, StreamNotFoundError
-
         try:
             return await self.update_stream(config)
         except StreamNotFoundError:
@@ -282,10 +289,8 @@ class JetStreamContext:
         bucket with a DIFFERENT configuration raises
         `BucketExistsError`.
         """
-        from natsio.kv.bucket import KeyValue
-        from natsio.kv.errors import BucketExistsError
-
-        from .errors import StreamNameInUseError
+        from natsio.kv.bucket import KeyValue  # noqa: PLC0415  # circular
+        from natsio.kv.errors import BucketExistsError  # noqa: PLC0415  # circular
 
         try:
             stream = await self.create_stream(_kv_stream_config(config))
@@ -312,10 +317,8 @@ class JetStreamContext:
         `BucketNotFoundError` when no such bucket exists —
         there is nothing to update.
         """
-        from natsio.kv.bucket import KeyValue
-        from natsio.kv.errors import BucketNotFoundError
-
-        from .errors import StreamNotFoundError
+        from natsio.kv.bucket import KeyValue  # noqa: PLC0415  # circular
+        from natsio.kv.errors import BucketNotFoundError  # noqa: PLC0415  # circular
 
         try:
             stream = await self.update_stream(_kv_stream_config(config))
@@ -336,7 +339,7 @@ class JetStreamContext:
         fall back to a create when the backing stream is absent. Race-tolerant
         under concurrent creators (see `create_or_update_stream()`).
         """
-        from natsio.kv.bucket import KeyValue
+        from natsio.kv.bucket import KeyValue  # noqa: PLC0415  # circular
 
         stream = await self.create_or_update_stream(_kv_stream_config(config))
         return KeyValue(self, config.bucket, stream, key_codec=key_codec, value_codec=value_codec)
@@ -349,13 +352,11 @@ class JetStreamContext:
         value_codec: "ValueCodec | None" = None,
     ) -> "KeyValue":
         """A handle to an existing Key-Value bucket."""
-        from natsio.kv.bucket import STREAM_PREFIX, KeyValue
-        from natsio.kv.entities import validate_bucket_name
-        from natsio.kv.errors import BucketNotFoundError
+        from natsio.kv.bucket import STREAM_PREFIX, KeyValue  # noqa: PLC0415  # circular
+        from natsio.kv.entities import validate_bucket_name  # noqa: PLC0415  # circular
+        from natsio.kv.errors import BucketNotFoundError  # noqa: PLC0415  # circular
 
         validate_bucket_name(bucket)
-        from .errors import StreamNotFoundError
-
         try:
             stream = await self.stream(f"{STREAM_PREFIX}{bucket}")
         except StreamNotFoundError:
@@ -363,13 +364,11 @@ class JetStreamContext:
         return KeyValue(self, bucket, stream, key_codec=key_codec, value_codec=value_codec)
 
     async def delete_key_value(self, bucket: str) -> None:
-        from natsio.kv.bucket import STREAM_PREFIX
-        from natsio.kv.entities import validate_bucket_name
-        from natsio.kv.errors import BucketNotFoundError
+        from natsio.kv.bucket import STREAM_PREFIX  # noqa: PLC0415  # circular
+        from natsio.kv.entities import validate_bucket_name  # noqa: PLC0415  # circular
+        from natsio.kv.errors import BucketNotFoundError  # noqa: PLC0415  # circular
 
         validate_bucket_name(bucket)
-        from .errors import StreamNotFoundError
-
         try:
             await self.delete_stream(f"{STREAM_PREFIX}{bucket}")
         except StreamNotFoundError:
@@ -382,7 +381,7 @@ class JetStreamContext:
         streams carrying the ``KV_`` name prefix — excluding plain streams that
         merely publish on ``$KV`` subjects (matching nats.go's dual filter).
         """
-        from natsio.kv.bucket import STREAM_PREFIX, SUBJECT_PREFIX
+        from natsio.kv.bucket import STREAM_PREFIX, SUBJECT_PREFIX  # noqa: PLC0415  # circular
 
         async for name in self.stream_names(subject=f"{SUBJECT_PREFIX}.*.>"):
             if name.startswith(STREAM_PREFIX):
@@ -395,7 +394,7 @@ class JetStreamContext:
         per-bucket round-trip is made. Filtering matches
         `key_value_store_names()`.
         """
-        from natsio.kv.bucket import STREAM_PREFIX, SUBJECT_PREFIX
+        from natsio.kv.bucket import STREAM_PREFIX, SUBJECT_PREFIX  # noqa: PLC0415  # circular
 
         async for info in self.streams(subject=f"{SUBJECT_PREFIX}.*.>"):
             name = info.config.name
@@ -411,10 +410,8 @@ class JetStreamContext:
         bucket with a DIFFERENT configuration raises
         `BucketExistsError`.
         """
-        from natsio.objectstore.errors import BucketExistsError
-        from natsio.objectstore.store import ObjectStore
-
-        from .errors import StreamNameInUseError
+        from natsio.objectstore.errors import BucketExistsError  # noqa: PLC0415  # circular
+        from natsio.objectstore.store import ObjectStore  # noqa: PLC0415  # circular
 
         try:
             stream = await self.create_stream(_obj_stream_config(config))
@@ -431,10 +428,8 @@ class JetStreamContext:
         otherwise change immutable config; those surface as their mapped
         `APIError`.
         """
-        from natsio.objectstore.errors import BucketNotFoundError
-        from natsio.objectstore.store import ObjectStore
-
-        from .errors import StreamNotFoundError
+        from natsio.objectstore.errors import BucketNotFoundError  # noqa: PLC0415  # circular
+        from natsio.objectstore.store import ObjectStore  # noqa: PLC0415  # circular
 
         try:
             stream = await self.update_stream(_obj_stream_config(config))
@@ -449,21 +444,19 @@ class JetStreamContext:
         Race-tolerant under concurrent creators (see
         `create_or_update_stream()`).
         """
-        from natsio.objectstore.store import ObjectStore
+        from natsio.objectstore.store import ObjectStore  # noqa: PLC0415  # circular
 
         stream = await self.create_or_update_stream(_obj_stream_config(config))
         return ObjectStore(self, config.bucket, stream)
 
     async def object_store(self, bucket: str) -> "ObjectStore":
         """A handle to an existing Object Store bucket."""
-        from natsio.objectstore.entities import validate_bucket_name
-        from natsio.objectstore.errors import BucketNotFoundError
-        from natsio.objectstore.store import STREAM_PREFIX as OBJ_STREAM_PREFIX
-        from natsio.objectstore.store import ObjectStore
+        from natsio.objectstore.entities import validate_bucket_name  # noqa: PLC0415  # circular
+        from natsio.objectstore.errors import BucketNotFoundError  # noqa: PLC0415  # circular
+        from natsio.objectstore.store import STREAM_PREFIX as OBJ_STREAM_PREFIX  # noqa: PLC0415  # circular
+        from natsio.objectstore.store import ObjectStore  # noqa: PLC0415  # circular
 
         validate_bucket_name(bucket)
-        from .errors import StreamNotFoundError
-
         try:
             stream = await self.stream(f"{OBJ_STREAM_PREFIX}{bucket}")
         except StreamNotFoundError:
@@ -471,13 +464,11 @@ class JetStreamContext:
         return ObjectStore(self, bucket, stream)
 
     async def delete_object_store(self, bucket: str) -> None:
-        from natsio.objectstore.entities import validate_bucket_name
-        from natsio.objectstore.errors import BucketNotFoundError
-        from natsio.objectstore.store import STREAM_PREFIX as OBJ_STREAM_PREFIX
+        from natsio.objectstore.entities import validate_bucket_name  # noqa: PLC0415  # circular
+        from natsio.objectstore.errors import BucketNotFoundError  # noqa: PLC0415  # circular
+        from natsio.objectstore.store import STREAM_PREFIX as OBJ_STREAM_PREFIX  # noqa: PLC0415  # circular
 
         validate_bucket_name(bucket)
-        from .errors import StreamNotFoundError
-
         try:
             await self.delete_stream(f"{OBJ_STREAM_PREFIX}{bucket}")
         except StreamNotFoundError:
@@ -490,7 +481,7 @@ class JetStreamContext:
         only streams carrying the ``OBJ_`` name prefix — excluding plain streams
         that merely publish on ``$O`` subjects (matching nats.go's dual filter).
         """
-        from natsio.objectstore.store import STREAM_PREFIX, SUBJECT_PREFIX
+        from natsio.objectstore.store import STREAM_PREFIX, SUBJECT_PREFIX  # noqa: PLC0415  # circular
 
         async for name in self.stream_names(subject=f"{SUBJECT_PREFIX}.*.C.>"):
             if name.startswith(STREAM_PREFIX):
@@ -503,7 +494,7 @@ class JetStreamContext:
         per-bucket round-trip is made. Filtering matches
         `object_store_names()`.
         """
-        from natsio.objectstore.store import STREAM_PREFIX, SUBJECT_PREFIX
+        from natsio.objectstore.store import STREAM_PREFIX, SUBJECT_PREFIX  # noqa: PLC0415  # circular
 
         async for info in self.streams(subject=f"{SUBJECT_PREFIX}.*.C.>"):
             name = info.config.name
@@ -695,8 +686,6 @@ class JetStreamContext:
         """
         if self._async_prefix is not None:
             return
-        from natsio._internal.lifecycle import Closed, Disconnected
-
         client = self._client
         conn = client._conn
         prefix = f"{client.inbox_prefix}._js.{next_nuid()}"
@@ -843,8 +832,6 @@ def _merge_headers(headers: HeadersInput | None, extra: dict[str, str]) -> Heade
         return headers
     if headers is None:
         return extra
-    from natsio._internal.protocol import Headers
-
     merged = Headers(headers)
     for key, value in extra.items():
         merged.set(key, value)
@@ -863,7 +850,7 @@ def _kv_status_from_info(bucket: str, info: StreamInfo) -> "KeyValueStatus":
 
     Kept in sync with ``KeyValue.status()`` — same fields, same normalization.
     """
-    from natsio.kv.entities import KeyValueStatus
+    from natsio.kv.entities import KeyValueStatus  # noqa: PLC0415  # circular
 
     config = info.config
     return KeyValueStatus(
@@ -883,7 +870,7 @@ def _obj_status_from_info(bucket: str, info: StreamInfo) -> "ObjectStoreStatus":
 
     Kept in sync with ``ObjectStore.status()`` — same fields, same normalization.
     """
-    from natsio.objectstore.entities import ObjectStoreStatus
+    from natsio.objectstore.entities import ObjectStoreStatus  # noqa: PLC0415  # circular
 
     config = info.config
     return ObjectStoreStatus(
@@ -902,10 +889,7 @@ def _obj_status_from_info(bucket: str, info: StreamInfo) -> "ObjectStoreStatus":
 
 def _kv_stream_config(config: "KeyValueConfig") -> StreamConfig:
     """Map a bucket config onto its ADR-8 backing stream."""
-    from datetime import timedelta
-
-    from natsio.jetstream.entities import StorageCompression
-    from natsio.kv.bucket import STREAM_PREFIX, SUBJECT_PREFIX
+    from natsio.kv.bucket import STREAM_PREFIX, SUBJECT_PREFIX  # noqa: PLC0415  # circular
 
     duplicate_window = timedelta(minutes=2)
     if config.ttl is not None and timedelta(0) < config.ttl < duplicate_window:
@@ -936,10 +920,7 @@ def _kv_stream_config(config: "KeyValueConfig") -> StreamConfig:
 
 def _obj_stream_config(config: "ObjectStoreConfig") -> StreamConfig:
     """Map a bucket config onto its ADR-20 backing stream."""
-    from datetime import timedelta
-
-    from natsio.jetstream.entities import StorageCompression
-    from natsio.objectstore.store import STREAM_PREFIX, SUBJECT_PREFIX
+    from natsio.objectstore.store import STREAM_PREFIX, SUBJECT_PREFIX  # noqa: PLC0415  # circular
 
     duplicate_window = timedelta(minutes=2)
     if config.ttl is not None and timedelta(0) < config.ttl < duplicate_window:

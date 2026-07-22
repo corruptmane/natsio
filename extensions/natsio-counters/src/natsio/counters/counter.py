@@ -3,7 +3,7 @@
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any
 
-from natsio.jetstream.entities import DiscardPolicy, StreamConfig
+from natsio.jetstream.entities import DiscardPolicy, StorageCompression, StreamConfig
 from natsio.jetstream.errors import MessageNotFoundError, StreamNotFoundError
 from natsio.jetstream.stream import Stream
 
@@ -131,8 +131,6 @@ def _entry_from_parts(subject: str, payload: bytes, headers: Any) -> CounterEntr
 
 def _counter_stream_config(config: CounterConfig) -> StreamConfig:
     """Map a `CounterConfig` onto its ADR-49 backing stream."""
-    from natsio.jetstream.entities import StorageCompression
-
     return StreamConfig(
         name=config.name,
         description=config.description,

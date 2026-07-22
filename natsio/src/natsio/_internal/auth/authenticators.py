@@ -7,6 +7,7 @@ on disk, and callables may return fresh tokens — nothing here is cached.
 """
 
 import asyncio
+import base64
 import inspect
 import os
 from collections.abc import Awaitable, Callable
@@ -155,8 +156,6 @@ class CallbackAuth:
     signature_callback: Callable[[bytes], bytes | Awaitable[bytes]]
 
     async def authenticate(self, nonce: bytes | None) -> AuthResult:
-        import base64
-
         if nonce is None:
             raise ConfigError("server did not send a nonce; signed auth is not supported here")
         jwt = await resolve_str(self.jwt_callback)

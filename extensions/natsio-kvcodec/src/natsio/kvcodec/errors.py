@@ -6,8 +6,6 @@ every ``Decode*``) and keeps a bucket that somehow accumulated foreign/garbage
 data from being misread as if it round-tripped cleanly.
 """
 
-from __future__ import annotations
-
 __all__ = [
     "KeyDecodeError",
     "KeyEncodeError",

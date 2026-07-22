@@ -20,20 +20,16 @@ parsed and preserved on the returned `Context` — see each field's docstring
 and the ``README`` for what is and isn't applied.
 """
 
-from __future__ import annotations
-
 import json
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
+import natsio
+from natsio.client import Client
 from natsio.errors import NATSError
-from natsio.options import TLSConfig
-
-if TYPE_CHECKING:
-    from natsio.client import Client
-    from natsio.options import ConnectOptions
+from natsio.options import ConnectOptions, TLSConfig
 
 __all__ = [
     "Context",
@@ -192,7 +188,7 @@ class Context:
     raw: dict[str, Any] = field(default_factory=dict, repr=False)
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any], *, name: str, path: str | None = None) -> Context:
+    def from_dict(cls, data: dict[str, Any], *, name: str, path: str | None = None) -> "Context":
         def s(key: str) -> str:
             value = data.get(key, "")
             return value if isinstance(value, str) else ""
@@ -354,8 +350,6 @@ async def connect(
     name="my-app")`` connects with context ``staging`` and client name
     ``my-app``.
     """
-    import natsio
-
     ctx = load(name)
     kwargs = ctx.connect_kwargs()
     kwargs.update(overrides)

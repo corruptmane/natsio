@@ -4,10 +4,11 @@ from collections.abc import AsyncGenerator, Generator
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Final, Self
 
+from natsio.errors import ConfigError
 from natsio.jetstream import headers as js_headers
 from natsio.jetstream.consumer import OrderedConsumer
 from natsio.jetstream.entities import DeliverPolicy, StreamConfig
-from natsio.jetstream.errors import NoMessagesError, WrongLastSequenceError
+from natsio.jetstream.errors import MessageNotFoundError, NoMessagesError, WrongLastSequenceError
 from natsio.jetstream.message import JsMsg
 from natsio.jetstream.stream import Stream
 
@@ -137,8 +138,6 @@ class KeyValue:
         """Like `get()` but returns marker entries instead of raising."""
         encoded = self._encode_key(key)
         subject = self._subject(encoded)
-        from natsio.jetstream.errors import MessageNotFoundError
-
         try:
             if revision is None:
                 stored = await self._stream.get_msg(subject=subject)
@@ -177,8 +176,6 @@ class KeyValue:
         surfacing as a raw APIError from the publish.
         """
         if ttl is not None and not self._stream.cached_info.config.allow_msg_ttl:
-            from natsio.errors import ConfigError
-
             raise ConfigError(
                 f"bucket {self.bucket!r} does not allow per-message TTLs; create it "
                 "with KeyValueConfig(allow_msg_ttl=True) or limit_marker_ttl to use a "
@@ -343,8 +340,6 @@ class KeyValue:
         (every revision, not last-per-subject) and is mutually exclusive with
         ``include_history`` and ``updates_only``.
         """
-        from natsio.errors import ConfigError
-
         if include_history and updates_only:
             raise ConfigError("include_history and updates_only are mutually exclusive")
         if resume_from_revision is not None and (include_history or updates_only):
@@ -404,8 +399,6 @@ class KeyValue:
         elif isinstance(self._key_codec, FilterableKeyCodec):
             encoded = self._key_codec.encode_filter(key)
         else:
-            from natsio.errors import ConfigError
-
             raise ConfigError(
                 "wildcard watch keys cannot be combined with a non-filterable key codec: the "
                 "encoded keyspace would silently match nothing; use a FilterableKeyCodec "

@@ -13,12 +13,11 @@ import builtins
 import json
 from collections.abc import AsyncGenerator, AsyncIterator, Generator
 from contextlib import suppress
+from datetime import timedelta
 from typing import TYPE_CHECKING, Any, Self
 
-if TYPE_CHECKING:
-    from datetime import timedelta
-
 from natsio._internal.dispatcher import SubscriptionEntry
+from natsio._internal.lifecycle import Closed, Reconnected
 from natsio._internal.nuid import next_nuid
 from natsio._internal.protocol import HMsgEvent, MsgEvent
 from natsio.errors import ConfigError, ConnectionClosedError
@@ -167,8 +166,6 @@ class Consumer:
 
         def handler(event: MsgEvent | HMsgEvent) -> None:
             queue.put_nowait(client._build_msg(event))
-
-        from natsio._internal.lifecycle import Closed
 
         def on_event(event: object) -> None:
             if isinstance(event, Closed):
@@ -421,8 +418,6 @@ class Consumption:
         self._entry = conn.subscribe(f"{self._inbox_base}.*", None, self._route)
         self._last_frame_at = asyncio.get_running_loop().time()
         self._worker = client._spawn(self._pump(), name=f"natsio-consume-{self._consumer.name}")
-
-        from natsio._internal.lifecycle import Closed, Reconnected
 
         def on_event(event: object) -> None:
             if isinstance(event, Reconnected):
@@ -882,7 +877,5 @@ class OrderedConsumer:
                 await consumer.delete()
 
 
-def _ordered_inactive_threshold() -> "timedelta":
-    from datetime import timedelta
-
+def _ordered_inactive_threshold() -> timedelta:
     return timedelta(minutes=5)

@@ -248,7 +248,7 @@ class Client:
         ``publish_async_*`` knobs tune the async publish window (max in-flight
         acks, stall wait when full, optional per-message ack timeout).
         """
-        from natsio.jetstream import JetStreamContext
+        from natsio.jetstream import JetStreamContext  # noqa: PLC0415  # circular
 
         return JetStreamContext(
             self,

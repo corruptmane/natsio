@@ -63,6 +63,11 @@ class Headers(Mapping[str, str]):
 
     __slots__ = ("_data",)
 
+    # Mutable (add/set/discard) — intentionally unhashable. Explicit so it
+    # reads as a decision, not an oversight (Python sets this implicitly once
+    # __eq__ is defined).
+    __hash__ = None
+
     def __init__(self, initial: "HeadersInput | None" = None) -> None:
         self._data: dict[str, list[str]] = {}
         if isinstance(initial, Headers):

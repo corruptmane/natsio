@@ -26,8 +26,6 @@ friction" notes (raw-key pre-validation, and wildcard watches under a key
 codec).
 """
 
-from __future__ import annotations
-
 from .errors import (
     KeyDecodeError,
     KeyEncodeError,

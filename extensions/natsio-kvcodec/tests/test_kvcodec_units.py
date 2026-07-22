@@ -5,8 +5,6 @@ validate_key guarantee for key codecs, and predictable typed errors on corrupt
 input. No server needed.
 """
 
-from __future__ import annotations
-
 import base64
 import zlib
 

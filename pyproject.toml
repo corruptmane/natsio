@@ -61,7 +61,35 @@ select = [
     "ASYNC",  # flake8-async
     "PERF",   # perflint
     "RUF",    # ruff-specific
+    "G",      # flake8-logging-format
+    "RSE",    # flake8-raise
+    "DTZ",    # flake8-datetimez — no naive datetimes
+    "PGH",    # pygrep-hooks — no blanket type:ignore / noqa
+    "FURB",   # refurb — modernization
+    "PLE",    # pylint errors
+    "PLW",    # pylint warnings
+    "PLC0415",  # import-outside-top-level — lazy imports must be justified (circular/optional)
+    # flake8-type-checking, correctness codes only. NOT TC001-003 (they push
+    # type-only imports INTO TYPE_CHECKING + quotes — we prefer concrete
+    # imports, TYPE_CHECKING only for circular/forward-ref).
+    "TC004",  # runtime-used import wrongly in a TYPE_CHECKING block
+    "TC005",  # empty TYPE_CHECKING block
+    "TC006",  # unquoted cast type
+    "TC010",  # runtime string annotation that can't be evaluated
 ]
+# The ignore list stays empty on purpose: every suppression is an inline,
+# visible, justified noqa — never a blanket config rule.
+
+[tool.ruff.lint.per-file-ignores]
+# The one deliberate exception: function-level imports are fine in TESTS (local
+# fixtures, scoped monkeypatch targets, per-case doubles) but banned in shipped
+# source, where every remaining lazy import is a justified `# noqa: PLC0415`.
+"**/tests/**" = ["PLC0415"]
+"natsio/tests/**" = ["PLC0415"]
+# Examples are teaching code — a conditional/lazy import (e.g. importing the
+# dev-only natsio-testing extension only on the self-start path) is a feature
+# to demonstrate, not a smell.
+"examples/**" = ["PLC0415"]
 
 [tool.ty.environment]
 python-version = "3.13"

@@ -5,8 +5,6 @@ put/get/delete/history/keys/watch, verifying the stored (encoded) form on the
 wire and the decoded form at the API.
 """
 
-from __future__ import annotations
-
 import asyncio
 
 import pytest

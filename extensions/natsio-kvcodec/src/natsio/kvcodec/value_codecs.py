@@ -5,8 +5,6 @@ Values are never validated by the core (only keys are), so a value codec may
 produce arbitrary bytes.
 """
 
-from __future__ import annotations
-
 import base64
 import binascii
 import zlib

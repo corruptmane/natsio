@@ -11,6 +11,7 @@ from datetime import timedelta
 from typing import Any, Final
 
 from natsio._internal.protocol import Headers
+from natsio.errors import ConfigError
 from natsio.jetstream.entities import Placement, StorageType
 
 from .errors import InvalidCounterValueError
@@ -89,8 +90,6 @@ class CounterConfig:
 
     def __post_init__(self) -> None:
         if not self.subjects:
-            from natsio.errors import ConfigError
-
             raise ConfigError("a counter stream needs at least one subject")
 
 

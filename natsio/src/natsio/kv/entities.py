@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from enum import StrEnum
 from typing import Final, NoReturn, Protocol, runtime_checkable
 
+from natsio.errors import ConfigError
 from natsio.jetstream.entities import Placement, Republish, StorageType, StreamInfo
 
 from .errors import InvalidBucketNameError, InvalidKeyError
@@ -118,8 +119,6 @@ class KeyValueConfig:
         if not 1 <= self.history <= 64:
             raise InvalidBucketNameError("history must be between 1 and 64")
         if self.ttl is not None and self.ttl != timedelta(0) and self.ttl < timedelta(milliseconds=100):
-            from natsio.errors import ConfigError
-
             raise ConfigError("ttl must be at least 100ms (server-enforced max_age floor) or 0/None for never")
 
 

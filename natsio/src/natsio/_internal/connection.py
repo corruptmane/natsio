@@ -1096,6 +1096,6 @@ class Connection:
 
 
 def _client_version() -> str:
-    from natsio import __version__
+    from natsio import __version__  # noqa: PLC0415  # circular
 
     return __version__

@@ -7,6 +7,8 @@ constants rules out the classic ``f"{Enum.MEMBER}"`` class of bugs.
 from datetime import timedelta
 from typing import Final
 
+from natsio.errors import ConfigError
+
 type TTLInput = timedelta | int | str
 """A per-message TTL (ADR-43): a ``timedelta``, whole seconds, or ``"never"``."""
 
@@ -17,8 +19,6 @@ def encode_ttl(ttl: TTLInput) -> str:
     The wire format is second-granular, so a ``timedelta`` with sub-second
     precision is rejected rather than silently rounded.
     """
-    from natsio.errors import ConfigError
-
     if isinstance(ttl, str):
         return ttl
     if isinstance(ttl, timedelta):

@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Final, Self
 
 from natsio._internal.nuid import next_nuid
+from natsio.errors import ConfigError
 from natsio.jetstream import headers as js_headers
 from natsio.jetstream.consumer import OrderedConsumer
 from natsio.jetstream.entities import DeliverPolicy, StreamConfig
@@ -32,6 +33,7 @@ from .entities import (
     ObjectMeta,
     ObjectMetaOptions,
     ObjectStoreStatus,
+    validate_bucket_name,
     validate_object_name,
 )
 from .errors import (
@@ -186,8 +188,6 @@ class ObjectStore:
         chunk_size = meta.chunk_size if meta.chunk_size is not None else DEFAULT_CHUNK_SIZE
         limit = self._ctx.client.max_payload
         if 0 < limit < chunk_size:
-            from natsio.errors import ConfigError
-
             raise ConfigError(f"chunk_size {chunk_size} exceeds the server's max_payload ({limit})")
         try:
             prev, prev_seq = await self._stored_meta(meta.name)
@@ -438,8 +438,6 @@ class ObjectStore:
         """
         validate_object_name(name)
         target_bucket = bucket.bucket if isinstance(bucket, ObjectStore) else bucket
-        from .entities import validate_bucket_name
-
         validate_bucket_name(target_bucket)
         return await self._put_link(name, ObjectLink(bucket=target_bucket))
 

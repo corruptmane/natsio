@@ -8,7 +8,7 @@ Prints the exact follow-up commands; it never commits, tags, or pushes.
 import json
 import re
 import sys
-from datetime import date
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import NoReturn
 
@@ -36,7 +36,7 @@ def main() -> None:
         fail(f"version {new!r} is not X.Y.Z")
 
     pyproject = PYPROJECT.read_text()
-    match = re.search(r'^version = "([^"]+)"$', pyproject, re.M)
+    match = re.search(r'^version = "([^"]+)"$', pyproject, re.MULTILINE)
     if match is None:
         fail(f"no version line found in {PYPROJECT}")
     old = match.group(1)
@@ -59,7 +59,8 @@ def main() -> None:
         return
 
     PYPROJECT.write_text(pyproject.replace(f'version = "{old}"', f'version = "{new}"', 1))
-    CHANGELOG.write_text(changelog.replace("## Unreleased\n", f"## {new} — {date.today().isoformat()}\n", 1))
+    today = datetime.now(UTC).date().isoformat()
+    CHANGELOG.write_text(changelog.replace("## Unreleased\n", f"## {new} — {today}\n", 1))
     VERSION_TEST.write_text(version_test.replace(f'"{old}"', f'"{new}"', 1))
     context7["previousVersions"] = [{"tag": f"v{new}"}, *context7.get("previousVersions", [])]
     CONTEXT7.write_text(json.dumps(context7, indent=2) + "\n")

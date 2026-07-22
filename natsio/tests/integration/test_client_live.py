@@ -276,7 +276,7 @@ class TestLifecycle:
         nc = await natsio.connect(
             server.url,
             connect_timeout=5.0,
-            error_cb=lambda exc: errors.append(exc),
+            error_cb=errors.append,
         )
         try:
             sub = nc.subscribe("flood", pending_msgs_limit=5, policy=PendingLimitPolicy.DROP_NEW)

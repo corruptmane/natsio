@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from typing import Annotated, Final
 
 from natsio._internal.jsonmodel import RFC3339, JsonModel
+from natsio.errors import ConfigError
 from natsio.jetstream.entities import Placement, StorageType, StreamInfo
 
 from .errors import InvalidBucketNameError, InvalidObjectNameError
@@ -57,8 +58,6 @@ class ObjectStoreConfig:
     def __post_init__(self) -> None:
         validate_bucket_name(self.bucket)
         if self.ttl is not None and self.ttl != timedelta(0) and self.ttl < timedelta(milliseconds=100):
-            from natsio.errors import ConfigError
-
             raise ConfigError("ttl must be at least 100ms (server-enforced max_age floor) or 0/None for never")
 
 
@@ -77,8 +76,6 @@ class ObjectMeta:
     def __post_init__(self) -> None:
         validate_object_name(self.name)
         if self.chunk_size is not None and self.chunk_size <= 0:
-            from natsio.errors import ConfigError
-
             raise ConfigError("chunk_size must be positive")
 
 

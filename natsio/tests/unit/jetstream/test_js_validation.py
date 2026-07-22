@@ -40,7 +40,7 @@ class _ExplodingClient:
 
 
 def _ctx() -> JetStreamContext:
-    return JetStreamContext(cast(Client, _ExplodingClient()))
+    return JetStreamContext(cast("Client", _ExplodingClient()))
 
 
 def _stream() -> Stream:
@@ -116,16 +116,16 @@ class TestConsumerEphemeralNameStaysValid:
 class TestContextPrefixValidation:
     def test_empty_api_prefix_rejected(self) -> None:
         with pytest.raises(ConfigError, match="API prefix cannot be empty"):
-            JetStreamContext(cast(Client, _ExplodingClient()), api_prefix="")
+            JetStreamContext(cast("Client", _ExplodingClient()), api_prefix="")
 
     def test_empty_domain_rejected(self) -> None:
         with pytest.raises(ConfigError, match="domain cannot be empty"):
-            JetStreamContext(cast(Client, _ExplodingClient()), domain="")
+            JetStreamContext(cast("Client", _ExplodingClient()), domain="")
 
     def test_domain_and_api_prefix_mutually_exclusive(self) -> None:
         with pytest.raises(ConfigError):
-            JetStreamContext(cast(Client, _ExplodingClient()), domain="hub", api_prefix="$JS.API")
+            JetStreamContext(cast("Client", _ExplodingClient()), domain="hub", api_prefix="$JS.API")
 
     def test_valid_domain_builds_prefix(self) -> None:
-        js = JetStreamContext(cast(Client, _ExplodingClient()), domain="hub")
+        js = JetStreamContext(cast("Client", _ExplodingClient()), domain="hub")
         assert js.api_prefix == "$JS.hub.API"

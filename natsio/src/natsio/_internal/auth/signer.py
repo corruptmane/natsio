@@ -36,7 +36,7 @@ type _Public = Callable[[bytes], bytes]
 @cache
 def _backend() -> tuple[_Sign, _Public]:
     try:
-        from nacl.signing import SigningKey
+        from nacl.signing import SigningKey  # noqa: PLC0415  # optional
     except ImportError:
         pass
     else:
@@ -46,8 +46,10 @@ def _backend() -> tuple[_Sign, _Public]:
         )
 
     try:
-        from cryptography.hazmat.primitives import serialization
-        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+        from cryptography.hazmat.primitives import serialization  # noqa: PLC0415  # optional
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import (  # noqa: PLC0415  # optional
+            Ed25519PrivateKey,
+        )
     except ImportError:
         raise MissingDependencyError(_MISSING) from None
 

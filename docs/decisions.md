@@ -4,6 +4,42 @@ The reasoning behind natsio's non-obvious choices, recorded so they survive
 the people (and AI sessions) that made them. Format: the decision, the why,
 and — where one exists — the scar that taught it.
 
+## Imports, annotations, and lint policy
+
+We target Python 3.13+ with **runtime-evaluated annotations** — no
+`from __future__ import annotations` anywhere. Annotations are real, evaluated
+at definition time; the deferral tricks are used only when genuinely forced:
+
+- **`TYPE_CHECKING` blocks and quoted hints** exist for exactly two reasons: a
+  **circular import** (the hub-and-spoke cycles: `client↔jetstream`,
+  `jetstream.context↔kv/objectstore`, `stream↔context`, `consumer↔stream`,
+  micro `entities↔service`) or a **forward reference** (a name used in an
+  annotation before it is defined — e.g. a class referencing itself). This is
+  machine-enforced: ruff `TC004` (a runtime-used import must not hide in a
+  `TYPE_CHECKING` block), `TC005` (no empty blocks), and `UP037` (no redundant
+  quotes) all run and pass, so every `TYPE_CHECKING` import is provably
+  type-only and every quote provably necessary. We do **not** enable
+  `TC001`–`TC003` — those push type-only imports *into* `TYPE_CHECKING`, the
+  opposite of "prefer concrete."
+- **Function-level (lazy) imports are banned in shipped source** (ruff
+  `PLC0415`). Every one that remains is a justified
+  `# noqa: PLC0415  # circular: …` (breaking a runtime import cycle) or
+  `# noqa: PLC0415  # optional` (an optional backend like PyNaCl/cryptography —
+  hoisting it would make `import natsio` crash without the extra). Lazy imports
+  are allowed in **tests** and **examples** (local fixtures, scoped doubles,
+  pedagogical conditional imports) via the single deliberate per-file-ignore.
+
+**Suppression posture.** The ruff `ignore` list is empty and there are no
+config-level rule disables; the sole `per-file-ignores` entry is the
+tests/examples `PLC0415` policy above. Every other suppression is a local,
+visible, justified `# noqa`/`# ty: ignore[code]`. Blanket `# type: ignore` is
+itself banned (ruff `PGH`), and dead `# noqa` is caught (`RUF100`). The lint
+set is broad and typing-focused (E/W/F/I/N/UP/B/C4/SIM/PIE/RET/ASYNC/PERF/RUF
+plus G/RSE/DTZ/PGH/FURB/PLE/PLW and the TC correctness codes); it deliberately
+omits `TRY003` (fights descriptive error messages), `SLF001` (our internals are
+one tightly-coupled package by design), and `ARG` (protocol-conformance
+parameters are legitimately unused).
+
 ## Architecture
 
 ### Zero runtime dependencies, and no crypto of our own

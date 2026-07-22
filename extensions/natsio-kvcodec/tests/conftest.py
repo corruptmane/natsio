@@ -5,8 +5,6 @@ when no binary is found), dogfooding the extension namespace exactly as the
 core integration suite does.
 """
 
-from __future__ import annotations
-
 import os
 from collections.abc import AsyncIterator
 from pathlib import Path
