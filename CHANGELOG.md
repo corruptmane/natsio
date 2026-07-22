@@ -3,7 +3,7 @@
 All notable changes to the `natsio` core client are documented here.
 Extension packages under `extensions/` keep their own changelogs.
 
-## Unreleased
+## 0.12.0 — 2026-07-22
 
 ### Core API (pre-1.0 seam changes, driven by building the extensions)
 
@@ -33,6 +33,17 @@ additive and fixed here:
 - Counter err_codes registered: `CounterIncrementMissingError` (10169) /
   `CounterIncrementInvalidError` (10171) instead of string-matching.
 
+### Fixed (Key-Value, surfaced by natsio-kvcodec)
+
+- Key codecs: the raw key was validated *before* the codec ran, rejecting
+  exactly the exotic keys (spaces, etc.) that a `Base64KeyCodec` exists to
+  encode. With a key codec set, only the *encoded* key must be subject-legal
+  now.
+- `keys()` / `iter_keys()` / `purge_deletes()` ran the value codec on the
+  server-stripped empty payload of a headers-only delivery, so any framing
+  value codec (zlib, encryption) made `keys()` raise. Empty payloads now skip
+  value decoding.
+
 ### Extensions
 
 - `natsio-otel` (metrics over the seam + W3C `inject`/`extract` and a
@@ -42,6 +53,15 @@ additive and fixed here:
   `natsio-counters` (ADR-49 distributed counters), `natsio-natscontext`
   (ADR-21 CLI context files → connect options). Each imports as
   `natsio.<name>`, versioned 0.1.0.
+
+### Internal
+
+- Suppression and import/annotation audit: shipped source now carries zero
+  type suppressions (dead `# type: ignore` comments removed) and zero
+  silently-swallowed exceptions; no `from __future__ import annotations`;
+  function-level imports banned in source (`PLC0415`) except justified
+  circular/optional ones. Broader, typing-focused lint set. See
+  `docs/decisions.md`.
 
 ## 0.11.0 — 2026-07-21
 
