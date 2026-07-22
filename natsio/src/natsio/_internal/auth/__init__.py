@@ -5,6 +5,7 @@ from .authenticators import (
     CredsAuth,
     CredsFileAuth,
     NKeyAuth,
+    NKeyFileAuth,
     TokenAuth,
     UserPasswordAuth,
 )
@@ -16,6 +17,7 @@ __all__ = [
     "CredsAuth",
     "CredsFileAuth",
     "NKeyAuth",
+    "NKeyFileAuth",
     "TokenAuth",
     "UserPasswordAuth",
 ]

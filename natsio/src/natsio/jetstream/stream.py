@@ -9,11 +9,13 @@ from typing import TYPE_CHECKING, Any
 
 from natsio._internal.jsonmodel import RFC3339
 from natsio._internal.nuid import next_nuid
-from natsio._internal.protocol import Headers, parse_header_block
+from natsio._internal.protocol import Headers, StatusCode, parse_header_block
 from natsio._internal.validation import validate_consumer_name
 from natsio.errors import ConfigError, NoRespondersError
 
 if TYPE_CHECKING:
+    from natsio.message import Msg
+
     from .context import JetStreamContext
 
 from . import headers as js_headers
@@ -184,6 +186,63 @@ class Stream:
             return await self._direct_get(sequence, subject, next_for)
         return await self._api_get(sequence, subject, next_for)
 
+    async def get_last_msgs_for(
+        self,
+        subjects: list[str] | str,
+        *,
+        batch: int | None = None,
+        up_to_seq: int | None = None,
+        up_to_time: datetime | None = None,
+    ) -> AsyncIterator[StoredMsg]:
+        """Yield the last stored message on each of ``subjects`` in one batch.
+
+        A single batch Direct Get (``multi_last``, ADR-31): one request to
+        ``$JS.API.DIRECT.GET.<stream>`` streams back the last message per matched
+        subject, terminated by a ``204 EOB`` frame. ``subjects`` may contain
+        wildcards (``*`` / ``>``); a subject with no stored message is simply
+        omitted. This is nats.go / orbit ``GetLastMsgsFor`` parity.
+
+        The batch API is Direct-Get-only: the stream must have been created with
+        ``allow_direct=True``, else `ConfigError` is raised (there is no
+        ``STREAM.MSG.GET`` fallback for the batch form).
+
+        - ``batch`` caps how many messages the server returns.
+        - ``up_to_seq`` / ``up_to_time`` fetch the last message on each subject
+          *at or before* that stream sequence / timestamp (mutually exclusive).
+
+        Ordinary usage returns nothing to await up front — iterate it:
+
+            async for stored in stream.get_last_msgs_for(["a.*", "b.>"]):
+                ...
+        """
+        if isinstance(subjects, str):
+            subjects = [subjects]
+        if not subjects:
+            raise ConfigError("get_last_msgs_for needs at least one subject")
+        if up_to_seq is not None and up_to_time is not None:
+            raise ConfigError("provide up_to_seq or up_to_time, not both")
+        if not self.cached_info.config.allow_direct:
+            raise ConfigError(
+                f"batch get requires a stream created with allow_direct=True; {self.name!r} does not allow direct get"
+            )
+        request: dict[str, Any] = {"multi_last": subjects}
+        if batch is not None:
+            request["batch"] = batch
+        if up_to_seq is not None:
+            request["up_to_seq"] = up_to_seq
+        if up_to_time is not None:
+            request["up_to_time"] = RFC3339.to_wire(up_to_time)
+        body = json.dumps(request, separators=(",", ":")).encode()
+        endpoint = f"{self._ctx.api_prefix}.DIRECT.GET.{self.name}"
+        async for msg in self._ctx.client.request_many(endpoint, body, timeout=self._ctx.timeout):
+            if msg.status is not None:
+                # A 204 "EOB" frame terminates the batch (ADR-31). A per-subject
+                # miss can arrive as a 404 status frame — skip it and keep going.
+                if msg.status.code == StatusCode.NOT_FOUND:
+                    continue
+                return
+            yield self._stored_from_direct(msg)
+
     async def delete_msg(self, sequence: int, *, no_erase: bool = False) -> None:
         payload: dict[str, Any] = {"seq": sequence}
         if no_erase:
@@ -209,6 +268,16 @@ class Stream:
             raise MessageNotFoundError("direct get is not available for this stream") from None
         if msg.status is not None and msg.status.code != 200:
             raise MessageNotFoundError(f"no message matched ({msg.status.code} {msg.status.description})")
+        return self._stored_from_direct(msg)
+
+    @staticmethod
+    def _stored_from_direct(msg: "Msg") -> StoredMsg:
+        """Build a `StoredMsg` from a Direct Get reply frame.
+
+        Shared by single-message `get_msg` and batch `get_last_msgs_for` so both
+        read the ``Nats-Subject`` / ``Nats-Sequence`` / ``Nats-Time-Stamp``
+        headers identically.
+        """
         headers = msg.headers if msg.headers is not None else Headers()
         time_raw = headers.get(js_headers.TIME_STAMP)
         return StoredMsg(

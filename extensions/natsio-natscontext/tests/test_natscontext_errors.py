@@ -57,10 +57,20 @@ def test_half_specified_client_cert_rejected(write_context: Callable[..., Path])
         ctx.connect_kwargs()
 
 
-def test_nkey_file_without_seed_rejected(write_context: Callable[..., Path], tmp_path: Path) -> None:
+async def test_nkey_file_without_seed_rejected(write_context: Callable[..., Path], tmp_path: Path) -> None:
+    # The mapper forwards the path to natsio's NKeyFileAuth, which reads+parses
+    # (and re-reads on reconnect); a seedless file is a ConfigError at auth time.
+    from natsio._internal.auth import NKeyFileAuth
+    from natsio.errors import ConfigError
+    from natsio.options import ConnectOptions
+
     bad = tmp_path / "empty.nk"
     bad.write_text("no seed in here\n", encoding="utf-8")
     write_context("nk", url="nats://x:4222", nkey=str(bad))
-    ctx = natscontext.load("nk")
-    with pytest.raises(ContextError, match="no NKey seed"):
-        ctx.connect_kwargs()
+    kwargs = natscontext.load("nk").connect_kwargs()
+    assert kwargs["nkey_file"] == str(bad)
+
+    auth = ConnectOptions(**kwargs).resolve_authenticator()
+    assert isinstance(auth, NKeyFileAuth)
+    with pytest.raises(ConfigError, match="no NKey seed"):
+        await auth.authenticate(b"nonce")

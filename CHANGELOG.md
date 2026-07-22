@@ -3,6 +3,46 @@
 All notable changes to the `natsio` core client are documented here.
 Extension packages under `extensions/` keep their own changelogs.
 
+## Unreleased
+
+### Core API (pre-1.0 seam changes, driven by building the extensions)
+
+Building four extensions against the seams before the 1.0 freeze surfaced two
+outright core bugs (fixed in the previous commit) and four seam gaps, all
+additive and fixed here:
+
+- Instrumentation seam now carries message `headers` to `on_message_published`
+  / `on_message_delivered` (near-zero hot-path cost — an already-parsed
+  reference; the delivery match is split so the headerless MSG case passes
+  `None` with no per-message getattr). This is what a tracing exporter needs;
+  the seam is frozen at these signatures. Injection stays a caller/helper
+  action and process spans a handler wrapper, deliberately not core hooks
+  (see docs/decisions.md).
+- `TLSConfig(certfile=, keyfile=, cafile=)`: build the SSL context lazily from
+  files (nats.go ClientCert/RootCAs parity) instead of hand-rolling `ssl`. A
+  bare `TLSConfig()` is unchanged; `context` plus files, or a lone keyfile,
+  raise `ConfigError`.
+- `NKeyFileAuth(path)` + the `nkey_file` connect option: reads and re-parses
+  the seed on every authenticate (reconnect re-read), symmetric with
+  `credentials`/`CredsFileAuth`.
+- `FilterableKeyCodec` protocol + wildcard-watch support: a key codec that
+  implements `encode_filter` now enables wildcard watches (per-token filter
+  encoding) instead of the blanket refusal; non-filterable codecs still refuse.
+- `Stream.get_last_msgs_for(subjects)`: public batch Direct Get (`multi_last`,
+  204 EOB terminator) — was private-only, forcing counters to hand-roll it.
+- Counter err_codes registered: `CounterIncrementMissingError` (10169) /
+  `CounterIncrementInvalidError` (10171) instead of string-matching.
+
+### Extensions
+
+- `natsio-otel` (metrics over the seam + W3C `inject`/`extract` and a
+  `traced_handler` wrapper that opens a CONSUMER span per message, linked
+  across the wire to the producer), `natsio-kvcodec` (Base64/Path/Chain key
+  codecs, Zlib/Base64 value codecs; wildcard watches now work),
+  `natsio-counters` (ADR-49 distributed counters), `natsio-natscontext`
+  (ADR-21 CLI context files → connect options). Each imports as
+  `natsio.<name>`, versioned 0.1.0.
+
 ## 0.11.0 — 2026-07-21
 
 ### Microservices (ADR-32)

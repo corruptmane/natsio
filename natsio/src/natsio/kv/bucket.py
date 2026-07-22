@@ -14,7 +14,7 @@ from natsio.jetstream.stream import Stream
 if TYPE_CHECKING:
     from natsio.jetstream.context import JetStreamContext
 
-from .entities import KeyCodec, KeyValueStatus, KvEntry, Operation, ValueCodec, validate_key
+from .entities import FilterableKeyCodec, KeyCodec, KeyValueStatus, KvEntry, Operation, ValueCodec, validate_key
 from .errors import BucketNotFoundError, KeyDeletedError, KeyExistsError, KeyNotFoundError
 
 __all__ = ["KeyValue", "KvWatcher"]
@@ -351,11 +351,7 @@ class KeyValue:
             raise ConfigError("resume_from_revision is mutually exclusive with include_history and updates_only")
 
         filters = list(keys) if keys else [">"]
-        subjects: list[str] = []
-        for key in filters:
-            validate_key(key, wildcards=True)
-            encoded = key if key == ">" else self._maybe_encode_watch_key(key)
-            subjects.append(self._subject(encoded))
+        subjects: list[str] = [self._subject(self._encode_watch_filter(key)) for key in filters]
 
         opt_start_seq: int | None = None
         if resume_from_revision is not None:
@@ -380,17 +376,43 @@ class KeyValue:
             ignore_deletes=ignore_deletes,
         )
 
-    def _maybe_encode_watch_key(self, key: str) -> str:
+    def _encode_watch_filter(self, key: str) -> str:
+        """Encode one watch filter (which may carry ``*``/``>``) to a subject.
+
+        Without a key codec the raw filter must itself be a legal subject filter
+        — validated here with subject-wildcard grammar. With a key codec the raw
+        filter is the caller's domain (it may be in the codec's own notation,
+        e.g. PathKeyCodec's ``/a/*``), so only the ENCODED filter must be a legal
+        subject filter — mirroring `_encode_key`, which validates the encoded key
+        rather than the raw one.
+
+        A literal key encodes whole, exactly as a read/write would. A wildcard
+        filter needs a `FilterableKeyCodec`, which encodes it per token (wildcard
+        tokens passed through untouched) into a valid subject filter that matches
+        the same keys; the decode path reverses it per token unchanged. A plain
+        codec genuinely cannot — encoding the whole key would mangle the
+        ``*``/``>`` — so it stays a loud refusal.
+        """
         if self._key_codec is None:
+            validate_key(key, wildcards=True)
             return key
-        if "*" in key or ">" in key:
+        if key == ">":
+            return key  # whole-bucket watch: no codec keyspace to translate
+        tokens = key.split(".")
+        if "*" not in tokens and ">" not in tokens:
+            encoded = self._key_codec.encode(key)
+        elif isinstance(self._key_codec, FilterableKeyCodec):
+            encoded = self._key_codec.encode_filter(key)
+        else:
             from natsio.errors import ConfigError
 
             raise ConfigError(
-                "wildcard watch keys cannot be combined with a key codec: the encoded "
-                "keyspace would silently match nothing; watch('>') the whole bucket instead"
+                "wildcard watch keys cannot be combined with a non-filterable key codec: the "
+                "encoded keyspace would silently match nothing; use a FilterableKeyCodec "
+                "(e.g. natsio.kvcodec's Base64KeyCodec/PathKeyCodec) or watch('>') the whole bucket"
             )
-        return self._key_codec.encode(key)
+        validate_key(encoded, wildcards=True)
+        return encoded
 
     async def keys(self) -> list[str]:
         """Every key with a live value. An empty bucket returns ``[]`` promptly."""

@@ -24,8 +24,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
-import ssl
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -114,30 +112,6 @@ def _valid_name(name: str) -> bool:
 def _expand(path: str) -> str:
     """Expand ``~`` and ``$VAR`` in a filesystem path, as the CLI does."""
     return os.path.expanduser(os.path.expandvars(path)) if path else path
-
-
-# A decorated seed block (``-----BEGIN USER NKEY SEED-----``) or a bare seed.
-_NKEY_SEED_BLOCK = re.compile(
-    r"-{3,}\s*BEGIN USER NKEY SEED\s*-{3,}\s*(?P<seed>[A-Z2-7]+)\s*-{3,}\s*END USER NKEY SEED\s*-{3,}",
-)
-_BARE_SEED = re.compile(r"(?<![A-Z2-7])(?P<seed>S[A-Z2-7]{2}[A-Z2-7]{50,})(?![A-Z2-7])")
-
-
-def _read_nkey_seed(path: str) -> str:
-    """Read an nkey *file* (the context stores a path) and return the seed string.
-
-    ``nats.go`` passes the file to ``nkeys.ParseDecoratedNKey``; natsio's
-    ``nkey_seed`` wants the seed itself, so we extract it here. Supports both a
-    decorated ``-----BEGIN USER NKEY SEED-----`` block and a bare seed file.
-    """
-    try:
-        content = Path(path).read_text(encoding="utf-8")
-    except OSError as exc:
-        raise ContextError(f"cannot read nkey file {path!r}: {exc}") from exc
-    match = _NKEY_SEED_BLOCK.search(content) or _BARE_SEED.search(content.strip())
-    if match is None:
-        raise ContextError(f"nkey file {path!r} contains no NKey seed")
-    return match.group("seed")
 
 
 # --------------------------------------------------------------------------- #
@@ -257,16 +231,17 @@ class Context:
     def _build_tls(self) -> TLSConfig | None:
         if not (self.cert or self.key or self.ca or self.tls_first):
             return None
-        context = ssl.create_default_context()
-        if self.ca:
-            context.load_verify_locations(cafile=_expand(self.ca))
         # orbit.go applies a client cert only when *both* cert and key are set;
         # a half-configured pair is a config error rather than a silent drop.
         if bool(self.cert) != bool(self.key):
             raise ContextError("context sets only one of 'cert'/'key'; both are required for a client certificate")
-        if self.cert and self.key:
-            context.load_cert_chain(certfile=_expand(self.cert), keyfile=_expand(self.key))
-        return TLSConfig(context=context, handshake_first=self.tls_first)
+        # natsio's TLSConfig loads the PEM files itself (lazily, per reconnect).
+        return TLSConfig(
+            certfile=_expand(self.cert) or None,
+            keyfile=_expand(self.key) or None,
+            cafile=_expand(self.ca) or None,
+            handshake_first=self.tls_first,
+        )
 
     def connect_kwargs(self) -> dict[str, Any]:
         """Project this context onto `natsio.connect` keyword arguments.
@@ -294,7 +269,9 @@ class Context:
         elif self.creds:
             kwargs["credentials"] = _expand(self.creds)
         elif self.nkey:
-            kwargs["nkey_seed"] = _read_nkey_seed(_expand(self.nkey))
+            # natsio's NKeyFileAuth reads and parses the seed file itself,
+            # re-reading on every reconnect (rotation) instead of once at load.
+            kwargs["nkey_file"] = _expand(self.nkey)
         elif self.token:
             kwargs["token"] = self.token
 

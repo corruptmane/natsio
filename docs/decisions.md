@@ -74,6 +74,27 @@ once, and *that* contract is tested), and the seam must cost nothing when
 unused (the default Noop is not wrapped at all — this was ~17% of publish
 throughput before it was fixed).
 
+**The 1.0 freeze and its scope.** Building `natsio-otel` against the seam
+revealed the protocol was metrics-complete but tracing-incapable, so before
+freezing it we widened exactly enough: the two message hooks now carry the
+message `headers` (`on_message_published(subject, headers, size)`,
+`on_message_delivered(subject, headers, size)`) — a near-zero hot-path cost
+(an already-parsed reference; the delivery `match` is split so the headerless
+`MSG` case passes `None` with no per-message `getattr`). That is what a
+tracing exporter needs to derive header attributes and see inbound context.
+
+What we deliberately did **not** add: a mutable pre-encode publish hook (for
+auto-injecting `traceparent`) or a per-message process-scope around the
+subscriber callback. Injection is a caller action — add `traceparent` to the
+headers you publish, which `natsio-otel`'s `inject()` helper does — kept off
+the hottest path. Process spans belong to a handler *wrapper*
+(`natsio-otel.traced_handler`), not a core hook, because natsio has three
+consumption modes (callback, iterator, `next_msg`) and only the callback is
+bracketable; a core scope would be a leaky half-solution that also taxed the
+delivery path per message. The seam is frozen at these signatures; richer
+tracing surfaces, if ever needed, are a separate opt-in protocol, not a
+mutation of these.
+
 ## Behavioral contracts
 
 ### Loud failure, everywhere

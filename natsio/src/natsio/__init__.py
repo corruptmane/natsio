@@ -39,6 +39,7 @@ from natsio.auth import (
     CredsAuth,
     CredsFileAuth,
     NKeyAuth,
+    NKeyFileAuth,
     TokenAuth,
     UserPasswordAuth,
 )
@@ -110,6 +111,7 @@ __all__ = [
     "Msg",
     "NATSError",
     "NKeyAuth",
+    "NKeyFileAuth",
     "NoReplySubjectError",
     "NoRespondersError",
     "NoServersAvailableError",

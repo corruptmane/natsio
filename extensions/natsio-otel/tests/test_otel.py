@@ -55,8 +55,8 @@ def _sum(points: list) -> float:
 
 def test_publish_hook_records_messages_bytes_and_size():
     reader, instr = _reader_and_instr()
-    instr.on_message_published("orders", 100)
-    instr.on_message_published("orders", 50)
+    instr.on_message_published("orders", None, 100)
+    instr.on_message_published("orders", None, 50)
     pts = _points(reader)
 
     assert _sum(pts["messaging.client.sent.messages"]) == 2
@@ -69,7 +69,7 @@ def test_publish_hook_records_messages_bytes_and_size():
 
 def test_delivered_hook_records_consumed_metrics():
     reader, instr = _reader_and_instr()
-    instr.on_message_delivered("events", 42)
+    instr.on_message_delivered("events", None, 42)
     pts = _points(reader)
     assert _sum(pts["messaging.client.consumed.messages"]) == 1
     assert _sum(pts["nats.client.consumed.bytes"]) == 42
@@ -78,8 +78,8 @@ def test_delivered_hook_records_consumed_metrics():
 
 def test_base_attributes_carry_messaging_system_and_operation_type():
     reader, instr = _reader_and_instr()
-    instr.on_message_published("orders", 10)
-    instr.on_message_delivered("orders", 10)
+    instr.on_message_published("orders", None, 10)
+    instr.on_message_delivered("orders", None, 10)
     pts = _points(reader)
     send = pts["messaging.client.sent.messages"][0]
     recv = pts["messaging.client.consumed.messages"][0]
@@ -90,14 +90,14 @@ def test_base_attributes_carry_messaging_system_and_operation_type():
 
 def test_subject_not_recorded_by_default():
     reader, instr = _reader_and_instr()
-    instr.on_message_published("secret.inbox.abc", 10)
+    instr.on_message_published("secret.inbox.abc", None, 10)
     pt = _points(reader)["messaging.client.sent.messages"][0]
     assert "messaging.destination.name" not in pt.attributes
 
 
 def test_subject_recorded_when_opted_in():
     reader, instr = _reader_and_instr(record_subject=True)
-    instr.on_message_published("orders.eu", 10)
+    instr.on_message_published("orders.eu", None, 10)
     pt = _points(reader)["messaging.client.sent.messages"][0]
     assert pt.attributes["messaging.destination.name"] == "orders.eu"
 
@@ -159,8 +159,8 @@ def test_hooks_do_not_raise_without_sdk_provider():
     # With only the API (no configured SDK), instruments are no-ops but the
     # calls must still be safe.
     instr = OtelInstrumentation()
-    instr.on_message_published("x", 1)
-    instr.on_message_delivered("x", 1)
+    instr.on_message_published("x", None, 1)
+    instr.on_message_delivered("x", None, 1)
     instr.on_error(RuntimeError())
     instr.on_slow_consumer("x", 1)
 
@@ -316,3 +316,75 @@ async def test_live_header_propagation_round_trip(server):
         assert trace.get_current_span(ctx).get_span_context().trace_id == expected
     finally:
         await nc.close()
+
+
+async def test_traced_handler_creates_child_span_linked_to_producer(server):
+    import asyncio
+
+    from natsio.otel import traced_handler  # ty: ignore[unresolved-import]
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    trace.set_tracer_provider(provider)
+    tracer = trace.get_tracer("producer-side")
+
+    done = asyncio.Event()
+
+    async def handler(msg: Msg) -> None:
+        done.set()
+
+    nc = await natsio.connect(server.url, connect_timeout=5.0)
+    try:
+        await nc.subscribe("traced.work", cb=traced_handler(handler, tracer=provider))
+        await nc.flush()
+        with tracer.start_as_current_span("producer", kind=trace.SpanKind.PRODUCER) as span:
+            producer_trace = span.get_span_context().trace_id
+            await nc.publish("traced.work", b"job", headers=inject())
+        await asyncio.wait_for(done.wait(), timeout=5.0)
+    finally:
+        await nc.close()
+
+    spans = {s.name: s for s in exporter.get_finished_spans()}
+    assert "process traced.work" in spans
+    consumer_span = spans["process traced.work"]
+    # The consumer span is parented to the producer's trace — cross-wire link.
+    assert consumer_span.context.trace_id == producer_trace
+    assert consumer_span.kind is trace.SpanKind.CONSUMER
+    assert consumer_span.attributes is not None
+    assert consumer_span.attributes["messaging.destination.name"] == "traced.work"
+
+
+async def test_traced_handler_records_exceptions(server):
+    import asyncio
+
+    from natsio.otel import traced_handler  # ty: ignore[unresolved-import]
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    seen = asyncio.Event()
+
+    async def boom(msg: Msg) -> None:
+        seen.set()
+        raise ValueError("handler failed")
+
+    nc = await natsio.connect(server.url, connect_timeout=5.0)
+    try:
+        await nc.subscribe("traced.fail", cb=traced_handler(boom, tracer=provider))
+        await nc.flush()
+        await nc.publish("traced.fail", b"x")
+        await asyncio.wait_for(seen.wait(), timeout=5.0)
+        await asyncio.sleep(0.1)  # let the span finish recording
+    finally:
+        await nc.close()
+
+    span = exporter.get_finished_spans()[0]
+    assert span.status.status_code is trace.StatusCode.ERROR
+    assert any(e.name == "exception" for e in span.events)

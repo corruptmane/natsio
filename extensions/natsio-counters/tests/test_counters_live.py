@@ -4,6 +4,7 @@ import asyncio
 
 import pytest
 from natsio.counters import (  # ty: ignore[unresolved-import]
+    COUNTER_INCREMENT_HEADER,
     Counter,
     CounterConfig,
     CounterEntry,
@@ -18,7 +19,7 @@ from natsio.counters import (  # ty: ignore[unresolved-import]
 
 import natsio
 from conftest import NatsServerProcess, free_port  # ty: ignore[unresolved-import]
-from natsio.jetstream import StorageType, StreamConfig
+from natsio.jetstream import CounterIncrementMissingError, StorageType, StreamConfig
 
 
 @pytest.fixture
@@ -113,6 +114,25 @@ class TestReads:
     async def test_get_uninitialized(self, counter: Counter) -> None:
         with pytest.raises(CounterSubjectNotInitializedError):
             await counter.get("events.never")
+
+
+class TestIncrementHeader:
+    """The counter wire contract: a publish without `Nats-Incr` is a typed error."""
+
+    async def test_missing_increment_raises_typed_error(self, counter: Counter) -> None:
+        # The server rejects a bare publish to a counter stream with err_code
+        # 10169; the core now maps it to CounterIncrementMissingError rather than
+        # leaving extensions to string-match "message counter increment is missing".
+        js = counter._ctx
+        with pytest.raises(CounterIncrementMissingError) as excinfo:
+            await js.publish("events.no_incr", b"payload")
+        assert excinfo.value.err_code == 10169
+
+    async def test_add_always_sends_increment_header(self, counter: Counter) -> None:
+        # The happy path: add() carries the header, so it never trips the error.
+        assert await counter.add("events.with_incr", 3) == 3
+        # And the constant is the pinned wire spelling used to build that header.
+        assert COUNTER_INCREMENT_HEADER == "Nats-Incr"
 
 
 class TestCrossSubject:

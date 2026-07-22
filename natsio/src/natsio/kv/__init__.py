@@ -15,6 +15,7 @@ async with kv.watch() as watcher:
 
 from natsio.kv.bucket import KV_OPERATION_HEADER, KeyValue, KvWatcher
 from natsio.kv.entities import (
+    FilterableKeyCodec,
     KeyCodec,
     KeyValueConfig,
     KeyValueStatus,
@@ -38,6 +39,7 @@ __all__ = [
     "KV_OPERATION_HEADER",
     "BucketExistsError",
     "BucketNotFoundError",
+    "FilterableKeyCodec",
     "InvalidBucketNameError",
     "InvalidKeyError",
     "KeyCodec",

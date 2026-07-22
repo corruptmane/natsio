@@ -14,6 +14,7 @@ import base64
 import binascii
 from typing import cast
 
+from natsio.kv import FilterableKeyCodec as CoreFilterableKeyCodec
 from natsio.kv import KeyCodec
 
 from .errors import (
@@ -36,22 +37,26 @@ __all__ = [
 _WILDCARDS = frozenset({"*", ">"})
 
 
-class FilterableKeyCodec:
+class FilterableKeyCodec(CoreFilterableKeyCodec):
     """Marker/base for key codecs that can encode a *filter* (a key that may
     contain ``*``/``>`` wildcards) while preserving the wildcards.
 
-    Mirrors orbit.go's optional ``FilterableKeyCodec`` interface. A codec is
-    "filterable" iff it provides ``encode_filter``; :class:`ChainKeyCodec` is
-    filterable only when *every* member is.
+    Explicitly implements the core's runtime-checkable
+    :class:`natsio.kv.FilterableKeyCodec` protocol, so the core's ``watch()``
+    recognises these codecs (via ``isinstance``) and encodes wildcard filters
+    per token instead of refusing them. Mirrors orbit.go's optional
+    ``FilterableKeyCodec`` interface. A codec is "filterable" iff it provides
+    ``encode_filter``; :class:`ChainKeyCodec` is filterable only when *every*
+    member is.
 
-    Subclassing is not required — this is duck-typed via ``hasattr(codec,
-    "encode_filter")`` — but subclassing documents intent and gives you the
-    :meth:`is_filterable` helper.
+    Subclassing is not required — the core protocol is structural — but
+    subclassing documents intent and gives you the :meth:`is_filterable`
+    helper.
     """
 
     @staticmethod
     def is_filterable(codec: object) -> bool:
-        return callable(getattr(codec, "encode_filter", None))
+        return isinstance(codec, CoreFilterableKeyCodec)
 
     def encode_filter(self, key_filter: str) -> str:
         # Overridden by every concrete filterable codec here; the default keeps

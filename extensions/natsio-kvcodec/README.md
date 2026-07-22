@@ -50,10 +50,11 @@ Every key codec guarantees its **encoded output satisfies
 sentinel are all NATS-legal), so the core accepts the encoded key as a subject.
 
 `Base64KeyCodec`, `PathKeyCodec`, `NoOpKeyCodec`, and an all-filterable
-`ChainKeyCodec` also implement `encode_filter(pattern)` (the optional
-`FilterableKeyCodec` protocol), which encodes a wildcard pattern while
-preserving `*`/`>`. **The natsio core does not call this yet** — see Core
-Friction.
+`ChainKeyCodec` also implement `encode_filter(pattern)` (the core's
+runtime-checkable `natsio.kv.FilterableKeyCodec` protocol), which encodes a
+wildcard pattern while preserving `*`/`>`. **The natsio core calls this** from
+`watch()`, so a wildcard watch under one of these codecs is encoded per token
+(`orders.>` -> `b3JkZXJz.>`) and works end-to-end — see Core Friction.
 
 ### Value codecs (`bytes -> bytes`)
 
@@ -126,9 +127,12 @@ isn't surprising):
    payload is empty under `meta_only`). Pinned by a strict `xfail` in
    `test_kvcodec_live.py::test_keys_under_framing_value_codec_is_broken`.
 
-A third, smaller one — **there is no filter hook.** orbit's `FilterableKeyCodec`
-lets a wildcard watch encode tokens individually (`orders.>` ->
-`b3JkZXJz.>`). The natsio core instead *refuses* any wildcard watch when a key
-codec is set (`ConfigError`). The codecs here already implement `encode_filter`,
-so a future `FilterableKeyCodec`-aware `_maybe_encode_watch_key` could support
-per-token wildcard watches with no codec changes.
+A third one — **the filter hook — is now closed.** orbit's `FilterableKeyCodec`
+lets a wildcard watch encode tokens individually (`orders.>` -> `b3JkZXJz.>`).
+The natsio core mirrors this: `watch()` recognises the runtime-checkable
+`natsio.kv.FilterableKeyCodec` protocol (which the codecs here implement) and
+calls `encode_filter()`, so per-token wildcard watches work end-to-end. Under a
+codec the *raw* filter is the caller's domain (it may be in the codec's own
+notation, e.g. `PathKeyCodec`'s `/a/*`) — only the encoded filter must be a
+legal subject filter. A wildcard watch under a *non*-filterable codec is still
+refused (`ConfigError`): encoding the whole key would mangle the `*`/`>`.

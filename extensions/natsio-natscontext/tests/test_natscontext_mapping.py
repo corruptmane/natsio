@@ -57,23 +57,21 @@ def test_creds_expands_homedir(write_context: Callable[..., Path], xdg: Path) ->
     assert creds == str(xdg / "home" / "user.creds")
 
 
-def test_nkey_reads_seed_from_file(write_context: Callable[..., Path], tmp_path: Path) -> None:
+def test_nkey_maps_to_nkey_file(write_context: Callable[..., Path], tmp_path: Path) -> None:
+    # The context stores a path; natsio's NKeyFileAuth reads+parses it (and
+    # re-reads on reconnect), so the mapper just forwards the expanded path.
     seed = _make_seed()
     nkfile = tmp_path / "user.nk"
     nkfile.write_text(seed + "\n", encoding="utf-8")
     write_context("c", url="nats://a:4222", nkey=str(nkfile))
-    assert natscontext.load("c").connect_kwargs()["nkey_seed"] == seed
+    assert natscontext.load("c").connect_kwargs()["nkey_file"] == str(nkfile)
+    assert "nkey_seed" not in natscontext.load("c").connect_kwargs()
 
 
-def test_nkey_reads_decorated_seed_file(write_context: Callable[..., Path], tmp_path: Path) -> None:
-    seed = _make_seed()
-    nkfile = tmp_path / "user.nk"
-    nkfile.write_text(
-        f"-----BEGIN USER NKEY SEED-----\n{seed}\n------END USER NKEY SEED------\n",
-        encoding="utf-8",
-    )
-    write_context("c", url="nats://a:4222", nkey=str(nkfile))
-    assert natscontext.load("c").connect_kwargs()["nkey_seed"] == seed
+def test_nkey_expands_path(write_context: Callable[..., Path], monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("NK_HOME", "/keys")
+    write_context("c", url="nats://a:4222", nkey="$NK_HOME/user.nk")
+    assert natscontext.load("c").connect_kwargs()["nkey_file"] == "/keys/user.nk"
 
 
 def test_auth_precedence_user_over_token(write_context: Callable[..., Path]) -> None:
@@ -115,8 +113,14 @@ def test_tls_ca_and_client_cert(write_context: Callable[..., Path], tmp_path: Pa
     )
     tls = natscontext.load("c").connect_kwargs()["tls"]
     assert isinstance(tls, TLSConfig)
-    assert tls.context is not None
+    # File paths are carried on TLSConfig and loaded lazily (no context built).
+    assert tls.context is None
+    assert tls.certfile == str(cert)
+    assert tls.keyfile == str(key)
+    assert tls.cafile == str(ca)
     assert tls.handshake_first is True
+    # And the lazy load actually produces a usable context.
+    assert tls.resolve_context() is not None
 
 
 @pytest.mark.skipif(not openssl_available(), reason="openssl CLI not available")
@@ -125,6 +129,9 @@ def test_tls_ca_only(write_context: Callable[..., Path], tmp_path: Path) -> None
     write_context("c", url="tls://a:4222", ca=str(ca))
     tls = natscontext.load("c").connect_kwargs()["tls"]
     assert isinstance(tls, TLSConfig)
+    assert tls.context is None
+    assert tls.cafile == str(ca)
+    assert tls.certfile is None
     assert tls.handshake_first is False
 
 

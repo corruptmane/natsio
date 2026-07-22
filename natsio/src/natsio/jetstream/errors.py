@@ -13,6 +13,8 @@ __all__ = [
     "APIError",
     "ConsumerDeletedError",
     "ConsumerNotFoundError",
+    "CounterIncrementInvalidError",
+    "CounterIncrementMissingError",
     "JetStreamError",
     "JetStreamNotEnabledError",
     "MessageNotFoundError",
@@ -91,6 +93,21 @@ class JetStreamNotEnabledError(APIError):
     pass
 
 
+class CounterIncrementMissingError(APIError):
+    """Published to a counter stream (`allow_msg_counter`) without a ``Nats-Incr`` header.
+
+    Every publish to a counter stream must carry the increment header (ADR-49);
+    the server rejects a bare publish with err_code ``10169``.
+    """
+
+
+class CounterIncrementInvalidError(APIError):
+    """A counter publish carried a ``Nats-Incr`` that is not a base-10 integer.
+
+    The server rejects the increment with err_code ``10171``.
+    """
+
+
 def _register() -> dict[int, type[APIError]]:
     return {
         10059: StreamNotFoundError,
@@ -100,6 +117,8 @@ def _register() -> dict[int, type[APIError]]:
         10071: WrongLastSequenceError,
         10076: JetStreamNotEnabledError,  # not enabled
         10039: JetStreamNotEnabledError,  # not enabled for account
+        10169: CounterIncrementMissingError,  # counter increment header absent (ADR-49)
+        10171: CounterIncrementInvalidError,  # counter increment header not an integer
     }
 
 

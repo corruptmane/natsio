@@ -9,6 +9,7 @@ from natsio._internal.auth import (
     Authenticator,
     CredsFileAuth,
     NKeyAuth,
+    NKeyFileAuth,
     TokenAuth,
     UserPasswordAuth,
 )
@@ -21,15 +22,48 @@ __all__ = ["ConnectKwargs", "ConnectOptions", "TLSConfig"]
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class TLSConfig:
-    """TLS settings. ``context=None`` uses `ssl.create_default_context()`."""
+    """TLS settings.
+
+    With no fields set, `resolve_context` returns
+    `ssl.create_default_context()`. You can either supply a ready-made
+    ``context`` **or** point at PEM files on disk (``certfile``/``keyfile`` for a
+    client certificate, ``cafile`` for a custom CA bundle) — nats.go
+    ``ClientCert``/``RootCAs`` parity. The two are mutually exclusive; the file
+    paths are read lazily inside `resolve_context`, on every (re)connect.
+    """
 
     context: ssl_module.SSLContext | None = None
     hostname: str | None = None
     # 2.10.4+ tls-first handshake: upgrade before the server sends INFO.
     handshake_first: bool = False
+    # Client certificate + CA bundle, loaded from PEM files (nats.go parity).
+    # keyfile may be None when the key is bundled into certfile (ssl semantics).
+    certfile: str | os.PathLike[str] | None = None
+    keyfile: str | os.PathLike[str] | None = None
+    cafile: str | os.PathLike[str] | None = None
+
+    def __post_init__(self) -> None:
+        if self.keyfile is not None and self.certfile is None:
+            raise ConfigError(
+                "TLSConfig.keyfile requires certfile (a private key alone cannot build a client certificate chain)"
+            )
+        if self.context is not None and (
+            self.certfile is not None or self.keyfile is not None or self.cafile is not None
+        ):
+            raise ConfigError(
+                "TLSConfig.context cannot be combined with certfile/keyfile/cafile "
+                "(supply a ready-made context or file paths, not both)"
+            )
 
     def resolve_context(self) -> ssl_module.SSLContext:
-        return self.context if self.context is not None else ssl_module.create_default_context()
+        if self.context is not None:
+            return self.context
+        context = ssl_module.create_default_context()
+        if self.cafile is not None:
+            context.load_verify_locations(cafile=self.cafile)
+        if self.certfile is not None:
+            context.load_cert_chain(certfile=self.certfile, keyfile=self.keyfile)
+        return context
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -47,6 +81,7 @@ class ConnectOptions:
     password: StrSource | None = None
     token: StrSource | None = None
     nkey_seed: str | None = None
+    nkey_file: str | os.PathLike[str] | None = None
     credentials: str | os.PathLike[str] | None = None
     authenticator: Authenticator | None = None
 
@@ -128,6 +163,7 @@ class ConnectOptions:
                 ("user/password", self.user),
                 ("token", self.token),
                 ("nkey_seed", self.nkey_seed),
+                ("nkey_file", self.nkey_file),
                 ("credentials", self.credentials),
                 ("authenticator", self.authenticator),
             )
@@ -150,6 +186,8 @@ class ConnectOptions:
             return TokenAuth(token=self.token)
         if self.nkey_seed is not None:
             return NKeyAuth(seed=self.nkey_seed)
+        if self.nkey_file is not None:
+            return NKeyFileAuth(path=self.nkey_file)
         if self.credentials is not None:
             return CredsFileAuth(path=self.credentials)
         return None
@@ -173,6 +211,7 @@ class ConnectKwargs(TypedDict, total=False):
     password: StrSource | None
     token: StrSource | None
     nkey_seed: str | None
+    nkey_file: str | os.PathLike[str] | None
     credentials: str | os.PathLike[str] | None
     authenticator: Authenticator | None
     allow_reconnect: bool

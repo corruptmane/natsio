@@ -8,13 +8,19 @@ exports **metrics** through ``opentelemetry-api``. Wire it in with::
 
     nc = await natsio.connect("nats://localhost", instrumentation=OtelInstrumentation())
 
-Metrics only, by design. The seam is a set of fire-and-forget point-event
-hooks; it cannot start/stop spans, wrap the subscriber callback, or reach the
-outgoing header block, so producer/consumer *tracing* cannot be driven from
-the hooks alone. What context propagation *is* clean lives in the module-level
-``inject`` / ``extract`` helpers, which the caller drives explicitly around
-their own publish/handle code. See the README's "The spans story" for the full
-gap analysis.
+For **tracing**, propagation is caller-driven — which the seam supports:
+
+- Producers add ``traceparent`` to the headers they publish with ``inject``.
+- Consumers recover the parent context with ``extract`` and run their handler
+  inside a span. ``traced_handler`` wraps a subscription callback to do exactly
+  that (extract, start a CONSUMER span, time and status it) — the natural home
+  for a "process" span, since natsio has three consumption modes (callback,
+  iterator, ``next_msg``) and only the callback is bracketable.
+
+The metric hooks additionally receive the message ``headers`` (seam ≥ the 1.0
+protocol), so an exporter may derive header-based attributes; this adapter
+records subject-cardinality-safe metrics and leaves span creation to
+``traced_handler`` / ``inject`` / ``extract``.
 
 Instrument names follow OpenTelemetry messaging semantic conventions where the
 spec covers the concept (``messaging.client.sent.messages``,
@@ -22,13 +28,16 @@ spec covers the concept (``messaging.client.sent.messages``,
 namespaced ``nats.client.*`` and documented as custom in the README.
 """
 
+from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 
+from opentelemetry import trace
 from opentelemetry.context import Context
 from opentelemetry.metrics import Counter, Histogram, Meter, MeterProvider, get_meter_provider
 from opentelemetry.propagate import extract as _otel_extract
 from opentelemetry.propagate import inject as _otel_inject
 from opentelemetry.propagators.textmap import Getter, Setter
+from opentelemetry.trace import SpanKind, Tracer, TracerProvider
 
 from natsio import Headers, Msg
 
@@ -37,7 +46,7 @@ if TYPE_CHECKING:
 
 __version__ = "0.1.0"
 
-__all__ = ["OtelInstrumentation", "extract", "inject"]
+__all__ = ["OtelInstrumentation", "extract", "inject", "traced_handler"]
 
 # --- semantic-convention attribute keys ------------------------------------
 # Hardcoded rather than imported from ``opentelemetry-semantic-conventions``:
@@ -206,13 +215,15 @@ class OtelInstrumentation:
     def on_bytes_received(self, count: int) -> None:
         self._net_received_bytes.add(count, self._recv_attrs)
 
-    def on_message_published(self, subject: str, payload_size: int) -> None:
+    def on_message_published(self, subject: str, headers: "HeadersInput | None", payload_size: int) -> None:
+        # `headers` (seam >= 1.0) is available for header-derived attributes;
+        # this metrics adapter keeps to cardinality-safe counters.
         attrs = {**self._send_attrs, _ATTR_DESTINATION: subject} if self._record_subject else self._send_attrs
         self._sent_messages.add(1, attrs)
         self._sent_bytes.add(payload_size, attrs)
         self._sent_size.record(payload_size, attrs)
 
-    def on_message_delivered(self, subject: str, payload_size: int) -> None:
+    def on_message_delivered(self, subject: str, headers: "Headers | None", payload_size: int) -> None:
         attrs = {**self._recv_attrs, _ATTR_DESTINATION: subject} if self._record_subject else self._recv_attrs
         self._consumed_messages.add(1, attrs)
         self._consumed_bytes.add(payload_size, attrs)
@@ -287,3 +298,47 @@ def extract(source: "Msg | HeadersInput | None", *, context: Context | None = No
     raw = source.headers if isinstance(source, Msg) else source
     carrier = Headers(raw) if raw is not None else Headers()
     return _otel_extract(carrier, context=context, getter=_HEADERS_GETTER)
+
+
+def traced_handler(
+    handler: Callable[[Msg], Awaitable[None]],
+    *,
+    tracer: Tracer | TracerProvider | None = None,
+    span_name: str | None = None,
+) -> Callable[[Msg], Awaitable[None]]:
+    """Wrap a subscription callback so each message runs inside a CONSUMER span.
+
+    The wrapper extracts the parent context from the message headers, opens a
+    span parented to it (so producer and consumer spans link across the wire),
+    runs the handler inside that span, and records exceptions + error status —
+    the "process" span natsio's seam can't create itself (only the callback is
+    bracketable; iterator / ``next_msg`` consumers span their own code)::
+
+        sub = nc.subscribe("orders", cb=traced_handler(handle_order))
+
+    ``span_name`` defaults to ``"process <subject>"``. Pass a ``Tracer`` (or a
+    provider) to override the default global tracer.
+    """
+    resolved: Tracer = (
+        tracer.get_tracer("natsio.otel")
+        if isinstance(tracer, TracerProvider)
+        else (tracer if tracer is not None else trace.get_tracer("natsio.otel"))
+    )
+
+    async def wrapped(msg: Msg) -> None:
+        name = span_name if span_name is not None else f"process {msg.subject}"
+        parent = extract(msg)
+        with resolved.start_as_current_span(
+            name,
+            context=parent,
+            kind=SpanKind.CONSUMER,
+            attributes={_ATTR_SYSTEM: _SYSTEM_NATS, _ATTR_DESTINATION: msg.subject},
+        ) as span:
+            try:
+                await handler(msg)
+            except BaseException as exc:
+                span.record_exception(exc)
+                span.set_status(trace.Status(trace.StatusCode.ERROR, type(exc).__qualname__))
+                raise
+
+    return wrapped

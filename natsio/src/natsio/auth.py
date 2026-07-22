@@ -13,6 +13,7 @@ from natsio._internal.auth import (
     CredsAuth,
     CredsFileAuth,
     NKeyAuth,
+    NKeyFileAuth,
     TokenAuth,
     UserPasswordAuth,
 )
@@ -24,6 +25,7 @@ __all__ = [
     "CredsAuth",
     "CredsFileAuth",
     "NKeyAuth",
+    "NKeyFileAuth",
     "TokenAuth",
     "UserPasswordAuth",
 ]

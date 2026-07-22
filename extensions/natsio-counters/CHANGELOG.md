@@ -26,8 +26,8 @@ Requires nats-server 2.12+ (`allow_msg_counter`). Stdlib only.
   - `load(subject) -> int` — current value via Direct Get `last_by_subj`.
   - `get(subject) -> CounterEntry` — value + last increment + parsed sources.
   - `get_multiple(subjects) -> AsyncIterator[CounterEntry]` — one batch Direct
-    Get (`multi_last`, ADR-31) with wildcard support, over the core's
-    `request_many` (ADR-47). Mirrors orbit's `GetMultiple`.
+    Get with wildcard support, over the core's `Stream.get_last_msgs_for`
+    (`multi_last`, ADR-31). Mirrors orbit's `GetMultiple`.
 - **`CounterConfig`** — counter-stream configuration (subjects, storage,
   replicas, limits, placement, compression, metadata). Omits per-message-TTL and
   schedule knobs, which ADR-49 declares incompatible with counters.
@@ -50,18 +50,16 @@ Requires nats-server 2.12+ (`allow_msg_counter`). Stdlib only.
 Surfaced while building this extension from outside the core. All are in the
 natsio core, not in the counters module:
 
-- **No batch Direct Get in the `Stream` API.** `Stream.get_msg` does only
-  single-message Direct Get; `get_multiple` had to hand-build the
-  `$JS.API.DIRECT.GET.<stream>` `multi_last` request and drive it through
-  `client.request_many`, re-parsing `Nats-Subject`/`Nats-Sequence` headers and
-  skipping the `204 EOB` frame — duplicating logic that lives privately in
-  `Stream._direct_get` / `StoredMsg`. *Proposal:* a public
-  `Stream.get_last_msgs_for(subjects)` (or `get_batch`) returning `StoredMsg`s.
-- **No structured "counter increment missing" error.** Publishing to a counter
-  stream without `Nats-Incr` surfaces as a generic `APIError` (description
-  `message counter increment is missing`) — no dedicated `err_code` mapping,
-  so extensions can only match on the string. *Proposal:* register the counter
-  err_codes in `natsio.jetstream.errors`.
+- ~~**No batch Direct Get in the `Stream` API.**~~ *Resolved in core:*
+  `get_multiple` now drives the public `Stream.get_last_msgs_for(subjects)`
+  (batch `multi_last` Direct Get, ADR-31), which returns `StoredMsg`s and
+  reuses the core's `Nats-Subject`/`Nats-Sequence` header parsing and `204 EOB`
+  termination — no more hand-built request or duplicated framing.
+- ~~**No structured "counter increment missing" error.**~~ *Resolved in core:*
+  the counter err_codes are registered in `natsio.jetstream.errors` as
+  `CounterIncrementMissingError` (`10169`) and `CounterIncrementInvalidError`
+  (`10171`), so a bare publish to a counter stream raises the typed error
+  instead of a string-matched generic `APIError`.
 - **`Counter` must hold both `JetStreamContext` and `Stream`.** Increment goes
   through `ctx.publish` while reads go through `stream.get_msg`; there is no
   single object owning both, so the handle threads them manually (as KV/OS do).

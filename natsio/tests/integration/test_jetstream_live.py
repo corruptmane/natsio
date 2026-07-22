@@ -124,6 +124,74 @@ class TestStreams:
         assert (await stream.info()).state.messages == 0
 
 
+class TestBatchGet:
+    """`Stream.get_last_msgs_for` — batch Direct Get (multi_last, ADR-31)."""
+
+    async def _seed(self, js: JetStreamContext, name: str, *, allow_direct: bool) -> Stream:
+        stream = await js.create_stream(
+            StreamConfig(name=name, subjects=[f"{name}.>"], storage=StorageType.MEMORY, allow_direct=allow_direct)
+        )
+        # Two writes per subject so the "last" message is unambiguous.
+        await js.publish(f"{name}.a", b"a-old")
+        await js.publish(f"{name}.a", b"a-new")
+        await js.publish(f"{name}.b", b"b-old")
+        await js.publish(f"{name}.b", b"b-new")
+        await js.publish(f"{name}.c", b"c-only")
+        return stream
+
+    async def test_returns_last_per_subject(self, nc: natsio.Client) -> None:
+        js = nc.jetstream()
+        stream = await self._seed(js, "BATCH", allow_direct=True)
+        found = {m.subject: m.payload async for m in stream.get_last_msgs_for(["BATCH.>"])}
+        assert found == {"BATCH.a": b"a-new", "BATCH.b": b"b-new", "BATCH.c": b"c-only"}
+
+    async def test_explicit_subject_list_with_a_miss(self, nc: natsio.Client) -> None:
+        js = nc.jetstream()
+        stream = await self._seed(js, "BATCHX", allow_direct=True)
+        # BATCHX.nope has no stored message — it is simply omitted, not an error.
+        found = {m.subject: m.payload async for m in stream.get_last_msgs_for(["BATCHX.a", "BATCHX.nope", "BATCHX.c"])}
+        assert found == {"BATCHX.a": b"a-new", "BATCHX.c": b"c-only"}
+
+    async def test_string_subject(self, nc: natsio.Client) -> None:
+        js = nc.jetstream()
+        stream = await self._seed(js, "BATCHS", allow_direct=True)
+        out = [m async for m in stream.get_last_msgs_for("BATCHS.b")]
+        assert [(m.subject, m.payload) for m in out] == [("BATCHS.b", b"b-new")]
+
+    async def test_carries_metadata(self, nc: natsio.Client) -> None:
+        js = nc.jetstream()
+        stream = await self._seed(js, "BATCHM", allow_direct=True)
+        out = {m.subject: m async for m in stream.get_last_msgs_for(["BATCHM.a"])}
+        entry = out["BATCHM.a"]
+        assert entry.seq > 0
+        assert entry.time is not None
+
+    async def test_up_to_seq(self, nc: natsio.Client) -> None:
+        js = nc.jetstream()
+        stream = await self._seed(js, "BATCHU", allow_direct=True)
+        # Seqs: a-old=1 a-new=2 b-old=3 b-new=4 c-only=5. Cap at 3 -> a=a-new(2), b=b-old(3).
+        found = {m.subject: m.payload async for m in stream.get_last_msgs_for(["BATCHU.>"], up_to_seq=3)}
+        assert found == {"BATCHU.a": b"a-new", "BATCHU.b": b"b-old"}
+
+    async def test_non_direct_stream_errors_clearly(self, nc: natsio.Client) -> None:
+        js = nc.jetstream()
+        stream = await self._seed(js, "BATCHND", allow_direct=False)
+        from natsio.errors import ConfigError
+
+        with pytest.raises(ConfigError):
+            async for _ in stream.get_last_msgs_for(["BATCHND.a"]):
+                pass
+
+    async def test_empty_subjects_errors(self, nc: natsio.Client) -> None:
+        js = nc.jetstream()
+        stream = await self._seed(js, "BATCHE", allow_direct=True)
+        from natsio.errors import ConfigError
+
+        with pytest.raises(ConfigError):
+            async for _ in stream.get_last_msgs_for([]):
+                pass
+
+
 class TestPublish:
     async def test_pub_ack_and_dedup(self, nc: natsio.Client) -> None:
         js = nc.jetstream()

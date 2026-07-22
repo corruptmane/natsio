@@ -306,7 +306,7 @@ class Client:
         await self._conn.publish_frame(frame)
         self._stats["out_msgs"] += 1
         self._stats["out_bytes"] += len(data)
-        self._conn.instrumentation.on_message_published(subject, len(data))
+        self._conn.instrumentation.on_message_published(subject, headers, len(data))
 
     async def flush(self, timeout: float | None = None) -> None:  # noqa: ASYNC109
         """Round-trip a PING and wait for the PONG."""

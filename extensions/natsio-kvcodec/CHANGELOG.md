@@ -28,10 +28,13 @@ Stdlib only.
     value side.)
   - `NoOpValueCodec` — identity.
   - `ChainValueCodec(*codecs)` — sequence composition. (orbit `ValueChainCodec`.)
-- **Filter support**: `FilterableKeyCodec` protocol + `encode_filter()` on the
-  base64, path, no-op, and (all-filterable) chain key codecs — encodes a
+- **Filter support**: `FilterableKeyCodec` (explicitly implements the core's
+  runtime-checkable `natsio.kv.FilterableKeyCodec` protocol) + `encode_filter()`
+  on the base64, path, no-op, and (all-filterable) chain key codecs — encodes a
   wildcard pattern while preserving `*`/`>`. Ported from orbit's
-  `FilterableKeyCodec`. Not yet consulted by the core (see below).
+  `FilterableKeyCodec`. The core's `watch()` now consults it (via `isinstance`),
+  so a wildcard watch under one of these codecs is encoded per token and works
+  end-to-end.
 - **Typed errors** under `KvCodecError`: `NoCodecsError`, `KeyEncodeError`,
   `KeyDecodeError`, `ValueEncodeError`, `ValueDecodeError`,
   `WildcardNotSupportedError`. Decoding fails loud on corrupt/non-encoded input.
@@ -42,8 +45,8 @@ Stdlib only.
 
 ### Known limitations (core seam friction)
 
-Surfaced while building this extension. All three are in the natsio core, not in
-the codecs:
+Surfaced while building this extension. All were in the natsio core, not in the
+codecs; the filter-hook gap below is now resolved.
 
 - **Raw-key pre-validation defeats Base64's escape-exotic-characters use case.**
   `KeyValue._encode_key` validates the raw key before the codec runs, so a key
@@ -56,7 +59,8 @@ the codecs:
   encryption) makes `keys()` raise. Pinned by a strict `xfail`
   (`test_keys_under_framing_value_codec_is_broken`). *Proposal:* skip value
   decoding for headers-only deliveries.
-- **No filter hook.** The core refuses wildcard watches under a key codec
-  (`ConfigError`) rather than encoding per token. The codecs already implement
-  `encode_filter`; a `FilterableKeyCodec`-aware `_maybe_encode_watch_key` would
-  unlock per-token wildcard watches with no codec changes.
+- **Filter hook (resolved).** The core previously refused wildcard watches under
+  any key codec (`ConfigError`). It now recognises the `FilterableKeyCodec`
+  protocol and calls `encode_filter()`, so a wildcard watch under a filterable
+  codec is encoded per token (`orders.>` -> `b3JkZXJz.>`) and works end-to-end;
+  a wildcard watch under a *non*-filterable codec is still refused.

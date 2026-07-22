@@ -226,8 +226,13 @@ class _Session:
 
     def _handle(self, event: object) -> None:
         match event:
-            case MsgEvent() | HMsgEvent():
-                self._conn.instrumentation.on_message_delivered(event.subject, len(event.payload))
+            case MsgEvent():
+                # Split from HMsgEvent so the headerless case passes None with
+                # no per-message getattr — the delivery path is hot.
+                self._conn.instrumentation.on_message_delivered(event.subject, None, len(event.payload))
+                self._conn.dispatcher.dispatch(event)
+            case HMsgEvent():
+                self._conn.instrumentation.on_message_delivered(event.subject, event.headers, len(event.payload))
                 self._conn.dispatcher.dispatch(event)
             case PingEvent():
                 self.enqueue(PONG_FRAME)

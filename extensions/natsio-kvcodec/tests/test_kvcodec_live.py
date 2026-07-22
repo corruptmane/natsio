@@ -13,6 +13,7 @@ import pytest
 from natsio.kvcodec import (  # ty: ignore[unresolved-import]
     Base64KeyCodec,
     ChainValueCodec,
+    NoOpKeyCodec,
     PathKeyCodec,
     ZlibValueCodec,
 )
@@ -172,18 +173,78 @@ class TestWatchLive:
         assert keys == ["/x/y", "/x/z"]
         assert all(e.operation is Operation.PUT for e in entries)
 
-    async def test_wildcard_watch_under_codec_refused(self, nc: natsio.Client) -> None:
-        # The documented refusal: a wildcard watch combined with a key codec
-        # would silently match nothing in the encoded keyspace, so the core
-        # raises rather than mislead. (kvcodec's Base64KeyCodec.encode_filter
-        # COULD support this, but the core has no filter hook — see Core
-        # Friction.)
+    async def test_wildcard_watch_base64_filter(self, nc: natsio.Client) -> None:
+        """A FilterableKeyCodec wildcard watch now WORKS end-to-end: the filter
+        is encoded per token (``orders.*`` -> ``b3JkZXJz.*``), so it matches the
+        codec'd keyspace and yields the matching keys, decoded."""
         js = nc.jetstream()
-        kv = await js.create_key_value(KeyValueConfig(bucket="WCKV"), key_codec=PathKeyCodec())
-        with pytest.raises(ConfigError):
-            kv.watch("/a/*")
-        with pytest.raises(ConfigError):
-            kv.watch("/a/>")
+        kv = await js.create_key_value(KeyValueConfig(bucket="B64WC"), key_codec=Base64KeyCodec())
+        await kv.put("orders.1", b"a")
+        await kv.put("orders.2", b"b")
+        await kv.put("users.1", b"c")  # must be EXCLUDED by orders.*
+
+        # Verify the filter really is per-token-encoded on the wire (wildcard
+        # token passed through untouched).
+        assert kv._encode_watch_filter("orders.*") == "b3JkZXJz.*"
+
+        entries = await _collect_initial(kv, "orders.*")
+        assert sorted((e.key, e.value) for e in entries) == [("orders.1", b"a"), ("orders.2", b"b")]
+
+    async def test_wildcard_watch_base64_live_updates(self, nc: natsio.Client) -> None:
+        js = nc.jetstream()
+        kv = await js.create_key_value(KeyValueConfig(bucket="B64WCLIVE"), key_codec=Base64KeyCodec())
+        await kv.put("orders.1", b"a")
+        async with kv.watch("orders.*") as watcher:
+            it = watcher.__aiter__()
+            first = await it.__anext__()
+            assert first is not None and first.key == "orders.1" and first.value == b"a"
+            assert await it.__anext__() is None  # initial state complete
+            await kv.put("orders.9", b"live")
+            await kv.put("users.9", b"nope")  # non-matching: must not arrive
+            live = await asyncio.wait_for(it.__anext__(), timeout=5.0)
+            assert live is not None and live.key == "orders.9" and live.value == b"live"
+
+    async def test_wildcard_watch_path_filter(self, nc: natsio.Client) -> None:
+        """PathKeyCodec's own notation (``/a/*``) is the caller's domain; only
+        the ENCODED filter (``_root_.a.*``) must be a subject filter."""
+        js = nc.jetstream()
+        kv = await js.create_key_value(KeyValueConfig(bucket="PATHWC"), key_codec=PathKeyCodec())
+        await kv.put("/a/x", b"1")
+        await kv.put("/a/y", b"2")
+        await kv.put("/b/z", b"3")  # excluded by /a/*
+        entries = await _collect_initial(kv, "/a/*")
+        assert sorted(e.key for e in entries) == ["/a/x", "/a/y"]
+        # Prefix wildcard ``>`` under the codec too.
+        entries_gt = await _collect_initial(kv, "/a/>")
+        assert sorted(e.key for e in entries_gt) == ["/a/x", "/a/y"]
+
+    async def test_wildcard_watch_noop_and_chain_filter(self, nc: natsio.Client) -> None:
+        js = nc.jetstream()
+        kv = await js.create_key_value(KeyValueConfig(bucket="NOOPWC"), key_codec=NoOpKeyCodec())
+        await kv.put("a.1", b"1")
+        await kv.put("b.1", b"2")
+        entries = await _collect_initial(kv, "a.*")
+        assert sorted(e.key for e in entries) == ["a.1"]
+
+    async def test_wildcard_watch_non_filterable_codec_refused(self, nc: natsio.Client) -> None:
+        """A plain (non-filterable) codec genuinely cannot encode a wildcard
+        filter per token, so the core still refuses — loudly."""
+
+        class Plain:  # no encode_filter -> not a FilterableKeyCodec
+            def encode(self, key: str) -> str:
+                return f"e.{key}"
+
+            def decode(self, key: str) -> str:
+                return key.removeprefix("e.")
+
+        js = nc.jetstream()
+        await js.create_key_value(KeyValueConfig(bucket="PLAINWC"))
+        kv = await js.key_value("PLAINWC", key_codec=Plain())
+        with pytest.raises(ConfigError, match="wildcard"):
+            kv.watch("a.*")
+        with pytest.raises(ConfigError, match="wildcard"):
+            kv.watch("a.>")
+        kv.watch(">")  # whole-bucket watch stays allowed
 
     async def test_live_update_after_snapshot(self, nc: natsio.Client) -> None:
         js = nc.jetstream()

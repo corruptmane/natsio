@@ -350,6 +350,49 @@ class TestReviewRegressions:
             kv.watch("a.*")
         kv.watch(">")  # whole-bucket watch stays allowed
 
+    async def test_wildcard_watch_with_filterable_key_codec_works(self, nc: natsio.Client) -> None:
+        """A FilterableKeyCodec encodes the filter per token, so a wildcard
+        watch matches the codec'd keyspace and yields decoded keys — the core
+        consults the encode_filter hook instead of refusing."""
+        from natsio.kv import FilterableKeyCodec
+
+        class PrefixFilterable:
+            """Per-token codec: literal tokens get an ``e_`` prefix; wildcard
+            tokens pass through, so the encoded filter stays a valid subject."""
+
+            def encode(self, key: str) -> str:
+                return ".".join(f"e_{t}" for t in key.split("."))
+
+            def decode(self, key: str) -> str:
+                return ".".join(t.removeprefix("e_") for t in key.split("."))
+
+            def encode_filter(self, filter: str) -> str:
+                return ".".join(t if t in ("*", ">") else f"e_{t}" for t in filter.split("."))
+
+        codec = PrefixFilterable()
+        assert isinstance(codec, FilterableKeyCodec)  # structural (runtime_checkable)
+
+        js = nc.jetstream()
+        await js.create_key_value(KeyValueConfig(bucket="FWCODEC"))
+        kv = await js.key_value("FWCODEC", key_codec=codec)
+        await kv.put("orders.1", b"a")
+        await kv.put("orders.2", b"b")
+        await kv.put("users.1", b"c")  # excluded by orders.*
+
+        # Filter is per-token-encoded; the stored keyspace uses the same encoding.
+        assert kv._encode_watch_filter("orders.*") == "e_orders.*"
+
+        seen: list = []
+        async with kv.watch("orders.*") as watcher:
+            it = watcher.__aiter__()
+            while (entry := await it.__anext__()) is not None:
+                seen.append((entry.key, entry.value))
+            assert sorted(seen) == [("orders.1", b"a"), ("orders.2", b"b")]
+            await kv.put("orders.3", b"live")
+            await kv.put("users.9", b"nope")
+            live = await asyncio.wait_for(it.__anext__(), timeout=5.0)
+            assert live is not None and live.key == "orders.3" and live.value == b"live"
+
     async def test_stopped_watcher_does_not_resurrect_consumer(self, kv) -> None:
         """Finding: iterating after stop() rebuilt server-side state."""
         watcher = kv.watch()

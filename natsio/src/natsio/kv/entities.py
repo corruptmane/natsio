@@ -4,13 +4,14 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import StrEnum
-from typing import Final, NoReturn, Protocol
+from typing import Final, NoReturn, Protocol, runtime_checkable
 
 from natsio.jetstream.entities import Placement, Republish, StorageType, StreamInfo
 
 from .errors import InvalidBucketNameError, InvalidKeyError
 
 __all__ = [
+    "FilterableKeyCodec",
     "KeyCodec",
     "KeyValueConfig",
     "KeyValueStatus",
@@ -161,6 +162,30 @@ class KeyCodec(Protocol):
     def encode(self, key: str) -> str: ...
 
     def decode(self, key: str) -> str: ...
+
+
+@runtime_checkable
+class FilterableKeyCodec(KeyCodec, Protocol):
+    """A `KeyCodec` that can additionally encode a *watch filter* — a key that
+    may carry the ``*``/``>`` subject wildcards — one token at a time.
+
+    Plain key codecs can only transform a whole literal key; encoding a
+    wildcard filter with `encode()` would corrupt the ``*``/``>`` tokens, so a
+    wildcard `watch()` under a plain codec is refused. A filterable codec closes
+    that gap: `encode_filter()` passes the wildcard tokens through untouched and
+    codec-encodes only the literal tokens, so ``orders.>`` becomes (for a
+    per-token base64 codec) ``b3JkZXJz.>`` — still a valid subject filter, and
+    it matches exactly the keys the raw filter would once each stored key's
+    tokens are individually encoded the same way. Mirrors orbit.go's optional
+    ``FilterableKeyCodec`` interface.
+
+    This is `runtime_checkable`: `watch()` consults it via ``isinstance``, so a
+    codec need only provide ``encode_filter`` (structural), not subclass this.
+    The decode path is unchanged — a per-token filter matches per-token-encoded
+    keys, and the codec's own `decode()` already reverses that per token.
+    """
+
+    def encode_filter(self, filter: str, /) -> str: ...
 
 
 class ValueCodec(Protocol):

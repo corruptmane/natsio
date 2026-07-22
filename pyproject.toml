@@ -65,6 +65,11 @@ select = [
 
 [tool.ty.environment]
 python-version = "3.13"
+# Sibling `natsio.<ext>` imports in extension tests cannot be resolved by a
+# type checker: core is a REGULAR package (pkgutil-hybrid namespace, see
+# docs/decisions.md), so contributions from other src roots don't merge under
+# static analysis. Extension tests carry `# ty: ignore[unresolved-import]` on
+# their own-package import — the accepted cost of the namespace model.
 extra-paths = ["natsio/tests"]
 
 [tool.pytest.ini_options]

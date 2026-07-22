@@ -28,7 +28,7 @@ from natsio.kvcodec import (  # ty: ignore[unresolved-import]
     ZlibValueCodec,
 )
 
-from natsio.kv import InvalidKeyError, validate_key
+from natsio.kv import FilterableKeyCodec, InvalidKeyError, validate_key
 
 # A strategy for strings that are already valid NATS key *tokens* (no dots): the
 # base64 codec is a superset-safe transform, but the natsio core pre-validates
@@ -86,6 +86,10 @@ class TestBase64KeyCodec:
         assert codec.encode_filter("user.*") == "dXNlcg.*"
         assert codec.encode_filter("user.>") == "dXNlcg.>"
         assert codec.encode_filter("app.*.config.>") == "YXBw.*.Y29uZmln.>"
+
+    @pytest.mark.parametrize("pattern", ["user.*", "user.>", "app.*.config.>", "orders.1"])
+    def test_encode_filter_output_is_valid_subject_filter(self, pattern: str) -> None:
+        validate_key(Base64KeyCodec().encode_filter(pattern), wildcards=True)  # must not raise
 
 
 class TestPathKeyCodec:
@@ -201,6 +205,28 @@ class TestChainKeyCodec:
         chain = ChainKeyCodec(Base64KeyCodec(), Custom())
         with pytest.raises(WildcardNotSupportedError):
             chain.encode_filter("orders.*")
+
+
+class TestFilterableProtocol:
+    """The kvcodec key codecs must satisfy the core's runtime-checkable
+    `natsio.kv.FilterableKeyCodec` protocol so `watch()` recognises them."""
+
+    @pytest.mark.parametrize("codec", [Base64KeyCodec(), PathKeyCodec(), NoOpKeyCodec()])
+    def test_key_codecs_are_filterable(self, codec: object) -> None:
+        assert isinstance(codec, FilterableKeyCodec)
+
+    def test_all_filterable_chain_is_filterable(self) -> None:
+        assert isinstance(ChainKeyCodec(PathKeyCodec(), Base64KeyCodec()), FilterableKeyCodec)
+
+    def test_plain_codec_is_not_filterable(self) -> None:
+        class Plain:
+            def encode(self, key: str) -> str:
+                return key
+
+            def decode(self, key: str) -> str:
+                return key
+
+        assert not isinstance(Plain(), FilterableKeyCodec)
 
 
 class TestBase64ValueCodec:

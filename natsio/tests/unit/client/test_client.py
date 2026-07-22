@@ -157,6 +157,40 @@ class TestPublish:
         finally:
             await client.close()
 
+    async def test_instrumentation_hooks_receive_headers(self) -> None:
+        """The 1.0 seam passes headers to the message hooks: published sees the
+        outbound headers, delivered sees the parsed inbound headers (None for a
+        plain MSG)."""
+        from natsio.instrumentation import NoopInstrumentation
+
+        published: list = []
+        delivered: list = []
+
+        class Recorder(NoopInstrumentation):
+            def on_message_published(self, subject, headers, payload_size):
+                published.append((subject, headers, payload_size))
+
+            def on_message_delivered(self, subject, headers, payload_size):
+                delivered.append((subject, headers, payload_size))
+
+        env = FakeEnv()
+        client = await connected_client(env, instrumentation=Recorder())
+        try:
+            sub = client.subscribe("h.>")
+            await client.flush()
+            await client.publish("h.a", b"x", headers={"Trace": "abc"})
+            assert published[0][0] == "h.a"
+            assert published[0][1] == {"Trace": "abc"}  # outbound headers reach the hook
+
+            deliver_msg(env, sub.sid, "h.plain", b"y")  # plain MSG: no headers
+            assert delivered[-1] == ("h.plain", None, 1)
+            # header block "NATS/1.0\r\nK: v\r\n\r\n" = 18 bytes; +1 payload = 19 total.
+            env.current.deliver(b"HMSG h.hdr %d 18 19\r\nNATS/1.0\r\nK: v\r\n\r\nz\r\n" % sub.sid)
+            subj, hdrs, _size = delivered[-1]
+            assert subj == "h.hdr" and hdrs is not None and hdrs.get("K") == "v"
+        finally:
+            await client.close()
+
 
 class TestSubscribe:
     async def test_iterator_mode(self) -> None:

@@ -17,7 +17,7 @@ from typing import Protocol
 from natsio.errors import ConfigError
 
 from . import nkeys, signer
-from .creds import parse_creds
+from .creds import parse_creds, parse_nkey_seed
 
 __all__ = [
     "AuthResult",
@@ -26,6 +26,7 @@ __all__ = [
     "CredsAuth",
     "CredsFileAuth",
     "NKeyAuth",
+    "NKeyFileAuth",
     "TokenAuth",
     "UserPasswordAuth",
     "resolve_str",
@@ -91,6 +92,27 @@ class NKeyAuth:
             raise ConfigError("server did not send a nonce; NKey auth is not supported here")
         pair = nkeys.from_seed(await resolve_str(self.seed))
         return AuthResult(nkey=pair.public_key, signature=pair.sign_nonce_b64(nonce))
+
+
+@dataclass(frozen=True, slots=True)
+class NKeyFileAuth:
+    """NKey seed held in a file, re-read on every (re)connect to pick up rotation.
+
+    The ``nk``/``nats`` CLI store nkeys as files (decorated ``BEGIN USER NKEY
+    SEED`` block or a bare seed); this reads and parses one on each
+    `authenticate` call, mirroring `CredsFileAuth`, then signs through the same
+    path as `NKeyAuth`.
+    """
+
+    path: str | os.PathLike[str]
+
+    def __post_init__(self) -> None:
+        signer.require_backend()
+
+    async def authenticate(self, nonce: bytes | None) -> AuthResult:
+        content = await asyncio.to_thread(Path(self.path).read_text, encoding="utf-8")
+        seed = parse_nkey_seed(content)
+        return await NKeyAuth(seed=seed).authenticate(nonce)
 
 
 @dataclass(frozen=True, slots=True)

@@ -828,11 +828,11 @@ class TestInstrumentationWiring:
             def on_bytes_received(self, count: int) -> None:
                 raise RuntimeError("metrics backend is down")
 
-            def on_message_delivered(self, subject: str, payload_size: int) -> None:
+            def on_message_delivered(self, subject: str, headers: object, payload_size: int) -> None:
                 raise RuntimeError("metrics backend is down")
 
         safe = _SafeInstrumentation(RaisingBackend())
         # Every guarded hook swallows the failure instead of propagating it.
         safe.on_error(RuntimeError("boom"))
         safe.on_bytes_received(42)
-        safe.on_message_delivered("subj", 3)
+        safe.on_message_delivered("subj", None, 3)

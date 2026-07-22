@@ -1,10 +1,8 @@
 """The Counter handle: increment, load, and enumerate ADR-49 counters."""
 
-import json
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any
 
-from natsio.jetstream import headers as js_headers
 from natsio.jetstream.entities import DiscardPolicy, StreamConfig
 from natsio.jetstream.errors import MessageNotFoundError, StreamNotFoundError
 from natsio.jetstream.stream import Stream
@@ -106,22 +104,15 @@ class Counter:
 
         ``subjects`` may contain wildcards (``*`` / ``>``); each matched subject
         yields its current entry. Backed by a single batch Direct Get
-        (``multi_last``, ADR-31) rather than one round-trip per subject.
+        (``Stream.get_last_msgs_for``, ``multi_last`` per ADR-31) rather than one
+        round-trip per subject.
         """
         if not subjects:
             return
-        request = json.dumps({"multi_last": subjects}).encode()
-        endpoint = f"{self._ctx.api_prefix}.DIRECT.GET.{self.name}"
-        async for msg in self._ctx.client.request_many(endpoint, request, stall=1.0):
-            # The batch terminates with a 204 "EOB" status frame (and any
-            # per-subject miss is a status frame too) — those carry no counter.
-            if msg.status is not None:
+        async for stored in self._stream.get_last_msgs_for(subjects):
+            if not stored.subject:
                 continue
-            headers = msg.headers
-            subject = headers.get(js_headers.SUBJECT) if headers is not None else None
-            if not subject:
-                continue
-            yield _entry_from_parts(subject, msg.payload, headers)
+            yield _entry_from_parts(stored.subject, stored.payload, stored.headers)
 
 
 def _entry_from_parts(subject: str, payload: bytes, headers: Any) -> CounterEntry:
