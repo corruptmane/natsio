@@ -4,7 +4,7 @@ build-backend = "uv_build"
 
 [project]
 name = "natsio-testing"
-version = "0.1.0.dev0"
+version = "0.1.0"
 description = "nats-server process management for tests — start, stop, and fault-inject real servers"
 readme = "README.md"
 license = "Apache-2.0"
@@ -21,6 +21,11 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = ["natsio"]
+
+[project.urls]
+Homepage = "https://github.com/corruptmane/natsio"
+Repository = "https://github.com/corruptmane/natsio"
+Changelog = "https://github.com/corruptmane/natsio/blob/main/extensions/natsio-testing/CHANGELOG.md"
 
 [tool.uv.sources]
 natsio = { workspace = true }

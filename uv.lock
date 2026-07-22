@@ -649,7 +649,7 @@ requires-dist = [
 
 [[package]]
 name = "natsio-testing"
-version = "0.1.0.dev0"
+version = "0.1.0"
 source = { editable = "extensions/natsio-testing" }
 dependencies = [
     { name = "natsio" },
