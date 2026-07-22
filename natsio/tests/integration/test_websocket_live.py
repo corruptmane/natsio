@@ -65,7 +65,8 @@ class TestWebSocketHandshake:
         await conn.connect()
         try:
             assert conn.state is ConnectionState.CONNECTED
-            assert conn.server_info["version"].startswith("2.14")
+            major, minor = (int(p) for p in conn.server_info["version"].split(".", 2)[:2])
+            assert (major, minor) >= (2, 14)  # natsio's supported server floor
             assert conn.connected_url == url
             await conn.flush()
         finally:

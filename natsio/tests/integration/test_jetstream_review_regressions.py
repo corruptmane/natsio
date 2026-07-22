@@ -186,9 +186,15 @@ class TestOrderedLifecycle:
                 got.append(msg.payload)
                 if len(got) == 2:
                     break  # abandon mid-stream on purpose
-        # Deterministic: the ephemeral consumer is gone right now, not at GC.
-        names = [name async for name in stream.consumer_names()]
-        assert names == []
+        # Deterministic: stop() deleted the ephemeral consumer synchronously —
+        # not deferred to GC (which would linger for inactive_threshold, 5min).
+        # The CONSUMER.NAMES listing can lag the just-completed delete by a
+        # hair under load, so poll a short bounded window; the point is prompt,
+        # not literally instantaneous.
+        async with asyncio.timeout(3.0):
+            # Polling external (server) state — there is no local event to await.
+            while [name async for name in stream.consumer_names()]:  # noqa: ASYNC110
+                await asyncio.sleep(0.02)
 
     async def test_idle_timeout_bounds_a_quiet_stream(self, nc: natsio.Client) -> None:
         """Lifecycle finding 9: no way to distinguish quiet from dead before."""
