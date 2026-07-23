@@ -4,6 +4,20 @@ All notable changes to `natsio-counters` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project is
 pre-1.0 and makes no API-stability promises.
 
+## [0.1.1] - 2026-07-23
+
+### Fixed
+
+- Ship the `py.typed` marker. The distribution declares `Typing :: Typed` and
+  is fully annotated, but the marker file was missing, so `mypy`/`ty` in a
+  consuming project could not see the package's inline types. Type checkers now
+  pick them up.
+
+### Added
+
+- A runnable `examples/basic.py` (create a counter, increment, read one, and
+  enumerate many with `get_multiple`).
+
 ## [0.1.0] - 2026-07-22
 
 Initial release. Distributed counters over JetStream counter streams
