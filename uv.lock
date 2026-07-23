@@ -609,7 +609,7 @@ requires-dist = [
 
 [[package]]
 name = "natsio-counters"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "extensions/natsio-counters" }
 dependencies = [
     { name = "natsio" },
