@@ -7,10 +7,10 @@ its fix. Named after the corresponding nats.go tests where one exists.
 import asyncio
 
 import pytest
-from test_client import connected_client, deliver_msg
+from test_client import _extract_reply, connected_client, deliver_msg
 
 import natsio
-from fake import FakeEnv
+from fake import FakeEnv, frames_written
 from natsio._internal.lifecycle import ConnectionState
 from natsio.errors import (
     ConnectionClosedError,
@@ -193,3 +193,67 @@ class TestOptionalAwait:
             assert sub.is_closed
         finally:
             await client.close()
+
+
+class TestRequestManyFirstReplyStall:
+    """`stall` bounds the gap BETWEEN replies — the first reply gets the full
+    deadline (nats.go natsext `if !first && stall != 0`). Applying stall before
+    the first reply turned a responder slower than `stall` into zero results."""
+
+    async def test_slow_first_reply_is_not_cut_off_by_stall(self) -> None:
+        env = FakeEnv()
+        client = await connected_client(env)
+        try:
+            replies: list[bytes] = []
+
+            async def collect() -> None:
+                replies.extend([msg.payload async for msg in client.request_many("svc", b"x", timeout=2.0, stall=0.05)])
+
+            task = asyncio.create_task(collect())
+            await asyncio.sleep(0)
+            await client.flush()
+            reply_subject = _extract_reply(frames_written(env.current), client.inbox_prefix)
+            mux_sid = client._mux_sid
+            assert mux_sid is not None
+            # Answer well after the 50ms stall but inside the 2s deadline.
+            await asyncio.sleep(0.2)
+            deliver_msg(env, mux_sid, reply_subject, b"slow-but-valid")
+            await asyncio.wait_for(task, timeout=2)
+            assert replies == [b"slow-but-valid"]
+        finally:
+            await client.close()
+
+
+class TestRequestManyCloseIsNotCompletion:
+    """Closing the connection mid-stream truncates the result; it is not the
+    responders finishing. `request()` already raised here — `request_many()`
+    returned quietly, so every caller (batch Direct Get, `$SYS` gathers) read a
+    truncated prefix as a complete answer."""
+
+    async def test_close_mid_stream_raises_instead_of_ending_the_stream(self) -> None:
+        env = FakeEnv()
+        client = await connected_client(env, request_timeout=30.0)
+        seen: list[bytes] = []
+
+        async def collect() -> None:
+            # Append per-message on purpose: the point of this test is that the
+            # partial result survives the mid-stream raise, and a comprehension
+            # would discard everything collected when the exception propagates.
+            async for msg in client.request_many("svc", b"x", timeout=30.0):
+                seen.append(msg.payload)  # noqa: PERF401
+
+        task = asyncio.create_task(collect())
+        await asyncio.sleep(0)
+        await client.flush()
+        reply_subject = _extract_reply(frames_written(env.current), client.inbox_prefix)
+        mux_sid = client._mux_sid
+        assert mux_sid is not None
+        deliver_msg(env, mux_sid, reply_subject, b"first")
+        await asyncio.sleep(0)  # let the consumer take it before we close
+
+        await client.close()
+
+        with pytest.raises(ConnectionClosedError, match="truncated"):
+            await asyncio.wait_for(task, timeout=1)
+        # The partial data was really delivered — this is truncation, not a lost stream.
+        assert seen == [b"first"]

@@ -35,6 +35,7 @@ class StatusCode(IntEnum):
 
     CONTROL = 100  # idle heartbeat / flow control
     OK = 200
+    NO_CONTENT = 204  # end of batch (ADR-31 batch direct get)
     NOT_FOUND = 404  # no messages (pull)
     TIMEOUT = 408  # pull request timed out / interest expired
     CONFLICT = 409  # pull terminated (consumer deleted, max-bytes, leadership change...)

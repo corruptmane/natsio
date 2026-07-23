@@ -3,6 +3,31 @@
 All notable changes to the `natsio` core client are documented here.
 Extension packages under `extensions/` keep their own changelogs.
 
+## Unreleased
+
+### Fixed (loud failure — both surfaced by building the remaining extensions)
+
+- `Stream.get_last_msgs_for()` treated **every** status frame except `204 EOB`
+  as a clean end of batch, so a `413 Too Many Results` (more matching subjects
+  than the server will batch) returned an empty list, and a batch cut short by
+  a lost connection or an elapsed deadline returned a silently truncated
+  prefix. Only `204 EOB` and `404 No Results` terminate now; any other status
+  raises `APIError`, and a stream that ends with no terminator at all raises
+  `JetStreamError` naming the truncation. `404 No Results` is a terminal
+  empty-set, not a per-subject miss — misses are simply omitted from a reply
+  that still ends in EOB (probe-confirmed on 2.14.3).
+- `Client.request_many()` applied `stall` to the *first* reply, contradicting
+  its own docstring: any responder slower than `stall` (default paths included)
+  yielded nothing at all. `stall` now bounds only the gap **between** replies —
+  the first gets the full `timeout` (nats.go `natsext` requestmany parity).
+- `Client.request_many()` ended its stream *silently* when the connection
+  closed mid-read, so a truncated prefix was indistinguishable from a complete
+  answer — and it was asymmetric, since single-reply `request()` already raised
+  there. It now raises `ConnectionClosedError` naming how many replies were
+  received. This fixes the same misreport in all three callers at once (batch
+  Direct Get, `natsio-jetstream-batch`'s `get_batch`, `natsio-sysclient`'s
+  cluster gathers).
+
 ## 0.12.0 — 2026-07-22
 
 ### Core API (pre-1.0 seam changes, driven by building the extensions)

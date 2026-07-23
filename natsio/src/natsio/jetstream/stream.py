@@ -28,7 +28,7 @@ from .entities import (
     ReplayPolicy,
     StreamInfo,
 )
-from .errors import MessageNotFoundError
+from .errors import APIError, JetStreamError, MessageNotFoundError
 
 __all__ = ["StoredMsg", "Stream"]
 
@@ -234,14 +234,37 @@ class Stream:
             request["up_to_time"] = RFC3339.to_wire(up_to_time)
         body = json.dumps(request, separators=(",", ":")).encode()
         endpoint = f"{self._ctx.api_prefix}.DIRECT.GET.{self.name}"
+        terminated = False
         async for msg in self._ctx.client.request_many(endpoint, body, timeout=self._ctx.timeout):
             if msg.status is not None:
-                # A 204 "EOB" frame terminates the batch (ADR-31). A per-subject
-                # miss can arrive as a 404 status frame — skip it and keep going.
-                if msg.status.code == StatusCode.NOT_FOUND:
-                    continue
-                return
+                # Two clean terminators, both probe-confirmed on 2.14.3:
+                #   204 EOB       — the batch ended normally.
+                #   404 No Results — NOTHING matched; it arrives alone and is
+                #                    NOT followed by an EOB. It is emphatically
+                #                    not a per-subject miss: those are simply
+                #                    omitted from the reply, which still ends
+                #                    in EOB. Treating 404 as skippable made
+                #                    every empty batch block for the full
+                #                    request timeout and then raise.
+                if msg.status.code in (StatusCode.NO_CONTENT, StatusCode.NOT_FOUND):
+                    terminated = True
+                    break
+                # Anything else is a failure the caller must see: a 413 "Too
+                # Many Results" (more matching subjects than the server will
+                # batch) silently became an empty result before this check.
+                raise APIError(
+                    f"batch direct get failed: {msg.status.code} {msg.status.description}",
+                    code=msg.status.code,
+                )
             yield self._stored_from_direct(msg)
+        if not terminated:
+            # request_many completed on its stall/overall deadline (or the
+            # connection died) without the terminator: what we yielded is a
+            # PREFIX, not the batch. Truncation must never look like success.
+            raise JetStreamError(
+                f"batch direct get on {self.name!r} ended without a terminator (204 EOB / 404 No Results): "
+                "the result is truncated (deadline reached or connection lost)"
+            )
 
     async def delete_msg(self, sequence: int, *, no_erase: bool = False) -> None:
         payload: dict[str, Any] = {"seq": sequence}

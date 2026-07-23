@@ -15,6 +15,7 @@ from natsio._internal.protocol import Headers, InlineStatus
 from natsio.errors import ConfigError
 from natsio.jetstream import headers as js_headers
 from natsio.jetstream.entities import StreamConfig, StreamInfo
+from natsio.jetstream.errors import APIError, JetStreamError
 from natsio.jetstream.stream import StoredMsg, Stream
 from natsio.message import Msg
 
@@ -135,16 +136,45 @@ class TestResponseParsing:
             ("events.b", 2, b'{"val":"9"}'),
         ]
 
-    async def test_skips_404_subject_miss(self) -> None:
+    async def test_per_subject_miss_is_omitted_not_signalled(self) -> None:
+        """A subject with no match is simply absent from the reply.
+
+        Probe-confirmed on 2.14.3: asking for `p.a`, `p.b`, `p.missing` returns
+        two data frames and an EOB — there is no per-subject 404 frame. (This
+        test used to assert the opposite, and that belief is what made a lone
+        `404 No Results` get skipped instead of terminating the batch.)
+        """
         frames = [
             _data_frame("events.a", 1, b'{"val":"5"}'),
-            _not_found_frame(),
             _data_frame("events.b", 2, b'{"val":"9"}'),
             _eob_frame(),
         ]
         stream, _ = _stream(frames)
         out = await _collect(stream, ["events.a", "events.missing", "events.b"])
         assert [m.subject for m in out] == ["events.a", "events.b"]
+
+    async def test_lone_404_is_a_terminal_empty_set(self) -> None:
+        """`404 No Results` means nothing matched — it arrives alone, with no EOB."""
+        stream, _ = _stream([_not_found_frame()])
+        assert await _collect(stream, ["events.nothing.>"]) == []
+
+    async def test_unexpected_status_raises_instead_of_ending_the_batch(self) -> None:
+        """`413 Too Many Results` used to read as a clean end-of-batch: an empty
+        list for a request the server explicitly refused."""
+        frames = [
+            Msg(subject="_INBOX.reply", payload=b"", headers=Headers(), status=InlineStatus(413, "Too Many Results"))
+        ]
+        stream, _ = _stream(frames)
+        with pytest.raises(APIError) as excinfo:
+            await _collect(stream, ["events.>"])
+        assert excinfo.value.code == 413
+
+    async def test_missing_terminator_is_truncation_not_completion(self) -> None:
+        """A batch cut short (deadline, dead connection) must not look complete."""
+        frames = [_data_frame("events.a", 1, b"x"), _data_frame("events.b", 2, b"y")]
+        stream, _ = _stream(frames)
+        with pytest.raises(JetStreamError, match="truncated"):
+            await _collect(stream, ["events.>"])
 
     async def test_parses_timestamp(self) -> None:
         frames = [_data_frame("events.a", 1, b"x", time="2026-07-22T12:00:00.5Z"), _eob_frame()]

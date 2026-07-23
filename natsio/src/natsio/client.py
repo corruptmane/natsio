@@ -410,6 +410,12 @@ class Client:
         Completion is whichever comes first: ``max_msgs`` replies, a gap of
         ``stall`` seconds between replies, or the overall ``timeout``. A
         no-responders status ends the stream without yielding.
+
+        ``stall`` bounds the gap *between* replies only — the first reply gets
+        the full ``timeout``.
+
+        Raises `ConnectionClosedError` if the connection closes mid-stream:
+        that result is truncated, not complete.
         """
         overall = timeout if timeout is not None else self._options.request_timeout
         loop = asyncio.get_running_loop()
@@ -432,14 +438,28 @@ class Client:
                 remaining = deadline_at - loop.time()
                 if remaining <= 0:
                     return
-                window = remaining if stall is None else min(stall, remaining)
+                # `stall` bounds the gap BETWEEN replies; the FIRST reply gets
+                # the full deadline (nats.go natsext requestmany: `if !first
+                # && stall != 0`). Applying it before the first reply turned a
+                # cluster slower than `stall` into an empty result.
+                window = remaining if stall is None or received == 0 else min(stall, remaining)
                 try:
                     async with asyncio.timeout(window):
                         msg = await sink.queue.get()
                 except builtins.TimeoutError:
                     return  # stall gap or overall deadline: complete with what we have
                 if msg is None:
-                    return
+                    # `None` reaches this queue from exactly one place —
+                    # `_RequestSink.close()`, called only by `Client.close()`.
+                    # So it is never "the responders finished"; it is the
+                    # connection dying under a partially-read stream. Returning
+                    # quietly handed the caller a silently truncated result
+                    # that looked complete, and it was asymmetric: the
+                    # single-reply `request()` already raises here.
+                    raise ConnectionClosedError(
+                        f"connection closed while reading replies to {subject!r} "
+                        f"({received} received): the result is truncated"
+                    )
                 if msg.status is not None and msg.status.code == StatusCode.NO_RESPONDERS:
                     return
                 yield msg

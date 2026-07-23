@@ -9,6 +9,7 @@ import natsio
 from natsio.errors import ConnectionClosedError
 from natsio.jetstream import (
     AckPolicy,
+    APIError,
     ConsumerConfig,
     ConsumerNotFoundError,
     DeliverPolicy,
@@ -122,6 +123,51 @@ class TestStreams:
         await js.publish("del.a", b"x")
         await stream.delete_msg(1)
         assert (await stream.info()).state.messages == 0
+
+
+class TestBatchGetLoudFailure:
+    """Review regression (natsio-schedules found this): batch direct get used to
+    treat ANY non-404 status as a clean end-of-batch, so a 413 'Too Many
+    Results' silently became an empty result and a mid-batch truncation was
+    indistinguishable from success. Only the 204 EOB may end it."""
+
+    async def test_too_many_results_raises_instead_of_returning_empty(self, nc) -> None:
+        js = nc.jetstream()
+        stream = await js.create_stream(
+            StreamConfig(name="TMR", subjects=["tmr.>"], storage=StorageType.MEMORY, allow_direct=True)
+        )
+        # >1024 distinct matching subjects is what trips the server's batch cap.
+        for i in range(1100):
+            await js.publish(f"tmr.{i}", b"x")
+
+        with pytest.raises(APIError) as excinfo:
+            _ = [m async for m in stream.get_last_msgs_for("tmr.>")]
+        # Loud and specific — not an empty list.
+        assert "batch direct get failed" in str(excinfo.value)
+
+    async def test_empty_batch_is_empty_not_an_error(self, nc) -> None:
+        """A batch matching NOTHING gets a lone 404 'No Results' with no EOB.
+        That is a clean empty result — not truncation, and it must not block
+        for the whole request timeout waiting for a terminator that never comes."""
+        js = nc.jetstream()
+        stream = await js.create_stream(
+            StreamConfig(name="EMPTYB", subjects=["eb.>"], storage=StorageType.MEMORY, allow_direct=True)
+        )
+        loop = asyncio.get_running_loop()
+        started = loop.time()
+        got = [m async for m in stream.get_last_msgs_for("eb.nothing.here")]
+        assert got == []
+        assert loop.time() - started < 2.0  # not the full request timeout
+
+    async def test_normal_batch_still_completes_on_eob(self, nc) -> None:
+        js = nc.jetstream()
+        stream = await js.create_stream(
+            StreamConfig(name="EOBOK", subjects=["eob.>"], storage=StorageType.MEMORY, allow_direct=True)
+        )
+        for i in range(10):
+            await js.publish(f"eob.{i}", b"%d" % i)
+        got = [m async for m in stream.get_last_msgs_for("eob.>")]
+        assert len(got) == 10
 
 
 class TestBatchGet:
