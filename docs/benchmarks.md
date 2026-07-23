@@ -24,7 +24,7 @@ Fairness rules that matter:
   those are marked **n/s** below (nats-core has no JetStream surface yet).
 
 Environment for the figures below: macOS arm64, CPython 3.13.13, nats-server
-2.14.3; natsio (dev) vs nats-py 2.15.0 vs nats-core 0.2.0.
+2.14.3; natsio 1.0.0 vs nats-py 2.15.0 vs nats-core 0.2.0.
 
 ## Results
 
@@ -32,43 +32,43 @@ Environment for the figures below: macOS arm64, CPython 3.13.13, nats-server
 
 | Scenario | Unit | natsio | nats-py | nats-core |
 |---|---|--:|--:|--:|
-| `pub_16b` | msgs/s | **1,401,676** | 893,879 | 2,047,388 |
-| `pub_1k` | msgs/s | **1,078,357** | 1,015,105 | 1,540,656 |
-| `pub_64k` | MB/s | 7,466 | 7,602 | 7,740 |
-| `pubsub_16b` | msgs/s | 312,727 | 342,362 | 336,088 |
-| `pubsub_1k` | msgs/s | 276,383 | 301,796 | 293,254 |
-| `roundtrip_latency` | ms | **0.167** | 0.176 | 5.996 |
-| `reqrep_throughput` | req/s | **64,417** | 60,057 | 5,598 |
+| `pub_16b` | msgs/s | **1,405,868** | 910,335 | 2,062,361 |
+| `pub_1k` | msgs/s | **1,085,935** | 1,051,033 | 1,536,058 |
+| `pub_64k` | MB/s | 7,559 | 7,685 | 7,632 |
+| `pubsub_16b` | msgs/s | 312,203 | 345,875 | 337,320 |
+| `pubsub_1k` | msgs/s | 279,402 | 307,663 | 295,605 |
+| `roundtrip_latency` | ms | **0.169** | 0.176 | 6.078 |
+| `reqrep_throughput` | req/s | **64,119** | 58,859 | 5,217 |
 
 ### JetStream, KV, Object Store
 
 | Scenario | Unit | natsio | nats-py | nats-core |
 |---|---|--:|--:|--:|
-| `js_publish_sync` | msgs/s | **13,700** | 9,399 | n/s |
-| `js_publish_async` | msgs/s | **142,825** | 123,330 | n/s |
-| `js_consume` | msgs/s | **205,978** | 28,543 | n/s |
-| `kv_put` | ops/s | **13,618** | 9,334 | n/s |
-| `kv_get` | ops/s | **11,759** | 8,875 | n/s |
-| `os_roundtrip` | MB/s | **889.9** | 39.1 | n/s |
+| `js_publish_sync` | msgs/s | **13,704** | 9,411 | n/s |
+| `js_publish_async` | msgs/s | **145,542** | 123,974 | n/s |
+| `js_consume` | msgs/s | **210,400** | 28,440 | n/s |
+| `kv_put` | ops/s | **13,255** | 9,250 | n/s |
+| `kv_get` | ops/s | **11,672** | 8,833 | n/s |
+| `os_roundtrip` | MB/s | **948.1** | 39.9 | n/s |
 
 **Bold** marks the fastest client that implements the scenario.
 
 ## Interpretation
 
-natsio leads nats-py on 11 of 13 scenarios and ties the other two within ~9%.
+natsio leads nats-py on 11 of 13 scenarios and ties the other two within ~10%.
 The gaps are worth understanding rather than cheering.
 
 **Where natsio pulls clearly ahead.** The JetStream and higher-level stores are
 the widest margins, because that is where allocation and indirection dominate:
-`js_consume` is **7.2×** nats-py (206k vs 29k msgs/s) and `os_roundtrip` is
-**23×** (890 vs 39 MB/s). These come from a faster JSON model (per-field
+`js_consume` is **7.4×** nats-py (210k vs 28k msgs/s) and `os_roundtrip` is
+**24×** (948 vs 40 MB/s). These come from a faster JSON model (per-field
 decode/encode strategies precomputed once), lighter per-message objects, and a
 pull-consumer read path that keeps the window topped up without per-message
-reflection. Core `pub_16b` is **1.57×** nats-py for the same reasons — the hot
+reflection. Core `pub_16b` is **1.54×** nats-py for the same reasons — the hot
 path is allocation, not architecture.
 
-**The two scenarios within ~9%.** `pubsub_16b` and `pubsub_1k` are the only
-places natsio trails, by roughly 8–9% (313k vs 342k, 276k vs 302k msgs/s). This
+**The two scenarios within ~10%.** `pubsub_16b` and `pubsub_1k` are the only
+places natsio trails, by roughly 9–10% (312k vs 346k, 279k vs 308k msgs/s). This
 is the delivery-dispatch path, and the gap is small enough to sit inside
 run-to-run variance on a busy machine; it is not a structural deficit.
 
@@ -79,9 +79,9 @@ library. Parity here is the expected, correct result.
 **nats-core's raw-publish lead has a price.** nats-core wins the fire-and-forget
 publish scenarios (`pub_16b`, `pub_1k`) via a **5 ms write-coalescing floor** —
 it batches writes before flushing. That trade is brutal for anything
-synchronous: its `roundtrip_latency` is **5.996 ms** against natsio's
-**0.167 ms** (a **36×** difference), and its `reqrep_throughput` collapses to
-**5,598 req/s** against natsio's **64,417** (**11.5×** slower). If your workload
+synchronous: its `roundtrip_latency` is **6.078 ms** against natsio's
+**0.169 ms** (a **36×** difference), and its `reqrep_throughput` collapses to
+**5,217 req/s** against natsio's **64,119** (**12.3×** slower). If your workload
 is request/reply or any latency-sensitive round trip, that coalescing floor is
 the number that decides it.
 

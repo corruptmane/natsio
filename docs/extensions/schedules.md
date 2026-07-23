@@ -1,0 +1,1 @@
+--8<-- "extensions/natsio-schedules/README.md"

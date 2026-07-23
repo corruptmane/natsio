@@ -211,3 +211,11 @@ We follow the server, not the constant.
 - No client-side cap on batch length: fast ingest has no equivalent of the
   atomic batch's 1000-message server limit, and 20k-message batches are part of
   the local stress runs.
+
+## Example
+
+A runnable script is at [`examples/basic.py`](https://github.com/corruptmane/natsio/blob/main/extensions/natsio-jetstream-batch/examples/basic.py) — start a server with `just server`, then:
+
+```bash
+python extensions/natsio-jetstream-batch/examples/basic.py
+```

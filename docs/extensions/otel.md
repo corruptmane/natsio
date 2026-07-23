@@ -1,0 +1,1 @@
+--8<-- "extensions/natsio-otel/README.md"

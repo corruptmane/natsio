@@ -110,3 +110,11 @@ this library's format are byte-compatible with what the CLI expects.
 ## License
 
 Apache-2.0.
+
+## Example
+
+A runnable script is at [`examples/basic.py`](https://github.com/corruptmane/natsio/blob/main/extensions/natsio-natscontext/examples/basic.py) — start a server with `just server`, then:
+
+```bash
+python extensions/natsio-natscontext/examples/basic.py
+```

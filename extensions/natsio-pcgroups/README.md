@@ -260,3 +260,11 @@ either buggy or silent:
 - **Single-replica testing.** The live suite runs against one server; the
   replica/storage inheritance for the KV bucket and the group stream follows
   the origin stream but is not exercised in a cluster here.
+
+## Example
+
+A runnable script is at [`examples/basic.py`](https://github.com/corruptmane/natsio/blob/main/extensions/natsio-pcgroups/examples/basic.py) — start a server with `just server`, then:
+
+```bash
+python extensions/natsio-pcgroups/examples/basic.py
+```

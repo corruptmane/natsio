@@ -45,6 +45,13 @@ markdown_extensions:
   - pymdownx.details
   - pymdownx.tabbed:
       alternate_style: true
+  # Render each extension's own README into its docs page (single source of
+  # truth — the page and the PyPI description never drift). base_path is the
+  # repo root so `extensions/…` resolves; check_paths fails the build loudly
+  # if a README is renamed or removed.
+  - pymdownx.snippets:
+      base_path: [.]
+      check_paths: true
 
 plugins:
   - search
@@ -76,7 +83,17 @@ nav:
   - Migrating from nats-py: migration-from-nats-py.md
   - Benchmarks: benchmarks.md
   - Design decisions: decisions.md
-  - Extensions: extensions.md
+  - Extensions:
+      - Overview: extensions.md
+      - natsio-schedules: extensions/schedules.md
+      - natsio-jetstream-batch: extensions/jetstream-batch.md
+      - natsio-sysclient: extensions/sysclient.md
+      - natsio-pcgroups: extensions/pcgroups.md
+      - natsio-counters: extensions/counters.md
+      - natsio-kvcodec: extensions/kvcodec.md
+      - natsio-natscontext: extensions/natscontext.md
+      - natsio-otel: extensions/otel.md
+      - natsio-testing: extensions/testing.md
   - API reference:
       - Client: reference/client.md
       - JetStream: reference/jetstream.md

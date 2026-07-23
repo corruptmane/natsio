@@ -222,3 +222,11 @@ uv run pytest extensions/natsio-sysclient -q
 
 Live tests need `tools/.bin/nats-server` (or `NATS_SERVER_BIN`) and start it
 with a `$SYS` account plus a JetStream-enabled `APP` account.
+
+## Example
+
+A runnable script is at [`examples/basic.py`](https://github.com/corruptmane/natsio/blob/main/extensions/natsio-sysclient/examples/basic.py) — start a server with `just server`, then:
+
+```bash
+python extensions/natsio-sysclient/examples/basic.py
+```

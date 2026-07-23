@@ -136,3 +136,11 @@ codec the *raw* filter is the caller's domain (it may be in the codec's own
 notation, e.g. `PathKeyCodec`'s `/a/*`) — only the encoded filter must be a
 legal subject filter. A wildcard watch under a *non*-filterable codec is still
 refused (`ConfigError`): encoding the whole key would mangle the `*`/`>`.
+
+## Example
+
+A runnable script is at [`examples/basic.py`](https://github.com/corruptmane/natsio/blob/main/extensions/natsio-kvcodec/examples/basic.py) — start a server with `just server`, then:
+
+```bash
+python extensions/natsio-kvcodec/examples/basic.py
+```

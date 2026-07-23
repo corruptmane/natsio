@@ -1,0 +1,1 @@
+--8<-- "extensions/natsio-natscontext/README.md"

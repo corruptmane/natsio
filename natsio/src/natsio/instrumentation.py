@@ -32,6 +32,21 @@ __all__ = ["Instrumentation", "NoopInstrumentation"]
 
 
 class Instrumentation(Protocol):
+    """Observability seam: the hooks the client calls at its load-bearing moments.
+
+    natsio never imports a metrics or tracing library. Instead it calls this
+    small protocol on connect/disconnect/reconnect/close, bytes in and out,
+    messages published and delivered, slow consumers, and errors. Implement it
+    and pass an instance via `ConnectOptions(instrumentation=...)`; every hook
+    defaults to a no-op on the Protocol, so partial implementations are fine.
+
+    Hooks are invoked **synchronously on hot paths**, so they must be fast and
+    must never raise — a broken backend cannot take down the connection
+    (exceptions are swallowed and logged). The default `NoopInstrumentation`
+    costs nothing (it is not even wrapped on the hot path). The `natsio-otel`
+    extension is a ready-made OpenTelemetry adapter over this exact seam.
+    """
+
     def on_connect(self, server_url: str) -> None: ...
 
     def on_disconnect(self, error: Exception | None) -> None: ...

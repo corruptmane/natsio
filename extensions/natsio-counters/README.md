@@ -87,3 +87,11 @@ Notes: `allow_msg_counter` can be set **only at stream creation** (it is read-on
 afterwards) and is **incompatible with per-message TTLs and message schedules**,
 so `CounterConfig` intentionally does not expose those knobs. Reads use Direct
 Get, so `allow_direct` is required (and forced on by `create_counter`).
+
+## Example
+
+A runnable script is at [`examples/basic.py`](https://github.com/corruptmane/natsio/blob/main/extensions/natsio-counters/examples/basic.py) — start a server with `just server`, then:
+
+```bash
+python extensions/natsio-counters/examples/basic.py
+```

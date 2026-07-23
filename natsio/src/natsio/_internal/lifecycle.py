@@ -17,6 +17,19 @@ log = logging.getLogger("natsio.lifecycle")
 
 
 class ConnectionState(Enum):
+    """The lifecycle state of a `Client`, readable via `Client.status`.
+
+    - `DISCONNECTED` — created but not yet connected, or a connection was lost
+      and no reconnect is in progress.
+    - `CONNECTING` — the initial connect is in flight.
+    - `CONNECTED` — the live, usable state.
+    - `RECONNECTING` — the link dropped and the client is re-establishing it
+      (a healthy, recoverable state, not a closure).
+    - `DRAINING` — `drain()` is in progress: subscriptions are being flushed
+      before close.
+    - `CLOSED` — terminal; the client cannot be reused.
+    """
+
     DISCONNECTED = "DISCONNECTED"
     CONNECTING = "CONNECTING"
     CONNECTED = "CONNECTED"

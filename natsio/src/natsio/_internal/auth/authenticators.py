@@ -61,6 +61,18 @@ class AuthResult:
 
 
 class Authenticator(Protocol):
+    """How a connection proves who it is to the server.
+
+    `authenticate` is called on every connect and reconnect with the server's
+    current `nonce` (present only when the server requires a signed challenge,
+    i.e. NKey/JWT), and returns the credentials to send in the `CONNECT`
+    protocol message. Recomputing on each call is deliberate: it lets a
+    credentials file be re-read or a signature be re-signed against a fresh
+    nonce after a reconnect. The built-in strategies (`UserPasswordAuth`,
+    `TokenAuth`, `NKeyAuth`, `CredsAuth`, `CallbackAuth`, …) implement this;
+    supply your own to source secrets from a KMS/HSM without shipping a key.
+    """
+
     async def authenticate(self, nonce: bytes | None) -> AuthResult: ...
 
 

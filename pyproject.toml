@@ -95,9 +95,11 @@ select = [
 "**/tests/**" = ["PLC0415"]
 "natsio/tests/**" = ["PLC0415"]
 # Examples are teaching code — a conditional/lazy import (e.g. importing the
-# dev-only natsio-testing extension only on the self-start path) is a feature
-# to demonstrate, not a smell.
+# dev-only natsio-testing extension only on the self-start path, or importing a
+# module only after an env var is set) is a feature to demonstrate, not a smell.
+# Covers the root examples/ and each extension's own examples/ dir.
 "examples/**" = ["PLC0415"]
+"**/examples/**" = ["PLC0415"]
 
 [tool.ty.environment]
 python-version = "3.13"

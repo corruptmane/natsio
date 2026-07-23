@@ -130,3 +130,11 @@ handler-wrapping seam).
 
 Part of the natsio extension tier. If adopted into orbit.py the move is
 mechanical (`natsio/otel/` -> `orbit/otel/`).
+
+## Example
+
+A runnable script is at [`examples/basic.py`](https://github.com/corruptmane/natsio/blob/main/extensions/natsio-otel/examples/basic.py) — start a server with `just server`, then:
+
+```bash
+python extensions/natsio-otel/examples/basic.py
+```

@@ -63,17 +63,20 @@ Conventions worth knowing:
 
 ## Roster
 
+Each extension's own page (linked below) renders its full README — install,
+usage, wire contract, and scope limits.
+
 | Extension | Import | Status |
 |---|---|---|
-| `natsio-testing` | `natsio.testing` | nats-server process manager for tests — **implemented** |
-| `natsio-counters` | `natsio.counters` | distributed counters (ADR-49) — **implemented** |
-| `natsio-schedules` | `natsio.schedules` | message schedules (ADR-51) — **implemented** |
-| `natsio-jetstream-batch` | `natsio.jetstream_batch` | 2.14 fast-ingest batch publish + batch reads — **implemented** |
-| `natsio-kvcodec` | `natsio.kvcodec` | KV key/value codecs (ADR-54) — **implemented** |
-| `natsio-natscontext` | `natsio.natscontext` | NATS CLI context files (ADR-21) — **implemented** |
-| `natsio-sysclient` | `natsio.sysclient` | `$SYS` monitoring API client — **implemented** |
-| `natsio-pcgroups` | `natsio.pcgroups` | partitioned consumer groups (static + elastic) — **implemented** |
-| `natsio-otel` | `natsio.otel` | OpenTelemetry adapter over the instrumentation seam — **implemented** |
+| [`natsio-testing`](extensions/testing.md) | `natsio.testing` | nats-server process manager for tests — **implemented** |
+| [`natsio-counters`](extensions/counters.md) | `natsio.counters` | distributed counters (ADR-49) — **implemented** |
+| [`natsio-schedules`](extensions/schedules.md) | `natsio.schedules` | message schedules (ADR-51) — **implemented** |
+| [`natsio-jetstream-batch`](extensions/jetstream-batch.md) | `natsio.jetstream_batch` | 2.14 fast-ingest batch publish + batch reads — **implemented** |
+| [`natsio-kvcodec`](extensions/kvcodec.md) | `natsio.kvcodec` | KV key/value codecs (ADR-54) — **implemented** |
+| [`natsio-natscontext`](extensions/natscontext.md) | `natsio.natscontext` | NATS CLI context files (ADR-21) — **implemented** |
+| [`natsio-sysclient`](extensions/sysclient.md) | `natsio.sysclient` | `$SYS` monitoring API client — **implemented** |
+| [`natsio-pcgroups`](extensions/pcgroups.md) | `natsio.pcgroups` | partitioned consumer groups (static + elastic) — **implemented** |
+| [`natsio-otel`](extensions/otel.md) | `natsio.otel` | OpenTelemetry adapter over the instrumentation seam — **implemented** |
 
 `natsio-testing` is the real-server process manager (start/stop, configs, free
 ports, readiness probing, JetStream store dirs, SIGKILL fault injection) that

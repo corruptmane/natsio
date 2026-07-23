@@ -247,3 +247,11 @@ nats.go — for those the ADR and the server are the oracle.
   `Interest` caveats (a consumer ack can silently delete a schedule) are
   documented in the ADR, not enforced here; `ScheduleStreamConfig` defaults to
   `Limits`, which is the recommended policy.
+
+## Example
+
+A runnable script is at [`examples/basic.py`](https://github.com/corruptmane/natsio/blob/main/extensions/natsio-schedules/examples/basic.py) — start a server with `just server`, then:
+
+```bash
+python extensions/natsio-schedules/examples/basic.py
+```
