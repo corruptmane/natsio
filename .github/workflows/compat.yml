@@ -3,6 +3,11 @@ name: Server compatibility
 # Early-warning radar, not a merge gate: the pinned server version in ci.yml
 # decides what we *support*; this tracks what's *coming*. A failure here means
 # an upstream nats-server change broke us before any user hit it.
+#
+# On failure the `report` job opens (or updates) a GitHub issue that embeds the
+# tested server version and the pytest failure tail, so investigating needs only
+# the issue URL — no digging through Actions logs. The issue auto-closes when the
+# job goes green again.
 
 on:
   schedule:
@@ -18,13 +23,24 @@ jobs:
       - uses: extractions/setup-just@v3
       - name: Install latest released nats-server
         run: |
+          mkdir -p radar
           TAG=$(curl -sfL https://api.github.com/repos/nats-io/nats-server/releases/latest | jq -r .tag_name)
           echo "Testing against nats-server ${TAG}"
           curl -sfL "https://github.com/nats-io/nats-server/releases/download/${TAG}/nats-server-${TAG}-linux-amd64.tar.gz" \
             | tar -xz --strip-components=1 -C /usr/local/bin --wildcards '*/nats-server'
-          nats-server --version
+          nats-server --version | tee radar/version.txt
       - run: uv sync --locked
-      - run: just integration -q
+      - name: Integration tests
+        run: |
+          set -o pipefail
+          just integration -q --tb=short -rf 2>&1 | tee radar/integration.log
+      - name: Upload radar log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: radar-latest-release
+          path: radar/
+          if-no-files-found: ignore
 
   server-main:
     runs-on: ubuntu-latest
@@ -37,8 +53,120 @@ jobs:
           go-version: stable
       - name: Build nats-server from main
         run: |
+          mkdir -p radar
           go install github.com/nats-io/nats-server/v2@main
           sudo cp "$(go env GOPATH)/bin/nats-server" /usr/local/bin/
-          nats-server --version
+          nats-server --version | tee radar/version.txt
       - run: uv sync --locked
-      - run: just integration -q
+      - name: Integration tests
+        run: |
+          set -o pipefail
+          just integration -q --tb=short -rf 2>&1 | tee radar/integration.log
+      - name: Upload radar log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: radar-server-main
+          path: radar/
+          if-no-files-found: ignore
+
+  # Turn a red radar into an actionable issue (and close it on recovery). Runs
+  # regardless of the test jobs' outcome so it can both open and close.
+  report:
+    needs: [latest-release, server-main]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      actions: read
+    steps:
+      - name: Download radar logs
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+        continue-on-error: true # no artifacts when a job died before uploading
+      - name: File or resolve the radar issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const LABEL = 'compat-radar';
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const flavors = [
+              {
+                job: 'latest-release',
+                result: '${{ needs.latest-release.result }}',
+                title: 'Compat radar: latest released nats-server is failing',
+                blurb: 'the **latest released** nats-server — a shipped version already broke us',
+              },
+              {
+                job: 'server-main',
+                result: '${{ needs.server-main.result }}',
+                title: 'Compat radar: nats-server `main` is failing',
+                blurb: 'nats-server built from **`main`** — an upstream change in flight',
+              },
+            ];
+
+            // Make sure the label exists (ignore "already created" races).
+            try {
+              await github.rest.issues.getLabel({ ...context.repo, name: LABEL });
+            } catch {
+              try {
+                await github.rest.issues.createLabel({
+                  ...context.repo, name: LABEL, color: 'b60205',
+                  description: 'nats-server compatibility radar failures',
+                });
+              } catch {}
+            }
+
+            const open = await github.paginate(github.rest.issues.listForRepo, {
+              ...context.repo, state: 'open', labels: LABEL, per_page: 100,
+            });
+
+            const read = (p) => { try { return fs.readFileSync(p, 'utf8').trim(); } catch { return ''; } };
+            const tail = (s, lines = 200, chars = 40000) =>
+              s.split('\n').slice(-lines).join('\n').slice(-chars);
+
+            for (const f of flavors) {
+              const existing = open.find((i) => i.title === f.title);
+
+              if (f.result === 'failure') {
+                const dir = `artifacts/radar-${f.job}`;
+                const version = read(`${dir}/version.txt`) || '(server version not captured)';
+                const log = read(`${dir}/integration.log`);
+                const logBlock = log
+                  ? `<details><summary>Integration failure tail (\`--tb=short -rf\`)</summary>\n\n\`\`\`\n${tail(log)}\n\`\`\`\n\n</details>`
+                  : '_No test log — the job failed before the tests ran (server build/install). See the run._';
+                const body = [
+                  `The compat radar failed against ${f.blurb}.`,
+                  ``,
+                  `- **Job:** \`${f.job}\``,
+                  `- **Server:** \`${version}\``,
+                  `- **Run:** ${runUrl}`,
+                  ``,
+                  logBlock,
+                  ``,
+                  `<sub>Opened automatically by \`.github/workflows/compat.yml\`. It updates on each failing run and closes itself when the job goes green.</sub>`,
+                ].join('\n');
+
+                if (existing) {
+                  await github.rest.issues.createComment({
+                    ...context.repo, issue_number: existing.number,
+                    body: `### Still failing — ${new Date().toISOString().slice(0, 10)}\n\n${body}`,
+                  });
+                } else {
+                  await github.rest.issues.create({
+                    ...context.repo, title: f.title, labels: [LABEL], body,
+                  });
+                }
+              } else if (f.result === 'success' && existing) {
+                await github.rest.issues.createComment({
+                  ...context.repo, issue_number: existing.number,
+                  body: `Green again on ${runUrl} — closing.`,
+                });
+                await github.rest.issues.update({
+                  ...context.repo, issue_number: existing.number, state: 'closed',
+                  state_reason: 'completed',
+                });
+              }
+            }
