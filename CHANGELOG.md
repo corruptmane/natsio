@@ -3,7 +3,14 @@
 All notable changes to the `natsio` core client are documented here.
 Extension packages under `extensions/` keep their own changelogs.
 
-## Unreleased
+## 1.0.0 — 2026-07-23
+
+**1.0 — the public API is now stable.** Everything exported from `natsio` and
+its `jetstream` / `kv` / `micro` / `objectstore` subpackages is frozen under
+semantic versioning: breaking changes wait for 2.0. The nine `natsio-*`
+extensions version independently and remain pre-1.0 (no stability promise yet).
+This release is the API freeze plus the loud-failure fixes below; there are no
+new features.
 
 ### Fixed (loud failure — both surfaced by building the remaining extensions)
 

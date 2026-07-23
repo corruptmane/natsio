@@ -4,7 +4,7 @@ build-backend = "uv_build"
 
 [project]
 name = "natsio"
-version = "0.12.0"
+version = "1.0.0"
 description = "Zero-dependency asyncio NATS client for modern Python"
 readme = "README.md"
 license = "Apache-2.0"
@@ -21,7 +21,7 @@ keywords = [
     "pubsub",
 ]
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 5 - Production/Stable",
     "Framework :: AsyncIO",
     "Intended Audience :: Developers",
     "Operating System :: OS Independent",
