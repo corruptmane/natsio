@@ -48,10 +48,10 @@ namespace = true
 |---|---|---|
 | `natsio-testing` | `natsio.testing` | nats-server process manager for tests — implemented |
 | `natsio-counters` | `natsio.counters` | distributed counters (ADR-49) — implemented |
-| `natsio-schedules` | `natsio.schedules` | message schedules (ADR-51) — planned |
-| `natsio-jetstream-batch` | `natsio.jetstream_batch` | 2.14 fast-ingest batch publish — planned |
+| `natsio-schedules` | `natsio.schedules` | message schedules (ADR-51) — implemented |
+| `natsio-jetstream-batch` | `natsio.jetstream_batch` | 2.14 fast-ingest batch publish + batch reads — implemented |
 | `natsio-kvcodec` | `natsio.kvcodec` | KV key/value codecs (ADR-54) — implemented |
 | `natsio-natscontext` | `natsio.natscontext` | NATS CLI context files (ADR-21) — implemented |
-| `natsio-sysclient` | `natsio.sysclient` | system/monitoring API client — planned |
-| `natsio-pcgroups` | `natsio.pcgroups` | partitioned consumer groups — planned |
+| `natsio-sysclient` | `natsio.sysclient` | `$SYS` monitoring API client — implemented |
+| `natsio-pcgroups` | `natsio.pcgroups` | partitioned consumer groups (static + elastic) — implemented |
 | `natsio-otel` | `natsio.otel` | OpenTelemetry metrics + trace-context propagation — implemented |

@@ -66,14 +66,14 @@ Conventions worth knowing:
 | Extension | Import | Status |
 |---|---|---|
 | `natsio-testing` | `natsio.testing` | nats-server process manager for tests — **implemented** |
-| `natsio-counters` | `natsio.counters` | distributed counters (ADR-49) — planned |
-| `natsio-schedules` | `natsio.schedules` | message schedules (ADR-51) — planned |
-| `natsio-jetstream-batch` | `natsio.jetstream_batch` | 2.14 fast-ingest batch publish — planned |
-| `natsio-kvcodec` | `natsio.kvcodec` | KV key/value codecs (ADR-54) — planned |
-| `natsio-natscontext` | `natsio.natscontext` | NATS CLI context files (ADR-21) — planned |
-| `natsio-sysclient` | `natsio.sysclient` | system/monitoring API client — planned |
-| `natsio-pcgroups` | `natsio.pcgroups` | partitioned consumer groups — planned |
-| `natsio-otel` | `natsio.otel` | OpenTelemetry adapter over the instrumentation seam — planned |
+| `natsio-counters` | `natsio.counters` | distributed counters (ADR-49) — **implemented** |
+| `natsio-schedules` | `natsio.schedules` | message schedules (ADR-51) — **implemented** |
+| `natsio-jetstream-batch` | `natsio.jetstream_batch` | 2.14 fast-ingest batch publish + batch reads — **implemented** |
+| `natsio-kvcodec` | `natsio.kvcodec` | KV key/value codecs (ADR-54) — **implemented** |
+| `natsio-natscontext` | `natsio.natscontext` | NATS CLI context files (ADR-21) — **implemented** |
+| `natsio-sysclient` | `natsio.sysclient` | `$SYS` monitoring API client — **implemented** |
+| `natsio-pcgroups` | `natsio.pcgroups` | partitioned consumer groups (static + elastic) — **implemented** |
+| `natsio-otel` | `natsio.otel` | OpenTelemetry adapter over the instrumentation seam — **implemented** |
 
 `natsio-testing` is the real-server process manager (start/stop, configs, free
 ports, readiness probing, JetStream store dirs, SIGKILL fault injection) that
@@ -109,8 +109,8 @@ nc = await natsio.connect(options=ConnectOptions(
 
 Hooks are invoked **synchronously** on hot paths, so implementations must be fast
 and must never raise — a broken metrics backend cannot take down the connection
-(exceptions are swallowed and logged). The planned **`natsio-otel`** extension
-will provide a ready-made OpenTelemetry adapter over this exact seam.
+(exceptions are swallowed and logged). The **`natsio-otel`** extension is a
+ready-made OpenTelemetry adapter over this exact seam.
 
 ## The orbit.py relationship
 

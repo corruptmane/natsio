@@ -7,9 +7,13 @@ members = [
     "natsio",
     "natsio-bench",
     "natsio-counters",
+    "natsio-jetstream-batch",
     "natsio-kvcodec",
     "natsio-natscontext",
     "natsio-otel",
+    "natsio-pcgroups",
+    "natsio-schedules",
+    "natsio-sysclient",
     "natsio-testing",
 ]
 
@@ -20,9 +24,13 @@ dev = [
     { name = "natsio", editable = "natsio" },
     { name = "natsio-bench", editable = "tools/natsio-bench" },
     { name = "natsio-counters", editable = "extensions/natsio-counters" },
+    { name = "natsio-jetstream-batch", editable = "extensions/natsio-jetstream-batch" },
     { name = "natsio-kvcodec", editable = "extensions/natsio-kvcodec" },
     { name = "natsio-natscontext", editable = "extensions/natsio-natscontext" },
     { name = "natsio-otel", editable = "extensions/natsio-otel" },
+    { name = "natsio-pcgroups", editable = "extensions/natsio-pcgroups" },
+    { name = "natsio-schedules", editable = "extensions/natsio-schedules" },
+    { name = "natsio-sysclient", editable = "extensions/natsio-sysclient" },
     { name = "natsio-testing", editable = "extensions/natsio-testing" },
     { name = "nkeys", specifier = ">=0.2.1" },
     { name = "opentelemetry-sdk", specifier = ">=1.20" },
@@ -611,6 +619,17 @@ dependencies = [
 requires-dist = [{ name = "natsio", editable = "natsio" }]
 
 [[package]]
+name = "natsio-jetstream-batch"
+version = "0.1.0"
+source = { editable = "extensions/natsio-jetstream-batch" }
+dependencies = [
+    { name = "natsio" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "natsio", editable = "natsio" }]
+
+[[package]]
 name = "natsio-kvcodec"
 version = "0.1.0"
 source = { editable = "extensions/natsio-kvcodec" }
@@ -646,6 +665,39 @@ requires-dist = [
     { name = "natsio", editable = "natsio" },
     { name = "opentelemetry-api", specifier = ">=1.20" },
 ]
+
+[[package]]
+name = "natsio-pcgroups"
+version = "0.1.0"
+source = { editable = "extensions/natsio-pcgroups" }
+dependencies = [
+    { name = "natsio" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "natsio", editable = "natsio" }]
+
+[[package]]
+name = "natsio-schedules"
+version = "0.1.0"
+source = { editable = "extensions/natsio-schedules" }
+dependencies = [
+    { name = "natsio" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "natsio", editable = "natsio" }]
+
+[[package]]
+name = "natsio-sysclient"
+version = "0.1.0"
+source = { editable = "extensions/natsio-sysclient" }
+dependencies = [
+    { name = "natsio" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "natsio", editable = "natsio" }]
 
 [[package]]
 name = "natsio-testing"

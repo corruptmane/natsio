@@ -12,6 +12,10 @@ natsio-otel = { workspace = true }
 natsio-kvcodec = { workspace = true }
 natsio-counters = { workspace = true }
 natsio-natscontext = { workspace = true }
+natsio-schedules = { workspace = true }
+natsio-jetstream-batch = { workspace = true }
+natsio-sysclient = { workspace = true }
+natsio-pcgroups = { workspace = true }
 
 [dependency-groups]
 dev = [
@@ -22,6 +26,10 @@ dev = [
     "natsio-kvcodec",
     "natsio-counters",
     "natsio-natscontext",
+    "natsio-schedules",
+    "natsio-jetstream-batch",
+    "natsio-sysclient",
+    "natsio-pcgroups",
     # asserting spans/metrics in natsio-otel's tests
     "opentelemetry-sdk>=1.20",
     # Ed25519 backends: both are exercised, and the official `nkeys` package is

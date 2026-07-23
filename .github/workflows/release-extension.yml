@@ -5,8 +5,12 @@
 #
 # One-time PyPI setup PER EXTENSION: add a trusted publisher to each PyPI
 # project (natsio-otel, natsio-kvcodec, natsio-counters, natsio-natscontext,
-# natsio-testing) pointing at this repository, workflow `release-extension.yml`,
-# environment `pypi`. Unclaimed names use a *pending* publisher.
+# natsio-testing, natsio-schedules, natsio-jetstream-batch, natsio-sysclient,
+# natsio-pcgroups) pointing at this repository, workflow
+# `release-extension.yml`, environment `pypi`. Unclaimed names use a *pending*
+# publisher. The tag → distribution mapping is mechanical (`<name>/vX.Y.Z` →
+# `natsio-<name>`), so a new extension needs no change here — only the PyPI
+# trusted-publisher entry.
 
 name: Release extension
 
