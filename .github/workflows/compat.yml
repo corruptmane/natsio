@@ -8,6 +8,12 @@ name: Server compatibility
 # tested server version and the pytest failure tail, so investigating needs only
 # the issue URL — no digging through Actions logs. The issue auto-closes when the
 # job goes green again.
+#
+# Each job caches a marker keyed on (this repo's commit SHA, the resolved
+# nats-server version). A daily run whose commit and server version are both
+# unchanged from a previous PASS restores the marker and skips the build + test
+# work entirely. Only a pass is cached, so a failure always re-runs until it is
+# either fixed or the inputs change.
 
 on:
   schedule:
@@ -21,19 +27,58 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
       - uses: extractions/setup-just@v3
-      - name: Install latest released nats-server
+      - name: Resolve latest released nats-server
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
           mkdir -p radar
-          TAG=$(curl -sfL https://api.github.com/repos/nats-io/nats-server/releases/latest | jq -r .tag_name)
-          echo "Testing against nats-server ${TAG}"
+          # Authenticated gh, not anonymous api.github.com: the anon endpoint is
+          # rate-limited to 60 req/hour per IP and returns an empty body on
+          # shared runners, which left the tag blank and fed a malformed URL to
+          # tar (a cryptic failure that opened a radar issue crying wolf).
+          TAG=$(gh api repos/nats-io/nats-server/releases/latest --jq .tag_name)
+          if [ -z "${TAG}" ] || [ "${TAG}" = "null" ]; then
+            echo "could not resolve the latest nats-server release tag (GitHub API problem, not a natsio break)" >&2
+            exit 1
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          # Named up front so a failed download still identifies the server.
+          echo "nats-server ${TAG} (latest release)" > radar/version.txt
+      - name: Skip if this commit already passed against this server
+        id: cache
+        uses: actions/cache/restore@v4
+        with:
+          path: radar-marker
+          key: radar-latest-${{ github.sha }}-${{ steps.resolve.outputs.tag }}
+      - name: Install nats-server
+        if: success() && steps.cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          TAG='${{ steps.resolve.outputs.tag }}'
           curl -sfL "https://github.com/nats-io/nats-server/releases/download/${TAG}/nats-server-${TAG}-linux-amd64.tar.gz" \
             | tar -xz --strip-components=1 -C /usr/local/bin --wildcards '*/nats-server'
           nats-server --version | tee radar/version.txt
-      - run: uv sync --locked
+      - name: Sync
+        if: success() && steps.cache.outputs.cache-hit != 'true'
+        run: uv sync --locked
       - name: Integration tests
+        if: success() && steps.cache.outputs.cache-hit != 'true'
         run: |
           set -o pipefail
           just integration -q --tb=short -rf 2>&1 | tee radar/integration.log
+      - name: Record the pass
+        if: success() && steps.cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p radar-marker
+          echo "${{ github.sha }} vs ${{ steps.resolve.outputs.tag }}: passed" > radar-marker/ok
+      - name: Save the pass marker
+        if: success() && steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: radar-marker
+          key: radar-latest-${{ github.sha }}-${{ steps.resolve.outputs.tag }}
       - name: Upload radar log
         if: always()
         uses: actions/upload-artifact@v4
@@ -48,20 +93,58 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
       - uses: extractions/setup-just@v3
+      - name: Resolve nats-server main commit
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p radar
+          # The version string a main build reports is not unique across commits,
+          # so key the cache on the actual main commit SHA and pin the build to it.
+          SHA=$(gh api repos/nats-io/nats-server/commits/main --jq .sha)
+          if [ -z "${SHA}" ] || [ "${SHA}" = "null" ]; then
+            echo "could not resolve the nats-server main commit (GitHub API problem, not a natsio break)" >&2
+            exit 1
+          fi
+          echo "sha=${SHA}" >> "$GITHUB_OUTPUT"
+          echo "nats-server main @ ${SHA:0:12}" > radar/version.txt
+      - name: Skip if this commit already passed against this server
+        id: cache
+        uses: actions/cache/restore@v4
+        with:
+          path: radar-marker
+          key: radar-main-${{ github.sha }}-${{ steps.resolve.outputs.sha }}
       - uses: actions/setup-go@v5
+        if: success() && steps.cache.outputs.cache-hit != 'true'
         with:
           go-version: stable
       - name: Build nats-server from main
+        if: success() && steps.cache.outputs.cache-hit != 'true'
         run: |
-          mkdir -p radar
-          go install github.com/nats-io/nats-server/v2@main
+          set -euo pipefail
+          go install "github.com/nats-io/nats-server/v2@${{ steps.resolve.outputs.sha }}"
           sudo cp "$(go env GOPATH)/bin/nats-server" /usr/local/bin/
           nats-server --version | tee radar/version.txt
-      - run: uv sync --locked
+      - name: Sync
+        if: success() && steps.cache.outputs.cache-hit != 'true'
+        run: uv sync --locked
       - name: Integration tests
+        if: success() && steps.cache.outputs.cache-hit != 'true'
         run: |
           set -o pipefail
           just integration -q --tb=short -rf 2>&1 | tee radar/integration.log
+      - name: Record the pass
+        if: success() && steps.cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p radar-marker
+          echo "${{ github.sha }} vs main ${{ steps.resolve.outputs.sha }}: passed" > radar-marker/ok
+      - name: Save the pass marker
+        if: success() && steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: radar-marker
+          key: radar-main-${{ github.sha }}-${{ steps.resolve.outputs.sha }}
       - name: Upload radar log
         if: always()
         uses: actions/upload-artifact@v4
