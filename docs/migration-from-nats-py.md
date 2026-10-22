@@ -2,7 +2,7 @@
 
 This guide is for teams running **nats-py 2.x** (verified against `nats-py`
 2.15.0) who want to move to **natsio** — a zero-dependency asyncio NATS client
-for Python 3.13+ targeting NATS Server 2.14. It maps every commonly-used API
+for Python 3.13+ targeting NATS Server 2.14+. It maps every commonly-used API
 surface side by side, calls out the behavioral differences that will actually
 bite you, and lists the handful of things nats-py lets you do that natsio
 deliberately does not.
@@ -28,9 +28,9 @@ before you ship.
 - **Typed, client-side validation.** Bad subjects, bad consumer names, and
   conflicting options raise a typed `ConfigError` *before* a round-trip, instead
   of surfacing as an opaque server `-ERR`.
-- **nats.go feature and performance parity.** See [§9](#9-performance-notes).
+- **nats.go behavior as the interoperability oracle.** See [§9](#9-performance-notes).
 
-**Install** (natsio requires Python ≥ 3.13 and is tested against NATS Server 2.14):
+**Install** (Python ≥ 3.13; CI covers 3.13–3.15 and NATS 2.14.0/current stable):
 
 ```bash
 uv add natsio            # or: pip install natsio
@@ -809,13 +809,20 @@ differently at runtime.
 
 ## 9. Performance notes
 
-natsio reaches nats.go-class throughput and matches (or beats) nats-py across
-the board, at identical round-trip latency. Representative figures from the
-in-repo harness (`tools/natsio-bench`, natsio vs nats-py, same machine and
-server): core publish of 16-byte messages **~1.40M vs ~894k msgs/s**; JetStream
-`consume()` **~206k vs ~29k msgs/s**; request/reply **~64k vs ~60k req/s** with
-the same per-request latency. Run the harness yourself for numbers on your
-hardware — see `tools/natsio-bench`.
+The [benchmark report](benchmarks.md) compares three Python clients with raw
+repeats, environment details and measured variability. Results depend on the
+scenario; there is no Go benchmark and no claim of nats.go performance parity.
+
+Connected `max_pending_size` is a hard admission bound for the whole encoded
+publish frame. A frame that cannot fit raises `ConfigError` immediately; a
+frame waiting behind other writes gets one overall `flush_timeout`. Choose a
+positive limit large enough for headers and reply-inbox overhead as well as the
+payload. Reconnect-buffer `0` and `-1` semantics remain separate.
+
+Discovery is applied only after the handshake succeeds and inherits verified
+TLS requirements. Explicit mixed secure/plaintext pools keep per-entry policy.
+Diagnostic event URLs omit credentials; `connected_url` keeps its original
+value for compatibility. See [TLS behavior](guide/auth-tls.md).
 
 ---
 

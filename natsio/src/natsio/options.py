@@ -3,6 +3,7 @@
 import os
 import ssl as ssl_module
 from dataclasses import dataclass, field, replace
+from math import isfinite
 from typing import Any, Self, TypedDict
 
 from natsio._internal.auth import (
@@ -68,7 +69,7 @@ class TLSConfig:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ConnectOptions:
-    servers: tuple[str, ...] = ("nats://127.0.0.1:4222",)
+    servers: tuple[str, ...] = field(default=("nats://127.0.0.1:4222",), repr=False)
     name: str | None = None
     connect_timeout: float = 5.0
     verbose: bool = False
@@ -77,13 +78,13 @@ class ConnectOptions:
     tls: TLSConfig | None = None
 
     # -- authentication (flat convenience fields; `authenticator` overrides) --
-    user: StrSource | None = None
-    password: StrSource | None = None
-    token: StrSource | None = None
-    nkey_seed: str | None = None
+    user: StrSource | None = field(default=None, repr=False)
+    password: StrSource | None = field(default=None, repr=False)
+    token: StrSource | None = field(default=None, repr=False)
+    nkey_seed: str | None = field(default=None, repr=False)
     nkey_file: str | os.PathLike[str] | None = None
     credentials: str | os.PathLike[str] | None = None
-    authenticator: Authenticator | None = None
+    authenticator: Authenticator | None = field(default=None, repr=False)
 
     # -- reconnect --
     allow_reconnect: bool = True
@@ -146,8 +147,19 @@ class ConnectOptions:
             ("drain_timeout", self.drain_timeout),
             ("request_timeout", self.request_timeout),
         ):
-            if positive[1] <= 0:
-                raise ConfigError(f"{positive[0]} must be positive")
+            if not isfinite(positive[1]) or positive[1] <= 0:
+                raise ConfigError(f"{positive[0]} must be finite and positive")
+        for name, value in (
+            ("reconnect_jitter", self.reconnect_jitter),
+            ("reconnect_jitter_tls", self.reconnect_jitter_tls),
+        ):
+            if not isfinite(value) or value < 0:
+                raise ConfigError(f"{name} must be finite and non-negative")
+        for name, value in (("max_pending_size", self.max_pending_size), ("max_control_line", self.max_control_line)):
+            if not isinstance(value, int) or value <= 0:
+                raise ConfigError(f"{name} must be a positive integer")
+        if not isinstance(self.reconnect_buf_size, int) or self.reconnect_buf_size < -1:
+            raise ConfigError("reconnect_buf_size must be -1 (disabled), 0 (default), or a positive integer")
         if self.max_outstanding_pings < 1:
             raise ConfigError("max_outstanding_pings must be at least 1")
         if self.max_reconnect_attempts == 0 or self.max_reconnect_attempts < -1:
