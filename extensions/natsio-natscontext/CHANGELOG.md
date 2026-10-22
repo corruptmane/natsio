@@ -3,6 +3,12 @@
 All notable changes to `natsio-natscontext` are documented here. The format is
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.1.1 — 2026-10-22
+
+- Require `natsio>=1.0.1` as the shared stable baseline, including the core security and reliability fixes.
+- Verify installed wheels and namespace composition outside editable workspace installs.
+- Hide credential-bearing server and proxy URLs in context representations.
+
 ## 0.1.0
 
 Initial release.

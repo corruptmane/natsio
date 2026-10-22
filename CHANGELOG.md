@@ -3,14 +3,37 @@
 All notable changes to the `natsio` core client are documented here.
 Extension packages under `extensions/` keep their own changelogs.
 
-## Unreleased
+## 1.0.1 — 2026-10-22
 
 ### Fixed
 
+- Prevent unverified INFO discovery from changing the server pool. Discovery
+  inherits verified transport/TLS policy; verified TLS endpoints retain that
+  requirement across reconnects, including late establishment INFO.
+  Pre-TLS discovery is discarded in favor of the encrypted INFO refresh;
+  successful TLS does not authenticate preceding plaintext.
+- Remove credential-bearing URLs and authentication providers/secrets from
+  library diagnostics and configuration representations. Raw URL accessors
+  retain their public behavior.
+- Reject encoded publish frames larger than `max_pending_size` immediately
+  with `ConfigError`; bound admission by one timeout and remove cancelled
+  waiters. Validate finite timeouts, non-negative jitter and buffer settings.
+- Turn malformed connection INFO into typed protocol teardown, including
+  invalid JSON shapes, limits and nonce values.
 - Accept JetStream v2 acknowledgement subjects with 11 or more tokens, as
   required by ADR-15. This fixes consumer metadata, KV, and Object Store reads
   with nats-server 2.16's default acknowledgement format and earlier servers
   with `js_ack_fc_v2` enabled. Legacy 9-token subjects remain supported (#7).
+
+### Maintenance
+
+- Require complete core/extension live CI, strict PR documentation builds,
+  Python 3.15 coverage, NATS 2.14.0 baseline and current stable gates.
+- Validate tagged releases before trusted publication; build all packages and
+  check clean wheel installs, optional signing extras and namespace composition.
+  Pin workflow actions, verify server downloads and propose automated updates.
+- Add bounded recovery/resource tests and longer scheduled reliability runs;
+  refresh compatibility, security, migration and benchmark documentation.
 
 ## 1.0.0 — 2026-07-23
 

@@ -4,7 +4,7 @@ build-backend = "uv_build"
 
 [project]
 name = "natsio-otel"
-version = "0.1.0"
+version = "0.1.1"
 description = "OpenTelemetry metrics + trace-context propagation for natsio, over its instrumentation seam"
 readme = "README.md"
 license = "Apache-2.0"
@@ -20,7 +20,7 @@ classifiers = [
     "Topic :: System :: Monitoring",
     "Typing :: Typed",
 ]
-dependencies = ["natsio", "opentelemetry-api>=1.20"]
+dependencies = ["natsio>=1.0.1", "opentelemetry-api>=1.20"]
 
 [project.urls]
 Homepage = "https://github.com/corruptmane/natsio"

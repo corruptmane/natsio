@@ -4,6 +4,11 @@ All notable changes to `natsio-sysclient` are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project
 is pre-1.0 and makes no API-stability promises.
 
+## 0.1.1 — 2026-10-22
+
+- Require `natsio>=1.0.1` as the shared stable baseline, including the core security and reliability fixes.
+- Verify installed wheels and namespace composition outside editable workspace installs.
+
 ## 0.1.0
 
 Initial release. Client for the NATS system/monitoring API (`$SYS.REQ.SERVER`),

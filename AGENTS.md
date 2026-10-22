@@ -63,7 +63,9 @@ Everything goes through `just` (CI runs the same recipes — never duplicate):
 
 ## Git
 
-- The owner signs and pushes; agents may commit locally on a review branch but NEVER push.
+- Commits must be signed with the configured key (available through the agent).
+  Never disable commit signing. Agents may commit locally on a review branch;
+  the owner controls release tags and pushes, and agents NEVER push.
 - No AI attribution in commit messages (no footers, no Co-Authored-By).
 - `git add` with **explicit paths only** — never `-A` (a real `.env` key
   once shipped that way).

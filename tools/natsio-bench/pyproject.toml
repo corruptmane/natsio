@@ -22,7 +22,7 @@ classifiers = [
 dependencies = [
     "natsio",
     "natsio-testing",
-    "nats-py>=2.15.0",
+    "nats-py>=2.16.0",
     "nats-core>=0.2.0",
 ]
 

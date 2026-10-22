@@ -94,20 +94,29 @@ An exporter lives *outside* the core: implement the protocol and pass an instanc
 via `ConnectOptions(instrumentation=...)`.
 
 ```python
-from natsio import ConnectOptions
-from natsio.instrumentation import Instrumentation
+import natsio
+from natsio.instrumentation import NoopInstrumentation
 
-class Metrics(Instrumentation):
-    def on_message_published(self, subject: str, payload_size: int) -> None:
-        published.labels(subject).inc()
-    def on_message_delivered(self, subject: str, payload_size: int) -> None:
-        delivered.labels(subject).inc()
-    # ...the remaining hooks default to no-ops on the Protocol
+class Metrics(NoopInstrumentation):
+    published = 0
+    delivered = 0
 
-nc = await natsio.connect(options=ConnectOptions(
-    servers=("nats://localhost:4222",),
-    instrumentation=Metrics(),
-))
+    def on_message_published(self, subject, headers, size):
+        self.published += 1
+
+    def on_message_delivered(self, subject, headers, size):
+        self.delivered += 1
+
+metrics = Metrics()
+nc = await natsio.connect("nats://localhost:4222", instrumentation=metrics)
+try:
+    async with nc.subscribe("metrics.example") as sub:
+        await nc.flush()
+        await nc.publish("metrics.example", b"hello")
+        await sub.next_msg()
+        assert metrics.published == metrics.delivered == 1
+finally:
+    await nc.close()
 ```
 
 Hooks are invoked **synchronously** on hot paths, so implementations must be fast
