@@ -5,8 +5,8 @@ default:
     @just --list
 
 # Install/refresh the workspace and dev tools
-sync:
-    uv sync
+sync *args:
+    uv sync {{args}}
 
 # Verified official server binary for local runs and CI.
 install-server version="v2.15.1":
