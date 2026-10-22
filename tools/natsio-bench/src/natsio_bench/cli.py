@@ -97,7 +97,7 @@ def main(argv: list[str] | None = None) -> int:
         args.json.write_text(json.dumps(build_json(result, metadata), indent=2))
         print(f"\nwrote {args.json}", file=sys.stderr)
 
-    return 0
+    return int(any(pair.status == "error" for pair in result.pairs))
 
 
 if __name__ == "__main__":

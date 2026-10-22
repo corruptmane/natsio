@@ -6,8 +6,11 @@ the metric is higher-better (throughput) or lower-better (latency). The JSON
 carries every raw repeat plus machine/env metadata for reproducibility.
 """
 
+import os
 import platform
+import subprocess
 import sys
+from datetime import UTC, datetime
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as pkg_version
 
@@ -26,9 +29,21 @@ def _version(dist: str) -> str:
         return "unknown"
 
 
+def _git(*args: str) -> str | None:
+    try:
+        result = subprocess.run(["git", *args], capture_output=True, text=True, check=False)
+    except OSError:
+        return None
+    return result.stdout.strip() if result.returncode == 0 else None
+
+
 def collect_metadata(binary: str) -> dict[str, object]:
     """Machine / environment facts that make a run reproducible."""
     return {
+        "measured_at": datetime.now(UTC).isoformat(),
+        "cpu_count": os.cpu_count(),
+        "git_commit": _git("rev-parse", "HEAD"),
+        "working_tree_dirty": bool(status) if (status := _git("status", "--porcelain")) is not None else None,
         "python": sys.version.split()[0],
         "implementation": platform.python_implementation(),
         "platform": platform.platform(),
