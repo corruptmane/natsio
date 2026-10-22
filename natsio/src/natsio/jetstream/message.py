@@ -28,8 +28,9 @@ class NotJSMessageError(JetStreamError):
 class AckMetadata:
     """Decoded ``$JS.ACK`` reply-subject tokens.
 
-    Handles both the v1 (9-token) and v2 (12-token, with domain and account
-    hash) forms; a v2 domain of ``_`` means "no domain".
+    Handles both the v1 (9-token) and v2 (11 or more tokens, with domain and
+    account hash) forms; a v2 domain of ``_`` means "no domain". Optional
+    trailing v2 tokens are ignored, as specified by ADR-15.
     """
 
     stream: str
@@ -46,11 +47,11 @@ class AckMetadata:
         tokens = reply.split(".")
         if len(tokens) < 9 or tokens[0] != "$JS" or tokens[1] != "ACK":
             raise NotJSMessageError(f"not a JetStream ack reply subject: {reply!r}")
-        if len(tokens) in (10, 11):
-            # Neither the v1 (9) nor v2 (12+) shape — reject cleanly instead of
+        if len(tokens) == 10:
+            # Neither the v1 (9) nor v2 (11+) shape — reject cleanly instead of
             # letting int() raise a raw ValueError on a misaligned token.
             raise NotJSMessageError(f"not a JetStream ack reply subject ({len(tokens)} tokens): {reply!r}")
-        if len(tokens) >= 12:
+        if len(tokens) >= 11:
             domain = None if tokens[2] == "_" else tokens[2]
             # tokens[3] is the account hash; unused client-side.
             stream, consumer = tokens[4], tokens[5]

@@ -3,6 +3,15 @@
 All notable changes to the `natsio` core client are documented here.
 Extension packages under `extensions/` keep their own changelogs.
 
+## Unreleased
+
+### Fixed
+
+- Accept JetStream v2 acknowledgement subjects with 11 or more tokens, as
+  required by ADR-15. This fixes consumer metadata, KV, and Object Store reads
+  with nats-server 2.16's default acknowledgement format and earlier servers
+  with `js_ack_fc_v2` enabled. Legacy 9-token subjects remain supported (#7).
+
 ## 1.0.0 — 2026-07-23
 
 **1.0 — the public API is now stable.** Everything exported from `natsio` and

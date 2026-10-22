@@ -285,6 +285,36 @@ class TestPublish:
 
 
 class TestConsumers:
+    @pytest.mark.parametrize("domain", [None, "hub"])
+    async def test_v2_ack_metadata_and_ack_sync(self, domain: str | None) -> None:
+        # Exercise the 2.16 default format on the pinned 2.14 server as well.
+        config = "feature_flags { js_ack_fc_v2: true }\n"
+        if domain is not None:
+            config += f"jetstream {{ domain: {domain} }}\n"
+        process = NatsServerProcess(require_server_binary(), jetstream=True, config=config)
+        try:
+            await process.start()
+            async with await natsio.connect(process.url) as client:
+                js = client.jetstream()
+                stream = await js.create_stream(
+                    StreamConfig(name="ACKV2", subjects=["ackv2"], storage=StorageType.MEMORY)
+                )
+                consumer = await stream.create_consumer(ConsumerConfig(durable_name="worker"))
+                published = await js.publish("ackv2", b"hello")
+                msg = await consumer.next(timeout=2)
+                assert msg.payload == b"hello"
+                assert msg.msg.reply is not None
+                assert len(msg.msg.reply.split(".")) >= 11
+                meta = msg.metadata
+                assert meta.domain == domain
+                assert (meta.stream, meta.consumer) == ("ACKV2", "worker")
+                assert (meta.num_delivered, meta.stream_seq, meta.consumer_seq) == (1, published.seq, 1)
+                assert meta.num_pending == 0
+                await msg.ack_sync()
+                assert (await consumer.info()).num_ack_pending == 0
+        finally:
+            await process.stop()
+
     async def test_consumer_crud(self, nc: natsio.Client) -> None:
         js = nc.jetstream()
         stream = await js.create_stream(StreamConfig(name="CCRUD", subjects=["c.>"], storage=StorageType.MEMORY))

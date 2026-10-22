@@ -72,33 +72,28 @@ class TestAckMetadata:
         assert meta.domain is None
         assert meta.timestamp == datetime.fromtimestamp(1752969600, tz=UTC)
 
-    def test_v2_twelve_tokens_with_domain(self) -> None:
-        reply = "$JS.ACK.hub.AcctHash.ORDERS.worker.2.200.84.1752969600000000000.0.rand"
+    @pytest.mark.parametrize(("domain", "expected_domain"), [("hub", "hub"), ("_", None)])
+    @pytest.mark.parametrize("suffix", ["", ".rand", ".rand.future"])
+    def test_v2_accepts_eleven_or_more_tokens(self, domain: str, expected_domain: str | None, suffix: str) -> None:
+        # ADR-15: trailing tokens are optional extensions, not metadata fields.
+        reply = f"$JS.ACK.{domain}.AcctHash.ORDERS.worker.2.200.84.1752969600000000000.5{suffix}"
         meta = AckMetadata.from_reply(reply)
-        assert meta.domain == "hub"
+        assert meta.domain == expected_domain
         assert meta.stream == "ORDERS"
         assert meta.consumer == "worker"
         assert (meta.num_delivered, meta.stream_seq, meta.consumer_seq) == (2, 200, 84)
-
-    def test_v2_underscore_domain_means_none(self) -> None:
-        reply = "$JS.ACK._.AcctHash.S.c.1.1.1.1752969600000000000.0.x"
-        assert AckMetadata.from_reply(reply).domain is None
+        assert meta.timestamp == datetime.fromtimestamp(1752969600, tz=UTC)
+        assert meta.num_pending == 5
 
     def test_non_ack_reply_rejected(self) -> None:
         with pytest.raises(NotJSMessageError, match="not a JetStream ack"):
             AckMetadata.from_reply("_INBOX.abc.1")
 
     def test_ten_token_reply_rejected(self) -> None:
-        # $JS.ACK + 8 fields = 10 tokens: neither v1 (9) nor v2 (12+). Used to
+        # $JS.ACK + 8 fields = 10 tokens: neither v1 (9) nor v2 (11+). Used to
         # raise a raw ValueError from int() on a misaligned token.
         reply = "$JS.ACK.hub.AcctHash.ORDERS.worker.2.200.84.1752969600000000000"
         assert len(reply.split(".")) == 10
-        with pytest.raises(NotJSMessageError):
-            AckMetadata.from_reply(reply)
-
-    def test_eleven_token_reply_rejected(self) -> None:
-        reply = "$JS.ACK.hub.AcctHash.ORDERS.worker.2.200.84.1752969600000000000.0"
-        assert len(reply.split(".")) == 11
         with pytest.raises(NotJSMessageError):
             AckMetadata.from_reply(reply)
 
