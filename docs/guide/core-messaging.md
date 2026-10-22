@@ -271,3 +271,19 @@ replies = [
   [Errors reference](../reference/errors.md).
 - [Migrating from nats-py](../migration-from-nats-py.md) — subscription and
   request API mappings.
+
+## Multi-reply resource limits
+
+`request_many()` uses a separate reply sink. `max_msgs` limits yielded replies;
+it is **not** a bound on replies arriving while the async generator is paused.
+A paused consumer can accumulate an unbounded queue, and its deadline is checked
+when iteration resumes. Consume promptly, keep responder output bounded, and
+explicitly close a partially consumed generator (for example with
+`contextlib.aclosing`). Closing removes its sink and releases queued replies.
+Do not use it as an ingress memory limit for untrusted or unbounded fan-out.
+
+A bounded localhost regression pauses after the first reply with `max_msgs=1`,
+then sends 512 additional 1 KiB replies. All 512 queue until `aclose()`, which
+releases them and restores sink/subscription counts. A default capacity and
+loud overflow policy would change existing delivery/completion behavior and
+needs separate design; this patch leaves that API unchanged.
