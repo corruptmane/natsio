@@ -44,8 +44,9 @@ def main() -> None:
         fail(f"new version {new} must be greater than current {old}")
 
     changelog = CHANGELOG.read_text()
-    if "## Unreleased" not in changelog:
-        fail("CHANGELOG.md has no '## Unreleased' section — write the changelog before releasing")
+    section = re.search(r"^## Unreleased\n(.+?)(?=^## |\Z)", changelog, re.MULTILINE | re.DOTALL)
+    if section is None or not section[1].strip():
+        fail("CHANGELOG.md needs non-empty '## Unreleased' notes — write the changelog before releasing")
 
     version_test = VERSION_TEST.read_text()
     if f'"{old}"' not in version_test:
@@ -69,9 +70,9 @@ def main() -> None:
     print()
     print("next steps (after gates pass):")
     print("  git add natsio/pyproject.toml CHANGELOG.md natsio/tests/test_package.py context7.json uv.lock")
-    print(f'  git commit -m "release: natsio {new}"')
+    print(f'  git commit -S -m "release: natsio {new}"   # owner only')
     print("  git push origin main")
-    print(f"  git tag v{new} && git push origin v{new}   # then approve the pypi deployment")
+    print(f'  git tag -s v{new} -m "natsio {new}" && git push origin v{new}   # owner approves pypi')
 
 
 if __name__ == "__main__":
