@@ -90,7 +90,7 @@ def _b64_encode_token(token: str) -> str:
 def _b64_decode_token(token: str) -> str:
     padded = token + "=" * (-len(token) % 4)
     try:
-        return base64.urlsafe_b64decode(padded).decode("utf-8")
+        return base64.b64decode(padded, altchars=b"-_", validate=True).decode("utf-8")
     except (binascii.Error, ValueError) as exc:
         raise KeyDecodeError(f"invalid base64 key token {token!r}: {exc}") from exc
 
