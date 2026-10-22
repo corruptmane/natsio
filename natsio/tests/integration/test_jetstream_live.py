@@ -439,7 +439,8 @@ class TestConsume:
                     break
         assert received == total
 
-    async def test_consume_survives_reconnect(self, server: NatsServerProcess) -> None:
+    @pytest.mark.parametrize("abrupt", [False, True], ids=["graceful", "sigkill"])
+    async def test_consume_survives_reconnect(self, server: NatsServerProcess, abrupt: bool) -> None:
         import tempfile
 
         with tempfile.TemporaryDirectory(prefix="natsio-js-recon-") as store:
@@ -459,20 +460,34 @@ class TestConsume:
                 async with consumer.consume(max_messages=5, expires=3) as messages:
                     msg = await messages.next(timeout=5)
                     received.append(msg.payload)
+                    before_sequence = msg.metadata.stream_seq
                     await msg.ack_sync()
 
-                    first.kill()
+                    if abrupt:
+                        first.kill()
+                        assert first.process is not None
+                        async with asyncio.timeout(5):
+                            await first.process.wait()
+                    else:
+                        await first.stop()
                     restarted = NatsServerProcess(binary, port=first.port, jetstream=True, store_dir=store)
-                    await restarted.start()
                     try:
+                        await restarted.start()
                         async with asyncio.timeout(15):
                             await reconnected.wait()
-                        # The restarted server may still be electing its JS meta
-                        # leader; publish() retries 503s briefly on its own.
-                        await js.publish("rc.m", b"after", timeout=10)
-                        msg = await messages.next(timeout=10)
-                        received.append(msg.payload)
-                        await msg.ack()
+                            # Consumer ACK state is written asynchronously by
+                            # nats-server's consumerFileStore.flushLoop, even
+                            # after ack_sync. SIGKILL can replay that one message;
+                            # a graceful shutdown must preserve the ACK instead.
+                            after = await js.publish("rc.m", b"after", timeout=10)
+                            msg = await messages.next(timeout=10)
+                            if abrupt and msg.metadata.stream_seq == before_sequence:
+                                assert msg.payload == b"before"
+                                await msg.ack_sync()
+                                msg = await messages.next(timeout=10)
+                            assert msg.metadata.stream_seq == after.seq
+                            received.append(msg.payload)
+                            await msg.ack_sync()
                     finally:
                         await restarted.stop()
                 assert received == [b"before", b"after"]

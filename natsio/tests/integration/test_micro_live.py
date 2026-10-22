@@ -63,6 +63,7 @@ class TestRequestReply:
         svc = add_service(nc, name="echo", version="1.0.0")
         svc.add_endpoint("echo", echo)
         async with svc:
+            await nc.flush()
             reply = await client2.request("echo", b"hello")
             assert reply.data == b"hello"
 
@@ -73,6 +74,7 @@ class TestRequestReply:
         svc = add_service(nc, name="err", version="1.0.0")
         svc.add_endpoint("boom", boom)
         async with svc:
+            await nc.flush()
             reply = await client2.request("boom", b"")
             assert reply.data == b"body"
             assert reply.headers is not None
@@ -89,6 +91,7 @@ class TestRequestReply:
         svc = add_service(nc, name="crash", version="1.0.0")
         svc.add_endpoint("crash", crash)
         async with svc:
+            await nc.flush()
             reply = await client2.request("crash", b"")
             assert reply.headers is not None
             assert reply.headers[ERROR_CODE_HEADER] == "500"
@@ -112,6 +115,7 @@ class TestRequestReply:
         svc = add_service(nc, ServiceConfig(name="cb", version="1.0.0", error_handler=on_error))
         svc.add_endpoint("crash", crash)
         async with svc:
+            await nc.flush()
             await client2.request("crash", b"")
             await _wait_for(lambda: bool(seen))
             assert any("routed" in s for s in seen)
@@ -121,6 +125,7 @@ class TestMonitoring:
     async def test_ping_all_variants(self, nc: natsio.Client, client2: natsio.Client) -> None:
         svc = add_service(nc, name="mon", version="2.1.0", metadata={"env": "test"})
         async with svc:
+            await nc.flush()
             for subject in ("$SRV.PING", "$SRV.PING.mon", f"$SRV.PING.mon.{svc.id}"):
                 reply = await client2.request(subject, b"")
                 body = json.loads(reply.data)
@@ -137,6 +142,7 @@ class TestMonitoring:
         svc = add_service(nc, name="mon", version="1.0.0", description="a service")
         svc.add_endpoint("a", h, metadata={"role": "worker"})
         async with svc:
+            await nc.flush()
             for subject in ("$SRV.INFO", "$SRV.INFO.mon", f"$SRV.INFO.mon.{svc.id}"):
                 reply = await client2.request(subject, b"")
                 body = json.loads(reply.data)
@@ -153,6 +159,7 @@ class TestMonitoring:
         svc = add_service(nc, name="mon", version="1.0.0")
         svc.add_endpoint("echo", echo)
         async with svc:
+            await nc.flush()
             for _ in range(3):
                 await client2.request("echo", b"x")
             await _wait_for(lambda: svc.stats().endpoints[0].num_requests == 3)
@@ -178,6 +185,7 @@ class TestMonitoring:
         svc = add_service(nc, ServiceConfig(name="mon", version="1.0.0", stats_handler=stats_handler))
         svc.add_endpoint("echo", echo)
         async with svc:
+            await nc.flush()
             await client2.request("echo", b"x")
             await _wait_for(lambda: svc.stats().endpoints[0].num_requests == 1)
             reply = await client2.request(f"$SRV.STATS.mon.{svc.id}", b"")
@@ -200,6 +208,7 @@ class TestScaling:
 
         ids = {s.id for s in services}
         try:
+            await nc.flush()
             # Endpoint requests are queue-balanced: over many requests, both
             # instances handle some.
             handled: set[str] = set()
@@ -225,6 +234,7 @@ class TestLifecycle:
 
         svc = add_service(nc, name="life", version="1.0.0")
         svc.add_endpoint("echo", echo)
+        await nc.flush()
         # Before stop: endpoint and monitoring both respond.
         assert (await client2.request("echo", b"x")).data == b"x"
         await client2.request("$SRV.PING.life", b"")
@@ -252,6 +262,7 @@ class TestLifecycle:
         svc.add_endpoint("echo", echo)
         async with svc as entered:
             assert entered is svc
+            await nc.flush()
             assert (await client2.request("echo", b"x")).data == b"x"
         assert svc.is_stopped
         with pytest.raises(NoRespondersError):
@@ -264,6 +275,7 @@ class TestLifecycle:
         svc = add_service(nc, name="grp", version="1.0.0")
         svc.add_group("a").add_group("b").add_endpoint("c", handle)
         async with svc:
+            await nc.flush()
             assert (await client2.request("a.b.c", b"")).data == b"ok"
 
 

@@ -21,6 +21,7 @@ async with await natsio.connect("nats://localhost:4222") as nc:
     svc = add_service(nc, name="calc", version="1.0.0")
     svc.add_endpoint("add", add)
     async with svc:            # $SRV responders live for the block
+        await nc.flush()       # server has processed the subscriptions
         await svc.stopped      # run until stopped
 ```
 
@@ -30,6 +31,10 @@ register a single endpoint. Pass a [`ServiceConfig`][natsio.micro.ServiceConfig]
 or its fields as keywords — `name` and `version` are required and validated
 loudly (a bad name or a non-SemVer version raises
 [`ServiceConfigError`][natsio.micro.ServiceConfigError] on the spot).
+
+Registration buffers subscriptions locally. Before announcing readiness or
+sending requests from another connection, `await nc.flush()` to confirm that
+the server has processed them. Entering the service context does not flush.
 
 ## Endpoints and handlers
 
