@@ -78,6 +78,11 @@ class TestBase64KeyCodec:
         with pytest.raises(KeyDecodeError):
             Base64KeyCodec().decode("not!valid")
 
+    @pytest.mark.parametrize("encoded", ["!!!!", "YWJj!!!!", "Y!WJj", "YWJj\n", "YQ==="])
+    def test_base64_key_never_discards_corruption(self, encoded: str) -> None:
+        with pytest.raises(KeyDecodeError):
+            Base64KeyCodec().decode(encoded)
+
     def test_encode_filter_orbit_vectors(self) -> None:
         codec = Base64KeyCodec()
         assert codec.encode_filter("user.123") == "dXNlcg.MTIz"
@@ -236,6 +241,11 @@ class TestBase64ValueCodec:
     def test_decode_corrupt_raises(self) -> None:
         with pytest.raises(ValueDecodeError):
             Base64ValueCodec().decode(b"!!!not-base64!!!")
+
+    @pytest.mark.parametrize("encoded", [b"!!!!", b"YWJj!!!!", b"Y!WJj", b"YWJj\n", b"YQ==="])
+    def test_base64_value_never_discards_corruption(self, encoded: bytes) -> None:
+        with pytest.raises(ValueDecodeError):
+            Base64ValueCodec().decode(encoded)
 
 
 class TestZlibValueCodec:

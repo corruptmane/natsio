@@ -6,6 +6,8 @@ from urllib.parse import unquote, urlparse
 
 from natsio.errors import ConfigError, ServerError
 
+from .diagnostics import sanitize_url
+
 __all__ = ["ParsedServer", "ServerPool"]
 
 _DEFAULT_PORT = 4222
@@ -21,7 +23,7 @@ class ParsedServer:
     host: str
     port: int
     tls_required: bool
-    url: str
+    url: str = field(repr=False)
     # Original URL scheme ("nats"/"tls"/"ws"/"wss"): drives transport selection
     # and the scheme prepended to gossiped bare host:port connect_urls.
     scheme: str = "nats"
@@ -29,11 +31,11 @@ class ParsedServer:
     # tls_required never triggers an in-band TLS upgrade (wss is TLS-first).
     websocket: bool = False
     # HTTP request path for the WebSocket Upgrade (ignored for non-ws schemes).
-    ws_path: str = "/"
+    ws_path: str = field(default="/", repr=False)
     # Credentials embedded in the URL (nats://user:pass@host) — these take
     # precedence over option-derived auth (parity with nats.go).
-    username: str | None = None
-    password: str | None = None
+    username: str | None = field(default=None, repr=False)
+    password: str | None = field(default=None, repr=False)
     discovered: bool = False
     consecutive_failures: int = field(default=0, repr=False)
     # Monotonic clock reading of the last connection attempt; -inf means never.
@@ -51,15 +53,18 @@ def parse_server_url(url: str, *, discovered: bool = False) -> ParsedServer:
     text = url.strip()
     if "://" not in text:
         text = f"nats://{text}"
-    parsed = urlparse(text)
+    try:
+        parsed = urlparse(text)
+    except ValueError:
+        raise ConfigError("invalid server URL") from None
     if parsed.scheme not in _KNOWN_SCHEMES:
-        raise ConfigError(f"unsupported server URL scheme: {url!r}")
+        raise ConfigError(f"unsupported server URL scheme: {sanitize_url(url)}")
     if not parsed.hostname:
-        raise ConfigError(f"server URL has no host: {url!r}")
+        raise ConfigError(f"server URL has no host: {sanitize_url(url)}")
     try:
         port = parsed.port or _DEFAULT_PORTS.get(parsed.scheme, _DEFAULT_PORT)
-    except ValueError as exc:
-        raise ConfigError(f"invalid port in server URL {url!r}: {exc}") from None
+    except ValueError:
+        raise ConfigError(f"invalid port in server URL: {sanitize_url(url)}") from None
     websocket = parsed.scheme in _WS_SCHEMES
     ws_path = "/"
     if websocket:
@@ -134,7 +139,12 @@ class ServerPool:
         self._servers.append(server)
 
     def merge_discovered(
-        self, connect_urls: list[str], *, keep_key: tuple[str, int] | None = None
+        self,
+        connect_urls: list[str],
+        *,
+        keep_key: tuple[str, int] | None = None,
+        source: ParsedServer | None = None,
+        tls_required: bool = False,
     ) -> list[ParsedServer]:
         """Reconcile the pool against INFO ``connect_urls`` (host:port entries).
 
@@ -149,17 +159,40 @@ class ServerPool:
         parsed: list[ParsedServer] = []
         for url in connect_urls:
             try:
-                parsed.append(parse_server_url(url, discovered=True))
-            except ConfigError:
+                server = parse_server_url(url, discovered=True)
+                parts = urlparse(server.url)
+                # Discovery is topology, never a source of credentials, paths
+                # or a change of transport family. WS retains its established
+                # re-scheming contract for bare/TCP advertisements.
+                if parts.username is not None or parts.password is not None or parts.query or parts.fragment:
+                    continue
+                if parts.port == 0:
+                    continue
+                if parts.path not in ("", "/") or (source and not source.websocket and server.websocket):
+                    continue
+                if source is not None:
+                    secure = tls_required or server.tls_required
+                    scheme = ("wss" if tls_required else "ws") if source.websocket else ("tls" if secure else "nats")
+                    host = f"[{server.host}]" if ":" in server.host else server.host
+                    server = parse_server_url(f"{scheme}://{host}:{server.port}", discovered=True)
+                parsed.append(server)
+            except (ConfigError, ValueError):
                 continue
         advertised = {s.key for s in parsed}
         self._servers = [s for s in self._servers if not s.discovered or s.key in advertised or s.key == keep_key]
-        known = {s.key for s in self._servers}
+        known = {s.key: s for s in self._servers}
         added: list[ParsedServer] = []
         for server in parsed:
             if server.key in known:
+                previous = known[server.key]
+                # Never downgrade a discovered endpoint learned through TLS.
+                # Explicit mixed pools keep their per-entry configured policy.
+                if previous.discovered and server.tls_required and not previous.tls_required:
+                    previous.tls_required = True
+                    previous.scheme = server.scheme
+                    previous.url = server.url
                 continue
-            known.add(server.key)
+            known[server.key] = server
             added.append(server)
         if added:
             if self._randomize:

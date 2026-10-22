@@ -1,0 +1,34 @@
+name: Validate tagged release
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          version: "0.13.5"
+          python-version: "3.13"
+      - uses: extractions/setup-just@f8a3cce218d9f83db3a2ecd90e41ac3de6cdfd9b # v3
+      - run: uv sync --locked --group docs
+      - run: just install-server v2.14.0
+      - run: just integration -q
+      - run: just install-server v2.15.1
+      - name: Validate tag, gates, docs, builds and installed wheels
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: just release-validate "$RELEASE_TAG"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-dist
+          path: release-dist/
+          if-no-files-found: error

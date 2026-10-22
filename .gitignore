@@ -9,6 +9,9 @@ __pycache__/
 # Build
 dist/
 build/
+release-dist/
+artifact.tar
+reliability/
 
 # Tooling caches
 .pytest_cache/

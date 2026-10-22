@@ -1,0 +1,206 @@
+{
+  "metadata": {
+    "python": "3.13.13",
+    "implementation": "CPython",
+    "platform": "macOS-26.4.1-arm64-arm-64bit-Mach-O",
+    "processor": "arm",
+    "event_loop": "asyncio (stdlib DefaultEventLoopPolicy, no uvloop)",
+    "nats_server": "nats-server: v2.14.3",
+    "server_binary": "/Users/corrupt/IT/natsio/tools/.bin/nats-server",
+    "clients": {
+      "natsio": "1.0.0",
+      "nats-py": "2.15.0",
+      "nats-core": "0.2.0"
+    }
+  },
+  "run": {
+    "quick": false,
+    "repeats": 5,
+    "clients": [
+      "natsio"
+    ],
+    "scenarios": [
+      "pub_16b",
+      "pubsub_16b",
+      "reqrep_throughput"
+    ]
+  },
+  "results": [
+    {
+      "scenario": "pub_16b",
+      "group": "core",
+      "client": "natsio",
+      "status": "ok",
+      "unit": "msgs/s",
+      "higher_is_better": true,
+      "summary": {
+        "median": 1416841.1644114486,
+        "min": 1334574.9803642873,
+        "max": 1433523.624665442
+      },
+      "skip_reason": null,
+      "error": null,
+      "repeats": [
+        {
+          "value": 1334574.9803642873,
+          "detail": {
+            "msgs_per_s": 1334574.9803642873,
+            "MB_per_s": 21.353199685828596
+          },
+          "ops": 300000,
+          "seconds": 0.22479066700179828
+        },
+        {
+          "value": 1367865.60513316,
+          "detail": {
+            "msgs_per_s": 1367865.60513316,
+            "MB_per_s": 21.88584968213056
+          },
+          "ops": 300000,
+          "seconds": 0.2193197919987142
+        },
+        {
+          "value": 1431546.1473712474,
+          "detail": {
+            "msgs_per_s": 1431546.1473712474,
+            "MB_per_s": 22.90473835793996
+          },
+          "ops": 300000,
+          "seconds": 0.20956362500146497
+        },
+        {
+          "value": 1433523.624665442,
+          "detail": {
+            "msgs_per_s": 1433523.624665442,
+            "MB_per_s": 22.93637799464707
+          },
+          "ops": 300000,
+          "seconds": 0.20927454200136708
+        },
+        {
+          "value": 1416841.1644114486,
+          "detail": {
+            "msgs_per_s": 1416841.1644114486,
+            "MB_per_s": 22.66945863058318
+          },
+          "ops": 300000,
+          "seconds": 0.21173862500290852
+        }
+      ]
+    },
+    {
+      "scenario": "pubsub_16b",
+      "group": "core",
+      "client": "natsio",
+      "status": "ok",
+      "unit": "msgs/s",
+      "higher_is_better": true,
+      "summary": {
+        "median": 308064.710529696,
+        "min": 304957.445103259,
+        "max": 312580.6482488863
+      },
+      "skip_reason": null,
+      "error": null,
+      "repeats": [
+        {
+          "value": 304957.445103259,
+          "detail": {
+            "MB_per_s": 4.879319121652144
+          },
+          "ops": 200000,
+          "seconds": 0.6558292089976021
+        },
+        {
+          "value": 309827.2558142158,
+          "detail": {
+            "MB_per_s": 4.957236093027453
+          },
+          "ops": 200000,
+          "seconds": 0.6455209999985527
+        },
+        {
+          "value": 307789.8140842138,
+          "detail": {
+            "MB_per_s": 4.924637025347422
+          },
+          "ops": 200000,
+          "seconds": 0.6497940830013249
+        },
+        {
+          "value": 308064.710529696,
+          "detail": {
+            "MB_per_s": 4.9290353684751365
+          },
+          "ops": 200000,
+          "seconds": 0.6492142500064801
+        },
+        {
+          "value": 312580.6482488863,
+          "detail": {
+            "MB_per_s": 5.001290371982181
+          },
+          "ops": 200000,
+          "seconds": 0.6398348750008154
+        }
+      ]
+    },
+    {
+      "scenario": "reqrep_throughput",
+      "group": "core",
+      "client": "natsio",
+      "status": "ok",
+      "unit": "req/s",
+      "higher_is_better": true,
+      "summary": {
+        "median": 63023.40067633588,
+        "min": 61484.0875333349,
+        "max": 64246.43796033391
+      },
+      "skip_reason": null,
+      "error": null,
+      "repeats": [
+        {
+          "value": 64246.43796033391,
+          "detail": {
+            "workers": 32.0
+          },
+          "ops": 30000,
+          "seconds": 0.46695195799838984
+        },
+        {
+          "value": 61484.0875333349,
+          "detail": {
+            "workers": 32.0
+          },
+          "ops": 30000,
+          "seconds": 0.48793112500425195
+        },
+        {
+          "value": 63112.85209123612,
+          "detail": {
+            "workers": 32.0
+          },
+          "ops": 30000,
+          "seconds": 0.4753389999968931
+        },
+        {
+          "value": 63023.40067633588,
+          "detail": {
+            "workers": 32.0
+          },
+          "ops": 30000,
+          "seconds": 0.47601366600429174
+        },
+        {
+          "value": 62543.77516968716,
+          "detail": {
+            "workers": 32.0
+          },
+          "ops": 30000,
+          "seconds": 0.4796640420026961
+        }
+      ]
+    }
+  ]
+}

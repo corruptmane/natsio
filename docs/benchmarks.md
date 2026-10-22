@@ -1,111 +1,91 @@
 # Benchmarks
 
-These numbers come from the in-repo harness, [`tools/natsio-bench`](#reproducing),
-comparing **natsio** against **nats-py** (the incumbent asyncio client) and
-**nats-core** (the official new beta). Read the methodology first — a benchmark
-is only as trustworthy as its fairness rules.
+The in-repository harness compares **natsio**, **nats-py**, and **nats-core** on
+stdlib asyncio. There is no Go adapter or Go measurement; these results make
+no claim of nats.go performance parity.
 
-## Methodology
+## Method and environment
 
-Every client runs on the same **stdlib asyncio** event loop — no uvloop for
-anyone — against a **fresh** JetStream-enabled `nats-server` started per
-`(scenario, client)` pair, so no run contaminates another. Each result is the
-**median of 3 timed repeats**.
+Each `(scenario, client)` pair uses a fresh JetStream-enabled localhost server.
+Five sequential timed repeats follow each scenario’s warm-up; the table shows
+the median and the observed `[minimum–maximum]`. Publish timings include the
+client’s `flush`; delivery timings end on the expected message count. Adapters
+use the respective client APIs. Unsupported adapter capabilities are `n/s`.
 
-Fairness rules that matter:
+This is one machine and one run order, without network latency, TLS, replicated
+storage, uvloop, or a randomized cross-run experiment. Ranges describe observed
+variability, not confidence intervals; overlapping ranges do not prove a tie.
+Other test workloads were kept idle during measurement.
 
-- **Publish-throughput** scenarios stop the clock only once every byte has been
-  flushed to the socket (each client's own `flush`), never at the last `await`.
-- **Delivery** scenarios stop at the Nth received message via an
-  `asyncio.Event`, never by polling.
-- Each client is driven **idiomatically** — its own intended fast path — so the
-  comparison measures the library, not an awkward adapter.
-- Scenarios auto-skip `(client, capability)` pairs a client does not support;
-  those are marked **n/s** below (nats-core has no JetStream surface yet).
+Measured 2026-10-22: macOS-26.4.1-arm64-arm-64bit-Mach-O, 10 logical CPUs,
+CPython 3.13.13; nats-server: v2.15.1; natsio 1.0.1,
+nats-py 2.16.0, nats-core 0.2.0. The raw JSON also records
+the base Git commit and dirty-tree status: this was the prepared 1.0.1 working
+tree, before the owner’s release commit.
 
-Environment for the figures below: macOS arm64, CPython 3.13.13, nats-server
-2.14.3; natsio 1.0.0 vs nats-py 2.15.0 vs nats-core 0.2.0.
+[Full raw repeats and environment](https://github.com/corruptmane/natsio/blob/main/tools/natsio-bench/results/2026-10-22-current.json).
 
 ## Results
 
-### Core messaging
+Bold marks the best observed **median among all supported clients**, including
+nats-core. Larger is better except for `roundtrip_latency`, where smaller wins.
 
 | Scenario | Unit | natsio | nats-py | nats-core |
-|---|---|--:|--:|--:|
-| `pub_16b` | msgs/s | **1,405,868** | 910,335 | 2,062,361 |
-| `pub_1k` | msgs/s | **1,085,935** | 1,051,033 | 1,536,058 |
-| `pub_64k` | MB/s | 7,559 | 7,685 | 7,632 |
-| `pubsub_16b` | msgs/s | 312,203 | 345,875 | 337,320 |
-| `pubsub_1k` | msgs/s | 279,402 | 307,663 | 295,605 |
-| `roundtrip_latency` | ms | **0.169** | 0.176 | 6.078 |
-| `reqrep_throughput` | req/s | **64,119** | 58,859 | 5,217 |
+|---|---|---:|---:|---:|
+| `pub_16b` | msgs/s | 1,354,657 [1,339,612–1,365,705] | 828,011 [822,907–845,942] | **2,019,080** [1,959,810–2,056,418] |
+| `pub_1k` | msgs/s | 1,052,793 [1,030,513–1,062,969] | 929,869 [909,914–946,654] | **1,517,478** [1,480,253–1,553,491] |
+| `pub_64k` | MB/s | 6,706.6 [6,045.2–6,733.6] | **7,318.3** [5,881.1–7,346.6] | 6,137.3 [4,490.7–6,911.8] |
+| `pubsub_16b` | msgs/s | 300,910 [300,523–306,526] | 319,275 [299,065–322,124] | **341,225** [337,350–344,010] |
+| `pubsub_1k` | msgs/s | 270,353 [252,327–271,367] | **294,252** [291,118–298,423] | 289,635 [245,455–294,520] |
+| `roundtrip_latency` | ms | **0.168** [0.167–0.168] | 0.180 [0.178–0.185] | 5.935 [5.921–5.985] |
+| `reqrep_throughput` | req/s | **63,767** [63,394–64,059] | 57,159 [51,747–58,356] | 4,882 [4,831–5,246] |
+| `js_publish_sync` | msgs/s | **13,620** [13,171–13,746] | 9,225 [9,088–9,311] | n/s |
+| `js_publish_async` | msgs/s | **140,870** [138,012–147,327] | 115,448 [107,532–116,255] | n/s |
+| `js_consume` | msgs/s | **210,814** [206,354–211,220] | 28,453 [27,736–28,506] | n/s |
+| `kv_put` | ops/s | **13,275** [11,851–13,393] | 9,124 [8,588–9,165] | n/s |
+| `kv_get` | ops/s | **11,708** [10,880–11,737] | 8,770 [8,167–8,782] | n/s |
+| `os_roundtrip` | MB/s | **965.6** [900.3–1,006.6] | 40.0 [39.7–41.0] | n/s |
 
-### JetStream, KV, Object Store
+natsio’s median is ahead of nats-py on 10 of these 13 scenarios. nats-py leads
+on large-payload publish bandwidth and both delivery-throughput scenarios.
+nats-core leads the two small-payload publish scenarios and 16-byte delivery;
+its measured request/reply latency is higher here. These observations do not
+isolate causes or predict production behavior. No unsupported workload is
+treated as a loss.
 
-| Scenario | Unit | natsio | nats-py | nats-core |
-|---|---|--:|--:|--:|
-| `js_publish_sync` | msgs/s | **13,704** | 9,411 | n/s |
-| `js_publish_async` | msgs/s | **145,542** | 123,974 | n/s |
-| `js_consume` | msgs/s | **210,400** | 28,440 | n/s |
-| `kv_put` | ops/s | **13,255** | 9,250 | n/s |
-| `kv_get` | ops/s | **11,672** | 8,833 | n/s |
-| `os_roundtrip` | MB/s | **948.1** | 39.9 | n/s |
+## Security-fix hot-path check
 
-**Bold** marks the fastest client that implements the scenario.
+A separate five-repeat comparison used the same NATS 2.14.3 binary and Python
+3.13.13. The baseline loaded the unchanged core from the starting Git HEAD in
+an isolated source directory; the after run loaded the patched checkout. Only
+natsio was benchmarked, so the competitor dependency refresh between runs does
+not enter these timings. The raw files retain the then-installed 1.0.0 package
+metadata; the patch version was prepared afterward.
 
-## Interpretation
+| Scenario | Before median [min–max] | After median [min–max] | Median change |
+|---|---:|---:|---:|
+| `pub_16b` | 1,416,841 [1,334,575–1,433,524] | 1,393,295 [1,370,774–1,401,820] | -1.7% |
+| `pubsub_16b` | 308,065 [304,957–312,581] | 303,632 [292,318–304,435] | -1.4% |
+| `reqrep_throughput` | 63,023 [61,484–64,246] | 62,558 [54,601–62,724] | -0.7% |
 
-natsio leads nats-py on 11 of 13 scenarios and ties the other two within ~10%.
-The gaps are worth understanding rather than cheering.
+The modest measured throughput reductions are retained for the security and
+bounded-wait guarantees. This sequential comparison is not a statistical
+estimate of regression size. No protocol/parser architecture was changed.
 
-**Where natsio pulls clearly ahead.** The JetStream and higher-level stores are
-the widest margins, because that is where allocation and indirection dominate:
-`js_consume` is **7.4×** nats-py (210k vs 28k msgs/s) and `os_roundtrip` is
-**24×** (948 vs 40 MB/s). These come from a faster JSON model (per-field
-decode/encode strategies precomputed once), lighter per-message objects, and a
-pull-consumer read path that keeps the window topped up without per-message
-reflection. Core `pub_16b` is **1.54×** nats-py for the same reasons — the hot
-path is allocation, not architecture.
-
-**The two scenarios within ~10%.** `pubsub_16b` and `pubsub_1k` are the only
-places natsio trails, by roughly 9–10% (312k vs 346k, 279k vs 308k msgs/s). This
-is the delivery-dispatch path, and the gap is small enough to sit inside
-run-to-run variance on a busy machine; it is not a structural deficit.
-
-**`pub_64k` is byte-bound.** At 64 KiB payloads all three clients converge
-(~7,400–7,700 MB/s): the work is memory bandwidth and the socket, not the
-library. Parity here is the expected, correct result.
-
-**nats-core's raw-publish lead has a price.** nats-core wins the fire-and-forget
-publish scenarios (`pub_16b`, `pub_1k`) via a **5 ms write-coalescing floor** —
-it batches writes before flushing. That trade is brutal for anything
-synchronous: its `roundtrip_latency` is **6.078 ms** against natsio's
-**0.169 ms** (a **36×** difference), and its `reqrep_throughput` collapses to
-**5,217 req/s** against natsio's **64,119** (**12.3×** slower). If your workload
-is request/reply or any latency-sensitive round trip, that coalescing floor is
-the number that decides it.
-
-The takeaway: natsio reaches nats.go-class throughput on the asyncio loop while
-keeping request/reply latency at the floor, and it is the only one of the three
-that is fast across core *and* JetStream/KV/Object Store.
+Raw [before](https://github.com/corruptmane/natsio/blob/main/tools/natsio-bench/results/2026-10-22-before.json)
+and [after](https://github.com/corruptmane/natsio/blob/main/tools/natsio-bench/results/2026-10-22-after.json) repetitions are retained.
 
 ## Reproducing
 
-The harness lives in `tools/natsio-bench` and drives a bundled `nats-server`.
-
 ```bash
-just bench                 # full run: all clients, all scenarios, 3-repeat medians
-just bench --quick         # smoke test: small counts
-uv run natsio-bench --list # every client and scenario name
+just install-server v2.15.1
+just bench --repeats 5 --json results.json
+just bench --quick
+just bench --list
+just bench --clients natsio,nats-py --scenarios js_consume,os_roundtrip --repeats 5
 ```
 
-Narrow it down or capture the raw data:
-
-```bash
-uv run natsio-bench --clients natsio,nats-py --scenarios js_consume,os_roundtrip
-uv run natsio-bench --json results.json     # full raw results + metadata
-```
-
-Absolute numbers depend on your hardware; run it on yours before drawing
-conclusions. The fairness rules above hold on any machine — that is the point of
-a fresh server per pair and idiomatic drivers.
+`just bench-refresh` refreshes the comparator lock entries. Keep the resolved
+versions and raw results alongside any performance claim. The harness exits
+nonzero if a scenario fails, while still recording successful and unsupported
+pairs. Use the full workload for comparisons; quick mode is a smoke test.

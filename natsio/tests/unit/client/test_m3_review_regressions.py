@@ -116,10 +116,12 @@ class TestRequestManyDeadline:
     async def test_publish_failure_is_not_relabeled_as_no_reply(self) -> None:
         """Finding 12: a write-buffer TimeoutError must surface as itself."""
         env = FakeEnv()
-        client = await connected_client(env, max_pending_size=64, flush_timeout=0.05)
+        client = await connected_client(env, max_pending_size=128, flush_timeout=0.05)
         try:
             env.current.block_writes()
-            await client._conn.publish_frame(b"PUB fill 40\r\n" + b"x" * 40 + b"\r\n")
+            # The request's payload plus generated reply subject fits in the
+            # limit alone; existing pending data is what blocks admission.
+            await client._conn.publish_frame(b"PUB fill 100\r\n" + b"x" * 100 + b"\r\n")
             with pytest.raises(TimeoutError, match="write buffer"):
                 await client.request("svc", b"y" * 40, timeout=5)
             # request_many: the same failure must RAISE, not complete empty.

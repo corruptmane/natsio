@@ -101,6 +101,11 @@ their subpackage (never a top-level `__init__.py`). Same hybrid Airflow uses
 for provider packages. If a module is ever adopted into official orbit.py,
 the transplant is mechanical.
 
+Current extension releases require `natsio>=1.0.1` as a common stable baseline.
+Some APIs existed in pre-1.0 core versions, but supporting those releases would
+also allow installations without the 1.0.1 security fixes. This deliberate
+support policy takes precedence over the earliest version exposing each API.
+
 ### The instrumentation seam
 
 Observability hooks are a zero-dep protocol (`Instrumentation`) so an OTel
@@ -188,10 +193,39 @@ is the better teacher).
 URL credentials beat option credentials. Permanent config errors (missing
 creds file, bad seed, missing Ed25519 backend) fail fast instead of being
 masked by other pool servers. Two identical auth rejections from a server
-abort the reconnect loop (`ignore_auth_error_abort` opts out). Discovered
-servers absent from later gossip are pruned; over WebSocket, gossiped URLs
-are *unconditionally* re-schemed onto the connection's scheme so a TCP
-address can never smuggle into a ws pool.
+abort the reconnect loop (`ignore_auth_error_abort` opts out).
+
+Discovery is staged for **all** INFO frames until TLS/authentication/PONG
+succeed. A failed establishment can neither add nor prune peers. Topology
+sent before an in-band TLS upgrade is discarded, since completing TLS
+does not authenticate preceding plaintext. NATS 2.14.0 and later send a full
+encrypted INFO after the first CONNECT/PING (`client.processPing`), so discovery
+can follow the connection event by one read. TLS-first/WSS preserve initial
+encrypted INFO. This is deliberate hardening beyond nats.go's early INFO merge.
+Discovered endpoints inherit the verified transport and TLS requirement, reject userinfo,
+paths, queries and invalid addresses, and never weaken a previously learned TLS
+requirement. A successfully TLS-verified endpoint also keeps requiring TLS on
+its own retries. Explicit mixed pools retain per-entry policy; this deliberately
+differs from nats.go's global Secure promotion when any seed uses tls/wss.
+WebSocket gossip is re-schemed onto the verified ws/wss transport as before.
+The source review used nats.go commit
+`d1936d74b2d25ae8f1da9f029b060080780a24e8`, including pool, INFO, URL-auth and
+TLS-name tests. natsio does not automatically inherit a seed URL's userinfo or
+DNS TLS hostname for discovered IPs; use option auth and explicit TLS hostname
+when those are needed. Do not claim full discovery parity.
+
+Diagnostic URLs use one sanitizer and omit userinfo, path and query. Raw
+configuration URL accessors stay unchanged for API compatibility. Auth provider
+and options representations omit secret-bearing fields and provider objects.
+
+### Connected write-buffer admission
+
+The connected publish limit applies to the full encoded frame. An impossible
+frame raises the existing `ConfigError` immediately, rather than waking the
+flusher forever. Admissible writes share one deadline across all wake-ups;
+cancelled/timed-out waiters unregister. Internal control frames and disconnected
+buffer replay retain their existing policies. Zero/-1 reconnect and subscription
+semantics are not repurposed as connected-write unlimited modes.
 
 ### Durations
 
@@ -218,16 +252,18 @@ Deliberate simplicity; revisit on demand.
 
 ## Performance doctrine
 
-The 2x-vs-nats-py publish win came from five contract-preserving fixes
+Historical 0.9-era profiling attributed its measured publish improvement to
+five contract-preserving fixes
 (validation fast path, unwrapped Noop instrumentation, cached `max_payload`,
 un-frozen per-message dataclasses, precomputed JSON codec plans) — all
 **allocation and indirection**, none architectural. Method is part of the
 doctrine: profile with evidence (ns/op, call counts), patch-measure-revert
 before landing, name the competitor's mechanism, and record what is *not*
 worth chasing (the sans-io parser rewrite; the 0.01%-hit `asyncio.wait`
-race). nats-core beats us on raw publish via a 5 ms write-coalescing floor
-that costs it 37x on request/reply latency — we deliberately do not copy
-that trade.
+race). Write coalescing can trade request/reply latency for raw publish throughput;
+we require measurement of both before adopting that trade. Current comparisons
+and their raw repetitions live in [Benchmarks](benchmarks.md); historical
+profiling numbers are not a claim about newer competitor releases.
 
 ## Process
 
@@ -244,12 +280,14 @@ that trade.
   Context7 indexes `docs/` + `examples/`, with `rules` steering agents away
   from nats-py idiom bleed-through.
 - **CI** runs the same `just` recipes as local dev (no split brain); merges
-  gate on the pinned supported server; a daily workflow tests the latest
-  server release and a from-source build of server `main` as an early-warning
-  radar, not a gate.
+  gate on NATS 2.14.0 and pinned current stable, with Python 3.13–3.15 on
+  Linux/macOS. The complete live suite includes extensions and refuses missing
+  infrastructure. Daily latest-release/server-main checks are an early-warning
+  radar; failure logs remain in Actions artifacts, never public issue comments.
 - **Versioning**: fix → patch, addition → minor, 1.0 declares the API
   freeze. `just release X.Y.Z` performs the bump (and refuses without a
-  changelog section). Commits are signed by the owner; `git add` uses
+  changelog section). Commits use the owner's configured signing key, including
+  agent-created local commits; never disable signing. `git add` uses
   explicit paths only — a `.env` with a live key once reached the public
   repo via `git add -A`, and the history rewrite that followed is not an
   experience worth repeating.

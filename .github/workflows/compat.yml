@@ -4,10 +4,8 @@ name: Server compatibility
 # decides what we *support*; this tracks what's *coming*. A failure here means
 # an upstream nats-server change broke us before any user hit it.
 #
-# On failure the `report` job opens (or updates) a GitHub issue that embeds the
-# tested server version and the pytest failure tail, so investigating needs only
-# the issue URL — no digging through Actions logs. The issue auto-closes when the
-# job goes green again.
+# Failure diagnostics remain in Actions artifacts; this workflow never posts
+# test output to public issues (it may contain private security findings).
 #
 # Each job caches a marker keyed on (this repo's commit SHA, the resolved
 # nats-server version). A daily run whose commit and server version are both
@@ -20,13 +18,20 @@ on:
     - cron: "17 6 * * *" # daily, 06:17 UTC (off the top-of-hour rush)
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   latest-release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
-      - uses: extractions/setup-just@v3
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          version: "0.13.5"
+      - uses: extractions/setup-just@f8a3cce218d9f83db3a2ecd90e41ac3de6cdfd9b # v3
       - name: Resolve latest released nats-server
         id: resolve
         env:
@@ -48,7 +53,7 @@ jobs:
           echo "nats-server ${TAG} (latest release)" > radar/version.txt
       - name: Skip if this commit already passed against this server
         id: cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: radar-marker
           key: radar-latest-${{ github.sha }}-${{ steps.resolve.outputs.tag }}
@@ -57,9 +62,8 @@ jobs:
         run: |
           set -euo pipefail
           TAG='${{ steps.resolve.outputs.tag }}'
-          curl -sfL "https://github.com/nats-io/nats-server/releases/download/${TAG}/nats-server-${TAG}-linux-amd64.tar.gz" \
-            | tar -xz --strip-components=1 -C /usr/local/bin --wildcards '*/nats-server'
-          nats-server --version | tee radar/version.txt
+          just install-server "$TAG"
+          tools/.bin/nats-server --version | tee radar/version.txt
       - name: Sync
         if: success() && steps.cache.outputs.cache-hit != 'true'
         run: uv sync --locked
@@ -75,13 +79,13 @@ jobs:
           echo "${{ github.sha }} vs ${{ steps.resolve.outputs.tag }}: passed" > radar-marker/ok
       - name: Save the pass marker
         if: success() && steps.cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: radar-marker
           key: radar-latest-${{ github.sha }}-${{ steps.resolve.outputs.tag }}
       - name: Upload radar log
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: radar-latest-release
           path: radar/
@@ -90,9 +94,13 @@ jobs:
   server-main:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
-      - uses: extractions/setup-just@v3
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          version: "0.13.5"
+      - uses: extractions/setup-just@f8a3cce218d9f83db3a2ecd90e41ac3de6cdfd9b # v3
       - name: Resolve nats-server main commit
         id: resolve
         env:
@@ -111,11 +119,11 @@ jobs:
           echo "nats-server main @ ${SHA:0:12}" > radar/version.txt
       - name: Skip if this commit already passed against this server
         id: cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: radar-marker
           key: radar-main-${{ github.sha }}-${{ steps.resolve.outputs.sha }}
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         if: success() && steps.cache.outputs.cache-hit != 'true'
         with:
           go-version: stable
@@ -124,8 +132,9 @@ jobs:
         run: |
           set -euo pipefail
           go install "github.com/nats-io/nats-server/v2@${{ steps.resolve.outputs.sha }}"
-          sudo cp "$(go env GOPATH)/bin/nats-server" /usr/local/bin/
-          nats-server --version | tee radar/version.txt
+          mkdir -p tools/.bin
+          cp "$(go env GOPATH)/bin/nats-server" tools/.bin/
+          tools/.bin/nats-server --version | tee radar/version.txt
       - name: Sync
         if: success() && steps.cache.outputs.cache-hit != 'true'
         run: uv sync --locked
@@ -141,115 +150,14 @@ jobs:
           echo "${{ github.sha }} vs main ${{ steps.resolve.outputs.sha }}: passed" > radar-marker/ok
       - name: Save the pass marker
         if: success() && steps.cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: radar-marker
           key: radar-main-${{ github.sha }}-${{ steps.resolve.outputs.sha }}
       - name: Upload radar log
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: radar-server-main
           path: radar/
           if-no-files-found: ignore
-
-  # Turn a red radar into an actionable issue (and close it on recovery). Runs
-  # regardless of the test jobs' outcome so it can both open and close.
-  report:
-    needs: [latest-release, server-main]
-    if: always()
-    runs-on: ubuntu-latest
-    permissions:
-      issues: write
-      actions: read
-    steps:
-      - name: Download radar logs
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-        continue-on-error: true # no artifacts when a job died before uploading
-      - name: File or resolve the radar issue
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            const LABEL = 'compat-radar';
-            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
-            const flavors = [
-              {
-                job: 'latest-release',
-                result: '${{ needs.latest-release.result }}',
-                title: 'Compat radar: latest released nats-server is failing',
-                blurb: 'the **latest released** nats-server — a shipped version already broke us',
-              },
-              {
-                job: 'server-main',
-                result: '${{ needs.server-main.result }}',
-                title: 'Compat radar: nats-server `main` is failing',
-                blurb: 'nats-server built from **`main`** — an upstream change in flight',
-              },
-            ];
-
-            // Make sure the label exists (ignore "already created" races).
-            try {
-              await github.rest.issues.getLabel({ ...context.repo, name: LABEL });
-            } catch {
-              try {
-                await github.rest.issues.createLabel({
-                  ...context.repo, name: LABEL, color: 'b60205',
-                  description: 'nats-server compatibility radar failures',
-                });
-              } catch {}
-            }
-
-            const open = await github.paginate(github.rest.issues.listForRepo, {
-              ...context.repo, state: 'open', labels: LABEL, per_page: 100,
-            });
-
-            const read = (p) => { try { return fs.readFileSync(p, 'utf8').trim(); } catch { return ''; } };
-            const tail = (s, lines = 200, chars = 40000) =>
-              s.split('\n').slice(-lines).join('\n').slice(-chars);
-
-            for (const f of flavors) {
-              const existing = open.find((i) => i.title === f.title);
-
-              if (f.result === 'failure') {
-                const dir = `artifacts/radar-${f.job}`;
-                const version = read(`${dir}/version.txt`) || '(server version not captured)';
-                const log = read(`${dir}/integration.log`);
-                const logBlock = log
-                  ? `<details><summary>Integration failure tail (\`--tb=short -rf\`)</summary>\n\n\`\`\`\n${tail(log)}\n\`\`\`\n\n</details>`
-                  : '_No test log — the job failed before the tests ran (server build/install). See the run._';
-                const body = [
-                  `The compat radar failed against ${f.blurb}.`,
-                  ``,
-                  `- **Job:** \`${f.job}\``,
-                  `- **Server:** \`${version}\``,
-                  `- **Run:** ${runUrl}`,
-                  ``,
-                  logBlock,
-                  ``,
-                  `<sub>Opened automatically by \`.github/workflows/compat.yml\`. It updates on each failing run and closes itself when the job goes green.</sub>`,
-                ].join('\n');
-
-                if (existing) {
-                  await github.rest.issues.createComment({
-                    ...context.repo, issue_number: existing.number,
-                    body: `### Still failing — ${new Date().toISOString().slice(0, 10)}\n\n${body}`,
-                  });
-                } else {
-                  await github.rest.issues.create({
-                    ...context.repo, title: f.title, labels: [LABEL], body,
-                  });
-                }
-              } else if (f.result === 'success' && existing) {
-                await github.rest.issues.createComment({
-                  ...context.repo, issue_number: existing.number,
-                  body: `Green again on ${runUrl} — closing.`,
-                });
-                await github.rest.issues.update({
-                  ...context.repo, issue_number: existing.number, state: 'closed',
-                  state_reason: 'completed',
-                });
-              }
-            }

@@ -161,7 +161,7 @@ class Context:
     path: str | None = None
 
     # -- applied to the natsio connection --
-    url: str = ""
+    url: str = field(default="", repr=False)
     user: str = ""
     password: str = field(default="", repr=False)
     token: str = field(default="", repr=False)
@@ -175,7 +175,7 @@ class Context:
 
     # -- parsed & preserved, but NOT applied to the connection (see README) --
     description: str = ""
-    socks_proxy: str = ""
+    socks_proxy: str = field(default="", repr=False)
     nsc: str = ""
     user_jwt: str = field(default="", repr=False)
     jetstream_domain: str = ""

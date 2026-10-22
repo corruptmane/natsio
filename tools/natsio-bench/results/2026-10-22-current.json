@@ -1,0 +1,1999 @@
+{
+  "metadata": {
+    "measured_at": "2026-10-22T12:41:30.761066+00:00",
+    "cpu_count": 10,
+    "git_commit": "b29c2b706785e92b31fba7f77f94a7a203d3a6a4",
+    "working_tree_dirty": true,
+    "python": "3.13.13",
+    "implementation": "CPython",
+    "platform": "macOS-26.4.1-arm64-arm-64bit-Mach-O",
+    "processor": "arm",
+    "event_loop": "asyncio (stdlib DefaultEventLoopPolicy, no uvloop)",
+    "nats_server": "nats-server: v2.15.1",
+    "server_binary": "/Users/corrupt/IT/natsio/tools/.bin/nats-server",
+    "clients": {
+      "natsio": "1.0.1",
+      "nats-py": "2.16.0",
+      "nats-core": "0.2.0"
+    }
+  },
+  "run": {
+    "quick": false,
+    "repeats": 5,
+    "clients": [
+      "natsio",
+      "nats-py",
+      "nats-core"
+    ],
+    "scenarios": [
+      "pub_16b",
+      "pub_1k",
+      "pub_64k",
+      "pubsub_16b",
+      "pubsub_1k",
+      "roundtrip_latency",
+      "reqrep_throughput",
+      "js_publish_sync",
+      "js_publish_async",
+      "js_consume",
+      "kv_put",
+      "kv_get",
+      "os_roundtrip"
+    ]
+  },
+  "results": [
+    {
+      "scenario": "pub_16b",
+      "group": "core",
+      "client": "natsio",
+      "status": "ok",
+      "unit": "msgs/s",
+      "higher_is_better": true,
+      "summary": {
+        "median": 1354656.8911582113,
+        "min": 1339612.1430494634,
+        "max": 1365704.8415477204
+      },
+      "skip_reason": null,
+      "error": null,
+      "repeats": [
+        {
+          "value": 1339612.1430494634,
+          "detail": {
+            "msgs_per_s": 1339612.1430494634,
+            "MB_per_s": 21.433794288791415
+          },
+          "ops": 300000,
+          "seconds": 0.22394541700487025
+        },
+        {
+          "value": 1347227.488015141,
+          "detail": {
+            "msgs_per_s": 1347227.488015141,
+            "MB_per_s": 21.555639808242255
+          },
+          "ops": 300000,
+          "seconds": 0.22267954199924134
+        },
+        {
+          "value": 1358735.392716229,
+          "detail": {
+            "msgs_per_s": 1358735.392716229,
+            "MB_per_s": 21.739766283459662
+          },
+          "ops": 300000,
+          "seconds": 0.22079354200104717
+        },
+        {
+          "value": 1365704.8415477204,
+          "detail": {
+            "msgs_per_s": 1365704.8415477204,
+            "MB_per_s": 21.851277464763527
+          },
+          "ops": 300000,
+          "seconds": 0.2196667910029646
+        },
+        {
+          "value": 1354656.8911582113,
+          "detail": {
+            "msgs_per_s": 1354656.8911582113,
+            "MB_per_s": 21.674510258531377
+          },
+          "ops": 300000,
+          "seconds": 0.221458290994633
+        }
+      ]
+    },
+    {
+      "scenario": "pub_16b",
+      "group": "core",
+      "client": "nats-py",
+      "status": "ok",
+      "unit": "msgs/s",
+      "higher_is_better": true,
+      "summary": {
+        "median": 828010.5868697489,
+        "min": 822907.3644726687,
+        "max": 845942.0812538553
+      },
+      "skip_reason": null,
+      "error": null,
+      "repeats": [
+        {
+          "value": 825900.3267432294,
+          "detail": {
+            "msgs_per_s": 825900.3267432294,
+            "MB_per_s": 13.214405227891671
+          },
+          "ops": 300000,
+          "seconds": 0.363239958001941
+        },
+        {
+          "value": 822907.3644726687,
+          "detail": {
+            "msgs_per_s": 822907.3644726687,
+            "MB_per_s": 13.166517831562699
+          },
+          "ops": 300000,
+          "seconds": 0.36456108299898915
+        },
+        {
+          "value": 828010.5868697489,
+          "detail": {
+            "msgs_per_s": 828010.5868697489,
+            "MB_per_s": 13.248169389915983
+          },
+          "ops": 300000,
+          "seconds": 0.36231420800322667
+        },
+        {
+          "value": 833934.848226055,
+          "detail": {
+            "msgs_per_s": 833934.848226055,
+            "MB_per_s": 13.34295757161688
+          },
+          "ops": 300000,
+          "seconds": 0.3597403329986264
+        },
+        {
+          "value": 845942.0812538553,
+          "detail": {
+            "msgs_per_s": 845942.0812538553,
+            "MB_per_s": 13.535073300061685
+          },
+          "ops": 300000,
+          "seconds": 0.35463420800078893
+        }
+      ]
+    },
+    {
+      "scenario": "pub_16b",
+      "group": "core",
+      "client": "nats-core",
+      "status": "ok",
+      "unit": "msgs/s",
+      "higher_is_better": true,
+      "summary": {
+        "median": 2019079.7517972216,
+        "min": 1959809.737541174,
+        "max": 2056418.415022096
+      },
+      "skip_reason": null,
+      "error": null,
+      "repeats": [
+        {
+          "value": 1991120.148442711,
+          "detail": {
+            "msgs_per_s": 1991120.148442711,
+            "MB_per_s": 31.857922375083373
+          },
+          "ops": 300000,
+          "seconds": 0.1506689589950838
+        },
+        {
+          "value": 1959809.737541174,
+          "detail": {
+            "msgs_per_s": 1959809.737541174,
+            "MB_per_s": 31.356955800658785
+          },
+          "ops": 300000,
+          "seconds": 0.15307608399598394
+        },
+        {
+          "value": 2019079.7517972216,
+          "detail": {
+            "msgs_per_s": 2019079.7517972216,
+            "MB_per_s": 32.30527602875554
+          },
+          "ops": 300000,
+          "seconds": 0.14858254099817714
+        },
+        {
+          "value": 2032780.2759550724,
+          "detail": {
+            "msgs_per_s": 2032780.2759550724,
+            "MB_per_s": 32.52448441528116
+          },
+          "ops": 300000,
+          "seconds": 0.14758112499839626
+        },
+        {
+          "value": 2056418.415022096,
+          "detail": {
+            "msgs_per_s": 2056418.415022096,
+            "MB_per_s": 32.90269464035353
+          },
+          "ops": 300000,
+          "seconds": 0.1458847079993575
+        }
+      ]
+    },
+    {
+      "scenario": "pub_1k",
+      "group": "core",
+      "client": "natsio",
+      "status": "ok",
+      "unit": "msgs/s",
+      "higher_is_better": true,
+      "summary": {
+        "median": 1052792.960992397,
+        "min": 1030513.2871756442,
+        "max": 1062969.1892839097
+      },
+      "skip_reason": null,
+      "error": null,
+      "repeats": [
+        {
+          "value": 1030513.2871756442,
+          "detail": {
+            "msgs_per_s": 1030513.2871756442,
+            "MB_per_s": 1055.2456060678596
+          },
+          "ops": 200000,
+          "seconds": 0.19407804100046633
+        },
+        {
+          "value": 1052792.960992397,
+          "detail": {
+            "msgs_per_s": 1052792.960992397,
+            "MB_per_s": 1078.0599920562145
+          },
+          "ops": 200000,
+          "seconds": 0.18997087500611087
+        },
+        {
+          "value": 1057676.1822201672,
+          "detail": {
+            "msgs_per_s": 1057676.1822201672,
+            "MB_per_s": 1083.0604105934515
+          },
+          "ops": 200000,
+          "seconds": 0.18909379199612886
+        },
+        {
+          "value": 1043545.6412686248,
+          "detail": {
+            "msgs_per_s": 1043545.6412686248,
+            "MB_per_s": 1068.5907366590718
+          },
+          "ops": 200000,
+          "seconds": 0.19165429099666653
+        },
+        {
+          "value": 1062969.1892839097,
+          "detail": {
+            "msgs_per_s": 1062969.1892839097,
+            "MB_per_s": 1088.4804498267235
+          },
+          "ops": 200000,
+          "seconds": 0.1881522080002469
+        }
+      ]
+    },
+    {
+      "scenario": "pub_1k",
+      "group": "core",
+      "client": "nats-py",
+      "status": "ok",
+      "unit": "msgs/s",
+      "higher_is_better": true,
+      "summary": {
+        "median": 929869.4419642279,
+        "min": 909913.7937823914,
+        "max": 946654.0694171255
+      },
+      "skip_reason": null,
+      "error": null,
+      "repeats": [
+        {
+          "value": 909913.7937823914,
+          "detail": {
+            "msgs_per_s": 909913.7937823914,
+            "MB_per_s": 931.7517248331689
+          },
+          "ops": 200000,
+          "seconds": 0.2198010419961065
+        },
+        {
+          "value": 942637.7454052607,
+          "detail": {
+            "msgs_per_s": 942637.7454052607,
+            "MB_per_s": 965.261051294987
+          },
+          "ops": 200000,
+          "seconds": 0.2121705829995335
+        },
+        {
+          "value": 929869.4419642279,
+          "detail": {
+            "msgs_per_s": 929869.4419642279,
+            "MB_per_s": 952.1863085713695
+          },
+          "ops": 200000,
+          "seconds": 0.21508395799901336
+        },
+        {
+          "value": 946654.0694171255,
+          "detail": {
+            "msgs_per_s": 946654.0694171255,
+            "MB_per_s": 969.3737670831366
+          },
+          "ops": 200000,
+          "seconds": 0.21127041699946858
+        },
+        {
+          "value": 924275.2815363626,
+          "detail": {
+            "msgs_per_s": 924275.2815363626,
+            "MB_per_s": 946.4578882932353
+          },
+          "ops": 200000,
+          "seconds": 0.2163857499981532
+        }
+      ]
+    },
+    {
+      "scenario": "pub_1k",
+      "group": "core",
+      "client": "nats-core",
+      "status": "ok",
+      "unit": "msgs/s",
+      "higher_is_better": true,
+      "summary": {
+        "median": 1517478.0274003425,
+        "min": 1480252.5100540072,
+        "max": 1553490.567867217
+      },
+      "skip_reason": null,
+      "error": null,
+      "repeats": [
+        {
+          "value": 1547756.0158106992,
+          "detail": {
+            "msgs_per_s": 1547756.0158106992,
+            "MB_per_s": 1584.902160190156
+          },
+          "ops": 200000,
+          "seconds": 0.12921933299367083
+        },
+        {
+          "value": 1553490.567867217,
+          "detail": {
+            "msgs_per_s": 1553490.567867217,
+            "MB_per_s": 1590.7743414960303
+          },
+          "ops": 200000,
+          "seconds": 0.1287423329995363
+        },
+        {
+          "value": 1512516.0704501714,
+          "detail": {
+            "msgs_per_s": 1512516.0704501714,
+            "MB_per_s": 1548.8164561409756
+          },
+          "ops": 200000,
+          "seconds": 0.13223000000289176
+        },
+        {
+          "value": 1517478.0274003425,
+          "detail": {
+            "msgs_per_s": 1517478.0274003425,
+            "MB_per_s": 1553.8975000579508
+          },
+          "ops": 200000,
+          "seconds": 0.13179762499930803
+        },
+        {
+          "value": 1480252.5100540072,
+          "detail": {
+            "msgs_per_s": 1480252.5100540072,
+            "MB_per_s": 1515.7785702953033
+          },
+          "ops": 200000,
+          "seconds": 0.135112083000422
+        }
+      ]
+    },
+    {
+      "scenario": "pub_64k",
+      "group": "core",
+      "client": "natsio",
+      "status": "ok",
+      "unit": "MB/s",
+      "higher_is_better": true,
+      "summary": {
+        "median": 6706.579869874019,
+        "min": 6045.222007548035,
+        "max": 6733.626293346806
+      },
+      "skip_reason": null,
+      "error": null,
+      "repeats": [
+        {
+          "value": 6733.626293346806,
+          "detail": {
+            "msgs_per_s": 102746.98323588265,
+            "MB_per_s": 6733.626293346806
+          },
+          "ops": 20000,
+          "seconds": 0.19465291700180387
+        },
+        {
+          "value": 6706.579869874019,
+          "detail": {
+            "msgs_per_s": 102334.28756521635,
+            "MB_per_s": 6706.579869874019
+          },
+          "ops": 20000,
+          "seconds": 0.19543791700561997
+        },
+        {
+          "value": 6658.093213417808,
+          "detail": {
+            "msgs_per_s": 101594.43990200514,
+            "MB_per_s": 6658.093213417808
+          },
+          "ops": 20000,
+          "seconds": 0.1968611670017708
+        },
+        {
+          "value": 6714.28543998006,
+          "detail": {
+            "msgs_per_s": 102451.86523407073,
+            "MB_per_s": 6714.28543998006
+          },
+          "ops": 20000,
+          "seconds": 0.1952136249965406
+        },
+        {
+          "value": 6045.222007548035,
+          "detail": {
+            "msgs_per_s": 92242.76744915826,
+            "MB_per_s": 6045.222007548035
+          },
+          "ops": 20000,
+          "seconds": 0.2168191669989028
+        }
+      ]
+    },
+    {
+      "scenario": "pub_64k",
+      "group": "core",
+      "client": "nats-py",
+      "status": "ok",
+      "unit": "MB/s",
+      "higher_is_better": true,
+      "summary": {
+        "median": 7318.303225932019,
+        "min": 5881.12848030374,
+        "max": 7346.573865394826
+      },
+      "skip_reason": null,
+      "error": null,
+      "repeats": [
+        {
+          "value": 7318.303225932019,
+          "detail": {
+            "msgs_per_s": 111668.44521990996,
+            "MB_per_s": 7318.303225932019
+          },
+          "ops": 20000,
+          "seconds": 0.17910162499902071
+        },
+        {
+          "value": 7346.573865394826,
+          "detail": {
+            "msgs_per_s": 112099.8209441349,
+            "MB_per_s": 7346.573865394826
+          },
+          "ops": 20000,
+          "seconds": 0.1784124170007999
+        },
+        {
+          "value": 7337.2470394703805,
+          "detail": {
+            "msgs_per_s": 111957.50487473115,
+            "MB_per_s": 7337.2470394703805
+          },
+          "ops": 20000,
+          "seconds": 0.17863920799572952
+        },
+        {
+          "value": 7314.38432776237,
+          "detail": {
+            "msgs_per_s": 111608.64757938187,
+            "MB_per_s": 7314.38432776237
+          },
+          "ops": 20000,
+          "seconds": 0.17919758400239516
+        },
+        {
+          "value": 5881.12848030374,
+          "detail": {
+            "msgs_per_s": 89738.89893041595,
+            "MB_per_s": 5881.12848030374
+          },
+          "ops": 20000,
+          "seconds": 0.2228687919996446
+        }
+      ]
+    },
+    {
+      "scenario": "pub_64k",
+      "group": "core",
+      "client": "nats-core",
+      "status": "ok",
+      "unit": "MB/s",
+      "higher_is_better": true,
+      "summary": {
+        "median": 6137.266986539401,
+        "min": 4490.67796826309,
+        "max": 6911.770869593188
+      },
+      "skip_reason": null,
+      "error": null,
+      "repeats": [
+        {
+          "value": 4490.67796826309,
+          "detail": {
+            "msgs_per_s": 68522.30786534256,
+            "MB_per_s": 4490.67796826309
+          },
+          "ops": 20000,
+          "seconds": 0.29187575000105426
+        },
+        {
+          "value": 5818.888903224785,
+          "detail": {
+            "msgs_per_s": 88789.19835242897,
+            "MB_per_s": 5818.888903224785
+          },
+          "ops": 20000,
+          "seconds": 0.22525262499402743
+        },
+        {
+          "value": 6137.266986539401,
+          "detail": {
+            "msgs_per_s": 93647.26236784973,
+            "MB_per_s": 6137.266986539401
+          },
+          "ops": 20000,
+          "seconds": 0.2135673750017304
+        },
+        {
+          "value": 6911.770869593188,
+          "detail": {
+            "msgs_per_s": 105465.25374745464,
+            "MB_per_s": 6911.770869593188
+          },
+          "ops": 20000,
+          "seconds": 0.18963591599458596
+        },
+        {
+          "value": 6800.534479502645,
+          "detail": {
+            "msgs_per_s": 103767.92113498908,
+            "MB_per_s": 6800.534479502645
+          },
+          "ops": 20000,
+          "seconds": 0.19273779200011631
+        }
+      ]
+    },
+    {
+      "scenario": "pubsub_16b",
+      "group": "core",
+      "client": "natsio",
+      "status": "ok",
+      "unit": "msgs/s",
+      "higher_is_better": true,
+      "summary": {
+        "median": 300910.0647272388,
+        "min": 300523.38024852617,
+        "max": 306526.17225326074
+      },
+      "skip_reason": null,
+      "error": null,
+      "repeats": [
+        {
+          "value": 300736.27759087266,
+          "detail": {
+            "MB_per_s": 4.811780441453963
+          },
+          "ops": 200000,
+          "seconds": 0.6650345000016387
+        },
+        {
+          "value": 306526.17225326074,
+          "detail": {
+            "MB_per_s": 4.904418756052173
+          },
+          "ops": 200000,
+          "seconds": 0.6524728330041398
+        },
+        {
+          "value": 306276.5837625225,
+          "detail": {
+            "MB_per_s": 4.900425340200361
+          },
+          "ops": 200000,
+          "seconds": 0.6530045410036109
+        },
+        {
+          "value": 300910.0647272388,
+          "detail": {
+            "MB_per_s": 4.814561035635821
+          },
+          "ops": 200000,
+          "seconds": 0.6646504169984837
+        },
+        {
+          "value": 300523.38024852617,
+          "detail": {
+            "MB_per_s": 4.808374083976418
+          },
+          "ops": 200000,
+          "seconds": 0.6655056250019697
+        }
+      ]
+    },
+    {
+      "scenario": "pubsub_16b",
+      "group": "core",
+      "client": "nats-py",
+      "status": "ok",
+      "unit": "msgs/s",
+      "higher_is_better": true,
+      "summary": {
+        "median": 319274.54438322375,
+        "min": 299065.178179221,
+        "max": 322123.78375644976
+      },
+      "skip_reason": null,
+      "error": null,
+      "repeats": [
+        {
+          "value": 320875.11216635775,
+          "detail": {
+            "MB_per_s": 5.1340017946617245
+          },
+          "ops": 200000,
+          "seconds": 0.6232954580045771
+        },
+        {
+          "value": 299065.178179221,
+          "detail": {
+            "MB_per_s": 4.785042850867536
+          },
+          "ops": 200000,
+          "seconds": 0.6687505419977242
+        },
+        {
+          "value": 318137.3480753935,
+          "detail": {
+            "MB_per_s": 5.090197569206295
+          },
+          "ops": 200000,
+          "seconds": 0.6286592920005205
+        },
+        {
+          "value": 319274.54438322375,
+          "detail": {
+            "MB_per_s": 5.1083927101315805
+          },
+          "ops": 200000,
+          "seconds": 0.6264201249941834
+        },
+        {
+          "value": 322123.78375644976,
+          "detail": {
+            "MB_per_s": 5.153980540103197
+          },
+          "ops": 200000,
+          "seconds": 0.6208793329933542
+        }
+      ]
+    },
+    {
+      "scenario": "pubsub_16b",
+      "group": "core",
+      "client": "nats-core",
+      "status": "ok",
+      "unit": "msgs/s",
+      "higher_is_better": true,
+      "summary": {
+        "median": 341225.3059505853,
+        "min": 337349.9767774886,
+        "max": 344010.31437960314
+      },
+      "skip_reason": null,
+      "error": null,
+      "repeats": [
+        {
+          "value": 338509.4961421823,
+          "detail": {
+            "MB_per_s": 5.4161519382749175
+          },
+          "ops": 200000,
+          "seconds": 0.5908253750021686
+        },
+        {
+          "value": 337349.9767774886,
+          "detail": {
+            "MB_per_s": 5.397599628439818
+          },
+          "ops": 200000,
+          "seconds": 0.5928561249966151
+        },
+        {
+          "value": 342196.21531090286,
+          "detail": {
+            "MB_per_s": 5.475139444974446
+          },
+          "ops": 200000,
+          "seconds": 0.5844599999982165
+        },
+        {
+          "value": 341225.3059505853,
+          "detail": {
+            "MB_per_s": 5.459604895209365
+          },
+          "ops": 200000,
+          "seconds": 0.5861230000009527
+        },
+        {
+          "value": 344010.31437960314,
+          "detail": {
+            "MB_per_s": 5.504165030073651
+          },
+          "ops": 200000,
+          "seconds": 0.5813779169984628
+        }
+      ]
+    },
+    {
+      "scenario": "pubsub_1k",
+      "group": "core",
+      "client": "natsio",
+      "status": "ok",
+      "unit": "msgs/s",
+      "higher_is_better": true,
+      "summary": {
+        "median": 270352.9593046326,
+        "min": 252326.6268684132,
+        "max": 271366.6158476495
+      },
+      "skip_reason": null,
+      "error": null,
+      "repeats": [
+        {
+          "value": 252326.6268684132,
+          "detail": {
+            "MB_per_s": 258.38246591325515
+          },
+          "ops": 150000,
+          "seconds": 0.5944675829960033
+        },
+        {
+          "value": 271366.6158476495,
+          "detail": {
+            "MB_per_s": 277.87941462799307
+          },
+          "ops": 150000,
+          "seconds": 0.5527577499960898
+        },
+        {
+          "value": 270623.5437076577,
+          "detail": {
+            "MB_per_s": 277.11850875664146
+          },
+          "ops": 150000,
+          "seconds": 0.5542754999987665
+        },
+        {
+          "value": 270022.0407129715,
+          "detail": {
+            "MB_per_s": 276.5025696900828
+          },
+          "ops": 150000,
+          "seconds": 0.5555102079961216
+        },
+        {
+          "value": 270352.9593046326,
+          "detail": {
+            "MB_per_s": 276.84143032794384
+          },
+          "ops": 150000,
+          "seconds": 0.5548302500028512
+        }
+      ]
+    },
+    {
+      "scenario": "pubsub_1k",
+      "group": "core",
+      "client": "nats-py",
+      "status": "ok",
+      "unit": "msgs/s",
+      "higher_is_better": true,
+      "summary": {
+        "median": 294251.91189960984,
+        "min": 291117.94265782944,
+        "max": 298422.98374591826
+      },
+      "skip_reason": null,
+      "error": null,
+      "repeats": [
+        {
+          "value": 298422.98374591826,
+          "detail": {
+            "MB_per_s": 305.5851353558203
+          },
+          "ops": 150000,
+          "seconds": 0.5026422499940963
+        },
+        {
+          "value": 295406.818053946,
+          "detail": {
+            "MB_per_s": 302.49658168724073
+          },
+          "ops": 150000,
+          "seconds": 0.5077743329966324
+        },
+        {
+          "value": 294251.91189960984,
+          "detail": {
+            "MB_per_s": 301.31395778520044
+          },
+          "ops": 150000,
+          "seconds": 0.5097672909978428
+        },
+        {
+          "value": 291117.94265782944,
+          "detail": {
+            "MB_per_s": 298.1047732816173
+          },
+          "ops": 150000,
+          "seconds": 0.5152550840066397
+        },
+        {
+          "value": 293035.45104632864,
+          "detail": {
+            "MB_per_s": 300.06830187144055
+          },
+          "ops": 150000,
+          "seconds": 0.5118834580061957
+        }
+      ]
+    },
+    {
+      "scenario": "pubsub_1k",
+      "group": "core",
+      "client": "nats-core",
+      "status": "ok",
+      "unit": "msgs/s",
+      "higher_is_better": true,
+      "summary": {
+        "median": 289635.1176806791,
+        "min": 245455.30944553355,
+        "max": 294520.1579419746
+      },
+      "skip_reason": null,
+      "error": null,
+      "repeats": [
+        {
+          "value": 273430.1333353774,
+          "detail": {
+            "MB_per_s": 279.9924565354264
+          },
+          "ops": 150000,
+          "seconds": 0.5485862080022343
+        },
+        {
+          "value": 289635.1176806791,
+          "detail": {
+            "MB_per_s": 296.58636050501536
+          },
+          "ops": 150000,
+          "seconds": 0.5178929999965476
+        },
+        {
+          "value": 294520.1579419746,
+          "detail": {
+            "MB_per_s": 301.58864173258195
+          },
+          "ops": 150000,
+          "seconds": 0.5093029999989085
+        },
+        {
+          "value": 245455.30944553355,
+          "detail": {
+            "MB_per_s": 251.34623687222634
+          },
+          "ops": 150000,
+          "seconds": 0.6111092089995509
+        },
+        {
+          "value": 293264.04283312144,
+          "detail": {
+            "MB_per_s": 300.3023798611163
+          },
+          "ops": 150000,
+          "seconds": 0.5114844580020872
+        }
+      ]
+    },
+    {
+      "scenario": "roundtrip_latency",
+      "group": "core",
+      "client": "natsio",
+      "status": "ok",
+      "unit": "ms",
+      "higher_is_better": false,
+      "summary": {
+        "median": 0.1676660031080246,
+        "min": 0.16708300245227292,
+        "max": 0.16845799837028608
+      },
+      "skip_reason": null,
+      "error": null,
+      "repeats": [
+        {
+          "value": 0.1676660031080246,
+          "detail": {
+            "p50": 0.1676660031080246,
+            "p90": 0.17583299631951377,
+            "p99": 0.19104200328001752,
+            "max": 0.3062920004595071
+          },
+          "ops": 2000,
+          "seconds": 0.3377258160835481
+        },
+        {
+          "value": 0.16708300245227292,
+          "detail": {
+            "p50": 0.16708300245227292,
+            "p90": 0.17491600010544062,
+            "p99": 0.19291700300527737,
+            "max": 0.23312499979510903
+          },
+          "ops": 2000,
+          "seconds": 0.33640325096348533
+        },
+        {
+          "value": 0.16845799837028608,
+          "detail": {
+            "p50": 0.16845799837028608,
+            "p90": 0.17970799672184512,
+            "p99": 0.1992920006159693,
+            "max": 0.24687500263098627
+          },
+          "ops": 2000,
+          "seconds": 0.3403069681371562
+        },
+        {
+          "value": 0.167500002135057,
+          "detail": {
+            "p50": 0.167500002135057,
+            "p90": 0.1741660016705282,
+            "p99": 0.18816600641002879,
+            "max": 0.23837500339141116
+          },
+          "ops": 2000,
+          "seconds": 0.3366165531115257
+        },
+        {
+          "value": 0.16783300088718534,
+          "detail": {
+            "p50": 0.16783300088718534,
+            "p90": 0.1777500001480803,
+            "p99": 0.19512500148266554,
+            "max": 0.23349999537458643
+          },
+          "ops": 2000,
+          "seconds": 0.3386709880869603
+        }
+      ]
+    },
+    {
+      "scenario": "roundtrip_latency",
+      "group": "core",
+      "client": "nats-py",
+      "status": "ok",
+      "unit": "ms",
+      "higher_is_better": false,
+      "summary": {
+        "median": 0.1800419995561242,
+        "min": 0.17845800175564364,
+        "max": 0.18545800412539393
+      },
+      "skip_reason": null,
+      "error": null,
+      "repeats": [
+        {
+          "value": 0.17845800175564364,
+          "detail": {
+            "p50": 0.17845800175564364,
+            "p90": 0.18554199778009206,
+            "p99": 0.20275000133551657,
+            "max": 0.3541669939295389
+          },
+          "ops": 2000,
+          "seconds": 0.35921652516844915
+        },
+        {
+          "value": 0.17987500177696347,
+          "detail": {
+            "p50": 0.17987500177696347,
+            "p90": 0.19004200294148177,
+            "p99": 0.20591700013028458,
+            "max": 0.24920800206018612
+          },
+          "ops": 2000,
+          "seconds": 0.36299071910616476
+        },
+        {
+          "value": 0.18545800412539393,
+          "detail": {
+            "p50": 0.18545800412539393,
+            "p90": 0.20862500241491944,
+            "p99": 0.3873750029015355,
+            "max": 0.4929999995511025
+          },
+          "ops": 2000,
+          "seconds": 0.38572038786514895
+        },
+        {
+          "value": 0.1827079977374524,
+          "detail": {
+            "p50": 0.1827079977374524,
+            "p90": 0.20908399892505258,
+            "p99": 0.301792002574075,
+            "max": 0.4804579948540777
+          },
+          "ops": 2000,
+          "seconds": 0.37775325186521513
+        },
+        {
+          "value": 0.1800419995561242,
+          "detail": {
+            "p50": 0.1800419995561242,
+            "p90": 0.19141699885949492,
+            "p99": 0.21225000091362745,
+            "max": 0.32787500094855204
+          },
+          "ops": 2000,
+          "seconds": 0.3636768870492233
+        }
+      ]
+    },
+    {
+      "scenario": "roundtrip_latency",
+      "group": "core",
+      "client": "nats-core",
+      "status": "ok",
+      "unit": "ms",
+      "higher_is_better": false,
+      "summary": {
+        "median": 5.93500000104541,
+        "min": 5.921000003581867,
+        "max": 5.984832998365164
+      },
+      "skip_reason": null,
+      "error": null,
+      "repeats": [
+        {
+          "value": 5.925124998611864,
+          "detail": {
+            "p50": 5.925124998611864,
+            "p90": 6.05133299541194,
+            "p99": 6.218166003236547,
+            "max": 6.53125000098953
+          },
+          "ops": 2000,
+          "seconds": 11.800733072275762
+        },
+        {
+          "value": 5.921000003581867,
+          "detail": {
+            "p50": 5.921000003581867,
+            "p90": 6.056582999008242,
+            "p99": 6.234750006115064,
+            "max": 6.5698749967850745
+          },
+          "ops": 2000,
+          "seconds": 11.804687210264092
+        },
+        {
+          "value": 5.93500000104541,
+          "detail": {
+            "p50": 5.93500000104541,
+            "p90": 6.062417000066489,
+            "p99": 6.20116700156359,
+            "max": 6.586708004761022
+          },
+          "ops": 2000,
+          "seconds": 11.819590728831827
+        },
+        {
+          "value": 5.984832998365164,
+          "detail": {
+            "p50": 5.984832998365164,
+            "p90": 6.131082998763304,
+            "p99": 6.2688749967492186,
+            "max": 7.654250002815388
+          },
+          "ops": 2000,
+          "seconds": 11.90672828197421
+        },
+        {
+          "value": 5.972124999971129,
+          "detail": {
+            "p50": 5.972124999971129,
+            "p90": 6.068666996725369,
+            "p99": 6.189500003529247,
+            "max": 6.407499997294508
+          },
+          "ops": 2000,
+          "seconds": 11.860834021943447
+        }
+      ]
+    },
+    {
+      "scenario": "reqrep_throughput",
+      "group": "core",
+      "client": "natsio",
+      "status": "ok",
+      "unit": "req/s",
+      "higher_is_better": true,
+      "summary": {
+        "median": 63766.71584707693,
+        "min": 63393.92031171419,
+        "max": 64059.424460427115
+      },
+      "skip_reason": null,
+      "error": null,
+      "repeats": [
+        {
+          "value": 63780.26145433113,
+          "detail": {
+            "workers": 32.0
+          },
+          "ops": 30000,
+          "seconds": 0.4703649579969351
+        },
+        {
+          "value": 64059.424460427115,
+          "detail": {
+            "workers": 32.0
+          },
+          "ops": 30000,
+          "seconds": 0.46831516599922907
+        },
+        {
+          "value": 63766.71584707693,
+          "detail": {
+            "workers": 32.0
+          },
+          "ops": 30000,
+          "seconds": 0.4704648749975604
+        },
+        {
+          "value": 63393.92031171419,
+          "detail": {
+            "workers": 32.0
+          },
+          "ops": 30000,
+          "seconds": 0.4732315000001108
+        },
+        {
+          "value": 63423.49443933384,
+          "detail": {
+            "workers": 32.0
+          },
+          "ops": 30000,
+          "seconds": 0.4730108340008883
+        }
+      ]
+    },
+    {
+      "scenario": "reqrep_throughput",
+      "group": "core",
+      "client": "nats-py",
+      "status": "ok",
+      "unit": "req/s",
+      "higher_is_better": true,
+      "summary": {
+        "median": 57159.1929138398,
+        "min": 51747.29413133624,
+        "max": 58356.45850644218
+      },
+      "skip_reason": null,
+      "error": null,
+      "repeats": [
+        {
+          "value": 51747.29413133624,
+          "detail": {
+            "workers": 32.0
+          },
+          "ops": 30000,
+          "seconds": 0.5797404580007424
+        },
+        {
+          "value": 57159.1929138398,
+          "detail": {
+            "workers": 32.0
+          },
+          "ops": 30000,
+          "seconds": 0.5248499579975032
+        },
+        {
+          "value": 56620.31451514016,
+          "detail": {
+            "workers": 32.0
+          },
+          "ops": 30000,
+          "seconds": 0.5298451670023496
+        },
+        {
+          "value": 58356.45850644218,
+          "detail": {
+            "workers": 32.0
+          },
+          "ops": 30000,
+          "seconds": 0.5140819160005776
+        },
+        {
+          "value": 57867.8262623506,
+          "detail": {
+            "workers": 32.0
+          },
+          "ops": 30000,
+          "seconds": 0.5184227909994661
+        }
+      ]
+    },
+    {
+      "scenario": "reqrep_throughput",
+      "group": "core",
+      "client": "nats-core",
+      "status": "ok",
+      "unit": "req/s",
+      "higher_is_better": true,
+      "summary": {
+        "median": 4882.140450798993,
+        "min": 4831.222159701714,
+        "max": 5245.811018329255
+      },
+      "skip_reason": null,
+      "error": null,
+      "repeats": [
+        {
+          "value": 5245.811018329255,
+          "detail": {
+            "workers": 32.0
+          },
+          "ops": 30000,
+          "seconds": 5.718848791002529
+        },
+        {
+          "value": 5066.293399057233,
+          "detail": {
+            "workers": 32.0
+          },
+          "ops": 30000,
+          "seconds": 5.921488874999341
+        },
+        {
+          "value": 4833.191135103414,
+          "detail": {
+            "workers": 32.0
+          },
+          "ops": 30000,
+          "seconds": 6.207079166000767
+        },
+        {
+          "value": 4882.140450798993,
+          "detail": {
+            "workers": 32.0
+          },
+          "ops": 30000,
+          "seconds": 6.144845750000968
+        },
+        {
+          "value": 4831.222159701714,
+          "detail": {
+            "workers": 32.0
+          },
+          "ops": 30000,
+          "seconds": 6.209608875004051
+        }
+      ]
+    },
+    {
+      "scenario": "js_publish_sync",
+      "group": "jetstream",
+      "client": "natsio",
+      "status": "ok",
+      "unit": "msgs/s",
+      "higher_is_better": true,
+      "summary": {
+        "median": 13619.621500300267,
+        "min": 13171.047761138963,
+        "max": 13746.31459615888
+      },
+      "skip_reason": null,
+      "error": null,
+      "repeats": [
+        {
+          "value": 13548.238472143135,
+          "detail": {},
+          "ops": 2000,
+          "seconds": 0.1476206670049578
+        },
+        {
+          "value": 13171.047761138963,
+          "detail": {},
+          "ops": 2000,
+          "seconds": 0.15184820799913723
+        },
+        {
+          "value": 13656.569213590168,
+          "detail": {},
+          "ops": 2000,
+          "seconds": 0.14644966599735199
+        },
+        {
+          "value": 13619.621500300267,
+          "detail": {},
+          "ops": 2000,
+          "seconds": 0.1468469589963206
+        },
+        {
+          "value": 13746.31459615888,
+          "detail": {},
+          "ops": 2000,
+          "seconds": 0.14549354199698428
+        }
+      ]
+    },
+    {
+      "scenario": "js_publish_sync",
+      "group": "jetstream",
+      "client": "nats-py",
+      "status": "ok",
+      "unit": "msgs/s",
+      "higher_is_better": true,
+      "summary": {
+        "median": 9225.395437984263,
+        "min": 9088.273822151637,
+        "max": 9311.082676487871
+      },
+      "skip_reason": null,
+      "error": null,
+      "repeats": [
+        {
+          "value": 9180.435740661047,
+          "detail": {},
+          "ops": 2000,
+          "seconds": 0.21785458299564198
+        },
+        {
+          "value": 9088.273822151637,
+          "detail": {},
+          "ops": 2000,
+          "seconds": 0.2200637919959263
+        },
+        {
+          "value": 9225.395437984263,
+          "detail": {},
+          "ops": 2000,
+          "seconds": 0.21679287499864586
+        },
+        {
+          "value": 9285.101372734267,
+          "detail": {},
+          "ops": 2000,
+          "seconds": 0.2153988330028369
+        },
+        {
+          "value": 9311.082676487871,
+          "detail": {},
+          "ops": 2000,
+          "seconds": 0.21479779199580662
+        }
+      ]
+    },
+    {
+      "scenario": "js_publish_sync",
+      "group": "jetstream",
+      "client": "nats-core",
+      "status": "skip",
+      "unit": "",
+      "higher_is_better": true,
+      "summary": {},
+      "skip_reason": "no jetstream capability",
+      "error": null,
+      "repeats": []
+    },
+    {
+      "scenario": "js_publish_async",
+      "group": "jetstream",
+      "client": "natsio",
+      "status": "ok",
+      "unit": "msgs/s",
+      "higher_is_better": true,
+      "summary": {
+        "median": 140869.68968252448,
+        "min": 138011.90641253063,
+        "max": 147327.40702436556
+      },
+      "skip_reason": null,
+      "error": null,
+      "repeats": [
+        {
+          "value": 140869.68968252448,
+          "detail": {},
+          "ops": 50000,
+          "seconds": 0.35493795799993677
+        },
+        {
+          "value": 147327.40702436556,
+          "detail": {},
+          "ops": 50000,
+          "seconds": 0.33938016700267326
+        },
+        {
+          "value": 138524.9081497913,
+          "detail": {},
+          "ops": 50000,
+          "seconds": 0.36094591700384626
+        },
+        {
+          "value": 145371.46317684063,
+          "detail": {},
+          "ops": 50000,
+          "seconds": 0.3439464590046555
+        },
+        {
+          "value": 138011.90641253063,
+          "detail": {},
+          "ops": 50000,
+          "seconds": 0.3622875830042176
+        }
+      ]
+    },
+    {
+      "scenario": "js_publish_async",
+      "group": "jetstream",
+      "client": "nats-py",
+      "status": "ok",
+      "unit": "msgs/s",
+      "higher_is_better": true,
+      "summary": {
+        "median": 115448.26725401683,
+        "min": 107532.00764511853,
+        "max": 116255.2214949641
+      },
+      "skip_reason": null,
+      "error": null,
+      "repeats": [
+        {
+          "value": 107532.00764511853,
+          "detail": {},
+          "ops": 50000,
+          "seconds": 0.46497783399536274
+        },
+        {
+          "value": 112208.97192208527,
+          "detail": {},
+          "ops": 50000,
+          "seconds": 0.44559716699586716
+        },
+        {
+          "value": 115581.49298685286,
+          "detail": {},
+          "ops": 50000,
+          "seconds": 0.4325952080034767
+        },
+        {
+          "value": 116255.2214949641,
+          "detail": {},
+          "ops": 50000,
+          "seconds": 0.4300882090028608
+        },
+        {
+          "value": 115448.26725401683,
+          "detail": {},
+          "ops": 50000,
+          "seconds": 0.43309441699966555
+        }
+      ]
+    },
+    {
+      "scenario": "js_publish_async",
+      "group": "jetstream",
+      "client": "nats-core",
+      "status": "skip",
+      "unit": "",
+      "higher_is_better": true,
+      "summary": {},
+      "skip_reason": "no jetstream capability",
+      "error": null,
+      "repeats": []
+    },
+    {
+      "scenario": "js_consume",
+      "group": "jetstream",
+      "client": "natsio",
+      "status": "ok",
+      "unit": "msgs/s",
+      "higher_is_better": true,
+      "summary": {
+        "median": 210813.65169265465,
+        "min": 206354.23117219517,
+        "max": 211220.37883856348
+      },
+      "skip_reason": null,
+      "error": null,
+      "repeats": [
+        {
+          "value": 206354.23117219517,
+          "detail": {},
+          "ops": 50000,
+          "seconds": 0.24230179200094426
+        },
+        {
+          "value": 210813.65169265465,
+          "detail": {},
+          "ops": 50000,
+          "seconds": 0.23717629099701298
+        },
+        {
+          "value": 211220.37883856348,
+          "detail": {},
+          "ops": 50000,
+          "seconds": 0.23671958300110418
+        },
+        {
+          "value": 208737.5091672345,
+          "detail": {},
+          "ops": 50000,
+          "seconds": 0.2395352909952635
+        },
+        {
+          "value": 211014.6107080253,
+          "detail": {},
+          "ops": 50000,
+          "seconds": 0.23695041699829744
+        }
+      ]
+    },
+    {
+      "scenario": "js_consume",
+      "group": "jetstream",
+      "client": "nats-py",
+      "status": "ok",
+      "unit": "msgs/s",
+      "higher_is_better": true,
+      "summary": {
+        "median": 28452.640828294316,
+        "min": 27736.024136515218,
+        "max": 28506.441361940706
+      },
+      "skip_reason": null,
+      "error": null,
+      "repeats": [
+        {
+          "value": 28506.441361940706,
+          "detail": {},
+          "ops": 50000,
+          "seconds": 1.7539895410009194
+        },
+        {
+          "value": 28452.640828294316,
+          "detail": {},
+          "ops": 50000,
+          "seconds": 1.7573061250004685
+        },
+        {
+          "value": 27736.024136515218,
+          "detail": {},
+          "ops": 50000,
+          "seconds": 1.8027097090016468
+        },
+        {
+          "value": 28420.275336998107,
+          "detail": {},
+          "ops": 50000,
+          "seconds": 1.759307375003118
+        },
+        {
+          "value": 28489.141755250384,
+          "detail": {},
+          "ops": 50000,
+          "seconds": 1.7550546250058687
+        }
+      ]
+    },
+    {
+      "scenario": "js_consume",
+      "group": "jetstream",
+      "client": "nats-core",
+      "status": "skip",
+      "unit": "",
+      "higher_is_better": true,
+      "summary": {},
+      "skip_reason": "no jetstream capability",
+      "error": null,
+      "repeats": []
+    },
+    {
+      "scenario": "kv_put",
+      "group": "jetstream",
+      "client": "natsio",
+      "status": "ok",
+      "unit": "ops/s",
+      "higher_is_better": true,
+      "summary": {
+        "median": 13274.557292783937,
+        "min": 11851.477281918147,
+        "max": 13393.288388882429
+      },
+      "skip_reason": null,
+      "error": null,
+      "repeats": [
+        {
+          "value": 11851.477281918147,
+          "detail": {},
+          "ops": 10000,
+          "seconds": 0.8437766670031124
+        },
+        {
+          "value": 13393.288388882429,
+          "detail": {},
+          "ops": 10000,
+          "seconds": 0.7466426249957294
+        },
+        {
+          "value": 13337.404211424548,
+          "detail": {},
+          "ops": 10000,
+          "seconds": 0.7497710829993594
+        },
+        {
+          "value": 13274.557292783937,
+          "detail": {},
+          "ops": 10000,
+          "seconds": 0.7533207910018973
+        },
+        {
+          "value": 13241.667150946707,
+          "detail": {},
+          "ops": 10000,
+          "seconds": 0.7551919170000474
+        }
+      ]
+    },
+    {
+      "scenario": "kv_put",
+      "group": "jetstream",
+      "client": "nats-py",
+      "status": "ok",
+      "unit": "ops/s",
+      "higher_is_better": true,
+      "summary": {
+        "median": 9123.617258792918,
+        "min": 8588.32057109431,
+        "max": 9165.134179867575
+      },
+      "skip_reason": null,
+      "error": null,
+      "repeats": [
+        {
+          "value": 9115.389787766415,
+          "detail": {},
+          "ops": 10000,
+          "seconds": 1.0970457910007099
+        },
+        {
+          "value": 8588.32057109431,
+          "detail": {},
+          "ops": 10000,
+          "seconds": 1.1643719999992754
+        },
+        {
+          "value": 9123.617258792918,
+          "detail": {},
+          "ops": 10000,
+          "seconds": 1.0960564999986673
+        },
+        {
+          "value": 9135.560529900322,
+          "detail": {},
+          "ops": 10000,
+          "seconds": 1.0946235830051592
+        },
+        {
+          "value": 9165.134179867575,
+          "detail": {},
+          "ops": 10000,
+          "seconds": 1.0910914999985835
+        }
+      ]
+    },
+    {
+      "scenario": "kv_put",
+      "group": "jetstream",
+      "client": "nats-core",
+      "status": "skip",
+      "unit": "",
+      "higher_is_better": true,
+      "summary": {},
+      "skip_reason": "no kv capability",
+      "error": null,
+      "repeats": []
+    },
+    {
+      "scenario": "kv_get",
+      "group": "jetstream",
+      "client": "natsio",
+      "status": "ok",
+      "unit": "ops/s",
+      "higher_is_better": true,
+      "summary": {
+        "median": 11708.251448750261,
+        "min": 10880.338123959642,
+        "max": 11736.690870704428
+      },
+      "skip_reason": null,
+      "error": null,
+      "repeats": [
+        {
+          "value": 11708.251448750261,
+          "detail": {},
+          "ops": 10000,
+          "seconds": 0.8540984999999637
+        },
+        {
+          "value": 10880.338123959642,
+          "detail": {},
+          "ops": 10000,
+          "seconds": 0.9190890840036445
+        },
+        {
+          "value": 11646.73755750886,
+          "detail": {},
+          "ops": 10000,
+          "seconds": 0.8586095419959747
+        },
+        {
+          "value": 11736.61453026759,
+          "detail": {},
+          "ops": 10000,
+          "seconds": 0.8520344579956145
+        },
+        {
+          "value": 11736.690870704428,
+          "detail": {},
+          "ops": 10000,
+          "seconds": 0.8520289160005632
+        }
+      ]
+    },
+    {
+      "scenario": "kv_get",
+      "group": "jetstream",
+      "client": "nats-py",
+      "status": "ok",
+      "unit": "ops/s",
+      "higher_is_better": true,
+      "summary": {
+        "median": 8769.631957925516,
+        "min": 8167.451815258255,
+        "max": 8782.444999706046
+      },
+      "skip_reason": null,
+      "error": null,
+      "repeats": [
+        {
+          "value": 8754.399906684688,
+          "detail": {},
+          "ops": 10000,
+          "seconds": 1.14228274999914
+        },
+        {
+          "value": 8769.631957925516,
+          "detail": {},
+          "ops": 10000,
+          "seconds": 1.140298708996852
+        },
+        {
+          "value": 8167.451815258255,
+          "detail": {},
+          "ops": 10000,
+          "seconds": 1.2243720839978778
+        },
+        {
+          "value": 8770.727380893552,
+          "detail": {},
+          "ops": 10000,
+          "seconds": 1.1401562910032226
+        },
+        {
+          "value": 8782.444999706046,
+          "detail": {},
+          "ops": 10000,
+          "seconds": 1.1386350840039086
+        }
+      ]
+    },
+    {
+      "scenario": "kv_get",
+      "group": "jetstream",
+      "client": "nats-core",
+      "status": "skip",
+      "unit": "",
+      "higher_is_better": true,
+      "summary": {},
+      "skip_reason": "no kv capability",
+      "error": null,
+      "repeats": []
+    },
+    {
+      "scenario": "os_roundtrip",
+      "group": "jetstream",
+      "client": "natsio",
+      "status": "ok",
+      "unit": "MB/s",
+      "higher_is_better": true,
+      "summary": {
+        "median": 965.6009451493662,
+        "min": 900.3178226091662,
+        "max": 1006.583899222271
+      },
+      "skip_reason": null,
+      "error": null,
+      "repeats": [
+        {
+          "value": 900.3178226091662,
+          "detail": {
+            "put_MB_per_s": 626.1303985773565,
+            "get_MB_per_s": 1601.7264099233262
+          },
+          "ops": 1,
+          "seconds": 0.03726954099693103
+        },
+        {
+          "value": 1006.583899222271,
+          "detail": {
+            "put_MB_per_s": 740.4053929288325,
+            "get_MB_per_s": 1571.5687330746082
+          },
+          "ops": 1,
+          "seconds": 0.033334957995975856
+        },
+        {
+          "value": 973.3681049215684,
+          "detail": {
+            "put_MB_per_s": 715.7311692906444,
+            "get_MB_per_s": 1520.8003958487504
+          },
+          "ops": 1,
+          "seconds": 0.03447250000317581
+        },
+        {
+          "value": 965.6009451493662,
+          "detail": {
+            "put_MB_per_s": 678.6853826941019,
+            "get_MB_per_s": 1672.7660302903491
+          },
+          "ops": 1,
+          "seconds": 0.03474979200109374
+        },
+        {
+          "value": 928.8274185244386,
+          "detail": {
+            "put_MB_per_s": 644.9922534691151,
+            "get_MB_per_s": 1658.7975398438869
+          },
+          "ops": 1,
+          "seconds": 0.03612558299937518
+        }
+      ]
+    },
+    {
+      "scenario": "os_roundtrip",
+      "group": "jetstream",
+      "client": "nats-py",
+      "status": "ok",
+      "unit": "MB/s",
+      "higher_is_better": true,
+      "summary": {
+        "median": 39.953915584271925,
+        "min": 39.74777260552733,
+        "max": 40.99166405894561
+      },
+      "skip_reason": null,
+      "error": null,
+      "repeats": [
+        {
+          "value": 39.74777260552733,
+          "detail": {
+            "put_MB_per_s": 408.10216736105036,
+            "get_MB_per_s": 20.891255144875085
+          },
+          "ops": 1,
+          "seconds": 0.844183958004578
+        },
+        {
+          "value": 39.953915584271925,
+          "detail": {
+            "put_MB_per_s": 468.817931222477,
+            "get_MB_per_s": 20.86608972583345
+          },
+          "ops": 1,
+          "seconds": 0.8398283749993425
+        },
+        {
+          "value": 40.20041280733511,
+          "detail": {
+            "put_MB_per_s": 406.542987294088,
+            "get_MB_per_s": 21.145686659603818
+          },
+          "ops": 1,
+          "seconds": 0.834678792001796
+        },
+        {
+          "value": 39.785495363622694,
+          "detail": {
+            "put_MB_per_s": 458.20609043446154,
+            "get_MB_per_s": 20.79557534351802
+          },
+          "ops": 1,
+          "seconds": 0.8433835420000833
+        },
+        {
+          "value": 40.99166405894561,
+          "detail": {
+            "put_MB_per_s": 420.5105865240618,
+            "get_MB_per_s": 21.545991119507182
+          },
+          "ops": 1,
+          "seconds": 0.8185672079998767
+        }
+      ]
+    },
+    {
+      "scenario": "os_roundtrip",
+      "group": "jetstream",
+      "client": "nats-core",
+      "status": "skip",
+      "unit": "",
+      "higher_is_better": true,
+      "summary": {},
+      "skip_reason": "no object_store capability",
+      "error": null,
+      "repeats": []
+    }
+  ]
+}

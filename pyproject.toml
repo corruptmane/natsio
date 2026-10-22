@@ -113,4 +113,4 @@ extra-paths = ["natsio/tests"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
-testpaths = ["natsio/tests", "extensions"]
+testpaths = ["natsio/tests", "extensions", "tools/tests"]

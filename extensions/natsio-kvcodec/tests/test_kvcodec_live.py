@@ -10,9 +10,12 @@ import asyncio
 import pytest
 from natsio.kvcodec import (  # ty: ignore[unresolved-import]
     Base64KeyCodec,
+    Base64ValueCodec,
     ChainValueCodec,
+    KeyDecodeError,
     NoOpKeyCodec,
     PathKeyCodec,
+    ValueDecodeError,
     ZlibValueCodec,
 )
 
@@ -74,6 +77,15 @@ class TestPathKeyCodecLive:
 
 
 class TestBase64KeyCodecLive:
+    async def test_corrupt_stored_key_is_not_silently_rewritten(self, nc: natsio.Client) -> None:
+        js = nc.jetstream()
+        raw = await js.create_key_value(KeyValueConfig(bucket="B64CORRUPTKEY"))
+        await raw.put("YQ===", b"value")
+        decoded = await js.key_value("B64CORRUPTKEY", key_codec=Base64KeyCodec())
+        async with asyncio.timeout(5), decoded.watch() as watcher:
+            with pytest.raises(KeyDecodeError):
+                await anext(aiter(watcher))
+
     async def test_roundtrip_valid_keys(self, nc: natsio.Client) -> None:
         # NOTE: raw keys must themselves be NATS-valid because the core
         # pre-validates before the codec runs (see Core Friction). So we use
@@ -103,6 +115,15 @@ class TestBase64KeyCodecLive:
 
 
 class TestValueCodecLive:
+    async def test_corrupt_stored_value_is_not_silently_rewritten(self, nc: natsio.Client) -> None:
+        js = nc.jetstream()
+        raw = await js.create_key_value(KeyValueConfig(bucket="B64CORRUPTVALUE"))
+        await raw.put("key", b"YWJj!!!!")
+        decoded = await js.key_value("B64CORRUPTVALUE", value_codec=Base64ValueCodec())
+        async with asyncio.timeout(5):
+            with pytest.raises(ValueDecodeError):
+                await decoded.get("key")
+
     async def test_zlib_value_roundtrip(self, nc: natsio.Client) -> None:
         js = nc.jetstream()
         kv = await js.create_key_value(KeyValueConfig(bucket="ZKV"), value_codec=ZlibValueCodec())

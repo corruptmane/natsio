@@ -78,7 +78,7 @@ class Authenticator(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class UserPasswordAuth:
-    user: StrSource
+    user: StrSource = field(repr=False)
     password: StrSource = field(repr=False)
 
     async def authenticate(self, nonce: bytes | None) -> AuthResult:
@@ -164,8 +164,8 @@ class CredsFileAuth:
 class CallbackAuth:
     """Dynamic JWT + external signer (KMS/HSM-style and auth-callout-ready flows)."""
 
-    jwt_callback: Callable[[], str | Awaitable[str]]
-    signature_callback: Callable[[bytes], bytes | Awaitable[bytes]]
+    jwt_callback: Callable[[], str | Awaitable[str]] = field(repr=False)
+    signature_callback: Callable[[bytes], bytes | Awaitable[bytes]] = field(repr=False)
 
     async def authenticate(self, nonce: bytes | None) -> AuthResult:
         if nonce is None:

@@ -293,11 +293,15 @@ terminal ack raises
 
 | Call | Meaning |
 |---|---|
-| `await msg.ack()` | Done — never redeliver. |
+| `await msg.ack()` | Tell the server processing succeeded and redelivery is no longer needed. |
 | `await msg.ack_sync()` | Ack and wait for the server to confirm it was recorded. |
 | `await msg.nak(delay=5)` | Failed — redeliver (optionally after `delay` seconds or a `timedelta`). |
-| `await msg.term("reason")` | Poisoned — never redeliver, stop trying. |
+| `await msg.term("reason")` | Tell the server to stop trying to deliver this message. |
 | `await msg.in_progress()` | Still working; reset the ack-wait timer (may be sent any number of times). |
+
+`ack_sync()` confirms server processing; it does not force a disk sync. A single
+server can replay acknowledged messages after an abrupt process failure if
+consumer state has not reached disk. Handlers should tolerate that replay.
 
 ### Heartbeats and liveness
 

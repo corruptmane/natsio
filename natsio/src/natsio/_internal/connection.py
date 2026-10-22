@@ -20,6 +20,7 @@ import random
 import re
 from collections import deque
 from collections.abc import Callable
+from contextlib import suppress
 from typing import Any
 
 from natsio.errors import (
@@ -40,6 +41,7 @@ from natsio.instrumentation import Instrumentation, NoopInstrumentation
 from natsio.options import ConnectOptions, TLSConfig
 
 from .auth import Authenticator, AuthResult, TokenAuth, UserPasswordAuth
+from .diagnostics import sanitize_url
 from .dispatcher import Dispatcher, MessageHandler, SubscriptionEntry
 from .lifecycle import (
     Closed,
@@ -88,6 +90,33 @@ _DEFAULT_RECONNECT_BUF_SIZE = 8 * 1024 * 1024
 # permissionsQueueRe). The publish variant carries no "Subscription to" token.
 _PERM_SUBJECT_RE = re.compile(r'Subscription to "(\S+)"')
 _PERM_QUEUE_RE = re.compile(r'using queue "(\S+)"')
+
+
+def _decode_info(raw: bytes) -> dict[str, Any]:
+    """Validate the INFO fields consumed by the connection, without echoing input."""
+    try:
+        info = json.loads(raw)
+    except (ValueError, RecursionError):
+        raise ParserError("malformed INFO JSON") from None
+    if not isinstance(info, dict):
+        raise ParserError("INFO must be a JSON object")
+    if "max_payload" in info and (type(info["max_payload"]) is not int or info["max_payload"] <= 0):
+        raise ParserError("INFO max_payload must be a positive integer")
+    for field in ("tls_required", "ldm"):
+        if field in info and type(info[field]) is not bool:
+            raise ParserError(f"INFO {field} must be a boolean")
+    if "connect_urls" in info and (
+        not isinstance(info["connect_urls"], list) or any(not isinstance(url, str) for url in info["connect_urls"])
+    ):
+        raise ParserError("INFO connect_urls must be an array of strings")
+    if "nonce" in info:
+        if not isinstance(info["nonce"], str):
+            raise ParserError("INFO nonce must be a string")
+        try:
+            info["nonce"].encode()
+        except UnicodeError:
+            raise ParserError("INFO nonce must be valid UTF-8") from None
+    return info
 
 
 # Every hook on the Instrumentation protocol, pre-bound once per _SafeInstrumentation.
@@ -173,6 +202,7 @@ class _Session:
         "_drain_waiters",
         "_flush_event",
         "handshake_pong",
+        "handshake_started",
         "info_future",
         "lost_future",
         "outstanding_pings",
@@ -183,6 +213,7 @@ class _Session:
         "running",
         "server",
         "server_info",
+        "tls_required",
         "transport",
     )
 
@@ -199,6 +230,8 @@ class _Session:
         self.ping_waiters: deque[asyncio.Future[None] | None] = deque()
         self.outstanding_pings = 0
         self.running = False  # False during handshake
+        self.handshake_started = False
+        self.tls_required = server.tls_required or conn.options.tls is not None
         self.server_info: dict[str, Any] = {}
         loop = asyncio.get_running_loop()
         self.info_future: asyncio.Future[bytes] = loop.create_future()
@@ -239,7 +272,8 @@ class _Session:
             case PongEvent():
                 self.outstanding_pings = 0
                 if not self.handshake_pong.done():
-                    self.handshake_pong.set_result(None)
+                    if self.handshake_started:
+                        self.handshake_pong.set_result(None)
                     return
                 if self.ping_waiters:
                     waiter = self.ping_waiters.popleft()
@@ -301,21 +335,31 @@ class _Session:
     async def send(self, frame: bytes) -> None:
         """User-path append with high-water-mark backpressure."""
         max_pending = self._conn.options.max_pending_size
+        if len(frame) > max_pending:
+            raise ConfigError(f"encoded frame of {len(frame)} bytes exceeds max_pending_size={max_pending}")
         # Loop rather than test-once: _wake_drain_waiters releases every waiter
         # at once, and if each appended unconditionally the buffer would
         # overshoot the limit by roughly the number of blocked publishers.
-        while self.pending_size + len(frame) > max_pending:
-            if self.lost_future.done():
-                # The flusher is gone; nobody would ever resolve a new waiter.
-                raise ConnectionClosedError("connection lost while waiting for the write buffer")
-            waiter: asyncio.Future[None] = asyncio.get_running_loop().create_future()
-            self._drain_waiters.append(waiter)
-            self._flush_event.set()
+        if self.pending_size + len(frame) > max_pending:
             try:
                 async with asyncio.timeout(self._conn.options.flush_timeout):
-                    await waiter
+                    while self.pending_size + len(frame) > max_pending:
+                        if self.lost_future.done():
+                            raise ConnectionClosedError("connection lost while waiting for the write buffer")
+                        waiter: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+                        self._drain_waiters.append(waiter)
+                        self._flush_event.set()
+                        try:
+                            await waiter
+                        finally:
+                            # Timeout/cancellation must not leave stale waiters
+                            # accumulating behind a permanently blocked socket.
+                            with suppress(ValueError):
+                                self._drain_waiters.remove(waiter)
             except builtins.TimeoutError:
                 raise TimeoutError("write buffer full: flusher could not drain in time") from None
+            if self.lost_future.done():
+                raise ConnectionClosedError("connection lost while waiting for the write buffer")
         self.enqueue(frame)
 
     def send_ping(self, waiter: asyncio.Future[None] | None) -> None:
@@ -685,14 +729,14 @@ class Connection:
                     # Anything registered or published while still (re)connecting.
                     self._replay_subscriptions(session)
                     self._flush_reconnect_buffer(session)
-                    self.instrumentation.on_connect(session.server.url)
-                    self._emit(Connected(session.server.url))
+                    self.instrumentation.on_connect(sanitize_url(session.server.url))
+                    self._emit(Connected(sanitize_url(session.server.url)))
                 else:
                     self._reconnect_count += 1
                     self._replay_subscriptions(session)
                     self._flush_reconnect_buffer(session)
-                    self.instrumentation.on_reconnect(session.server.url, self._reconnect_count)
-                    self._emit(Reconnected(session.server.url))
+                    self.instrumentation.on_reconnect(sanitize_url(session.server.url), self._reconnect_count)
+                    self._emit(Reconnected(sanitize_url(session.server.url)))
                 error = await self._run_session(session)
                 self._session = None
                 if self._closing:
@@ -780,7 +824,7 @@ class Connection:
                         raise
                     last_error = exc
                     self._pool.mark_failure(server)
-                    log.info("connect to %s failed: %s", server.url, exc)
+                    log.info("connect to %s failed: %s", sanitize_url(server.url), exc)
                     continue
                 self._pool.mark_success(server)
                 return session
@@ -865,26 +909,33 @@ class Connection:
         tls_first = wants_tls if server.websocket else handshake_first
 
         async with asyncio.timeout(options.connect_timeout):
-            await transport.connect(
-                server.host,
-                server.port,
-                tls=(tls_config or TLSConfig()).resolve_context() if tls_first else None,
-                tls_hostname=tls_hostname if tls_first else None,
-            )
             try:
+                await transport.connect(
+                    server.host,
+                    server.port,
+                    tls=(tls_config or TLSConfig()).resolve_context() if tls_first else None,
+                    tls_hostname=tls_hostname if tls_first else None,
+                )
                 raw_info = await session.info_future
-                info: dict[str, Any] = json.loads(raw_info)
+                info = _decode_info(raw_info)
+                # Additional INFO may already have arrived in the same read.
+                # Keep only the latest topology, without committing it yet.
+                requires_upgrade = (
+                    wants_tls or bool(info.get("tls_required")) or bool(session.server_info.get("tls_required"))
+                )
+                info.update(session.server_info)
                 session.server_info = info
-                if info.get("max_payload"):
-                    self._max_payload = int(info["max_payload"])
-                    session.parser.set_max_payload(self._max_payload)
-                # A real server advertises the whole cluster in the very first
-                # INFO; async INFO frames only follow on membership changes.
-                self._merge_connect_urls(info, server)
+                if "max_payload" in info:
+                    session.parser.set_max_payload(info["max_payload"])
 
-                if not server.websocket and (wants_tls or info.get("tls_required")) and not handshake_first:
+                if not server.websocket and requires_upgrade and not handshake_first:
                     context = (tls_config or TLSConfig()).resolve_context()
                     await transport.upgrade_tls(context, tls_hostname)
+                    session.tls_required = True
+                    # TLS does not authenticate the preceding plaintext INFO.
+                    # Supported servers send fresh INFO inside TLS after the
+                    # first CONNECT/PING; only that topology may be trusted.
+                    info.pop("connect_urls", None)
 
                 try:
                     auth = await self._authenticate(server, info)
@@ -892,6 +943,13 @@ class Connection:
                     # Config-class failures are permanent: tag them so
                     # _establish_any fast-fails instead of trying the next server.
                     raise _ConfigClassError(exc) from exc
+                # An async authenticator can yield while another establishment
+                # INFO arrives. Honor any newly required TLS before emitting
+                # the resolved credentials; staging must never weaken it.
+                if not server.websocket and info.get("tls_required") and not session.tls_required:
+                    await transport.upgrade_tls((tls_config or TLSConfig()).resolve_context(), tls_hostname)
+                    session.tls_required = True
+                    info.pop("connect_urls", None)
                 payload = build_connect_payload(
                     version=_client_version(),
                     verbose=options.verbose,
@@ -907,6 +965,7 @@ class Connection:
                     signature=auth.signature,
                 )
                 connect_json = json.dumps(payload, separators=(",", ":")).encode()
+                session.handshake_started = True
                 transport.write(encode_connect(connect_json) + PING_FRAME)
                 await session.handshake_pong
             except BaseException:
@@ -921,7 +980,19 @@ class Connection:
         if session.lost_future.done():
             error = session.lost_future.result()
             raise error if error is not None else ConnectionClosedError("connection lost during handshake")
+        # A verified endpoint that required TLS stays secure on later attempts,
+        # even when a new plaintext INFO omits tls_required. Other explicitly
+        # configured pool entries keep their own transport/security policy.
+        if session.tls_required:
+            server.tls_required = True
+        if "max_payload" in session.server_info:
+            self._max_payload = session.server_info["max_payload"]
+            session.parser.set_max_payload(self._max_payload)
         session.running = True
+        # The first INFO is plaintext on normal TLS NATS connections. Neither
+        # it nor any subsequent establishment INFO may alter the shared pool
+        # until TLS, authentication and the handshake PONG have all succeeded.
+        self._merge_connect_urls(session.server_info, server, tls_required=session.tls_required)
         return session
 
     async def _authenticate(self, server: ParsedServer, info: dict[str, Any]) -> AuthResult:
@@ -1010,20 +1081,20 @@ class Connection:
     # -- inbound hooks -------------------------------------------------------
 
     def handle_async_info(self, session: _Session, raw: bytes) -> None:
-        try:
-            info: dict[str, Any] = json.loads(raw)
-        except ValueError:
-            log.warning("ignoring malformed async INFO")
-            return
+        info = _decode_info(raw)
+        if not session.running and session.server_info.get("tls_required"):
+            info["tls_required"] = True
         session.server_info.update(info)
+        if not session.running:
+            return
         if info.get("max_payload"):
             # A membership/config change can carry a new ceiling; keep the cached
             # publish limit and the inbound parser ceiling in step with it.
             self._max_payload = int(info["max_payload"])
             session.parser.set_max_payload(self._max_payload)
-        self._merge_connect_urls(info, session.server)
+        self._merge_connect_urls(info, session.server, tls_required=session.tls_required)
         if info.get("ldm"):
-            self._emit(LameDuck(session.server.url))
+            self._emit(LameDuck(sanitize_url(session.server.url)))
             if self.options.allow_reconnect and not self._closing:
                 # Migrate before the server evicts us — but on the NEXT loop
                 # iteration, so messages the server packed into this same
@@ -1031,26 +1102,21 @@ class Connection:
                 # graceful drain; truncating it mid-segment loses data.
                 asyncio.get_running_loop().call_soon(session.mark_lost, None)
 
-    def _merge_connect_urls(self, info: dict[str, Any], current: ParsedServer) -> None:
+    def _merge_connect_urls(
+        self, info: dict[str, Any], current: ParsedServer, *, tls_required: bool | None = None
+    ) -> None:
         urls = info.get("connect_urls")
         if not isinstance(urls, list) or not urls:
             return
         entries = [u for u in urls if isinstance(u, str)]
-        if current.websocket:
-            # connect_urls are bare host:port. Over a WebSocket connection the
-            # server still gossips them bare, so we re-scheme them to match the
-            # current connection (ws/wss) — mirroring nats.go connScheme(), which
-            # prefixes discovered URLs with the active scheme. This keeps the pool
-            # single-scheme and reachable (bare -> nats:// would be unusable here).
-            scheme = current.scheme  # "ws" or "wss"
-            # Unconditional re-scheme (nats.go connScheme()): even a gossiped
-            # url that arrives WITH a scheme is forced onto the connection's —
-            # anything else could smuggle a TCP server into a ws-only pool,
-            # which the construction-time mixing guard cannot catch here.
-            entries = [f"{scheme}://{u.partition('://')[2]}" if "://" in u else f"{scheme}://{u}" for u in entries]
-        added = self._pool.merge_discovered(entries, keep_key=current.key)
+        added = self._pool.merge_discovered(
+            entries,
+            keep_key=current.key,
+            source=current,
+            tls_required=current.tls_required if tls_required is None else tls_required,
+        )
         if added:
-            self._emit(ServersDiscovered(tuple(s.url for s in added)))
+            self._emit(ServersDiscovered(tuple(sanitize_url(s.url) for s in added)))
 
     def background_error(self, error: Exception) -> None:
         self.instrumentation.on_error(error)

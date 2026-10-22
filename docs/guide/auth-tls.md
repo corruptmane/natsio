@@ -1,5 +1,30 @@
 # Authentication & TLS
 
+Discovery is accepted only after TLS (when required), authentication, and the
+handshake PONG succeed. This includes additional INFO frames received during
+establishment. A failed certificate check or authentication attempt cannot add
+or prune servers. Discovered servers inherit the verified connection's
+transport and TLS requirement; discovery cannot supply credentials or paths.
+For an in-band TLS upgrade, plaintext discovery is discarded even if the later
+handshake succeeds: TLS cannot authenticate bytes sent before it. Supported
+servers send fresh INFO inside TLS after CONNECT/PING, so discovery may become
+visible just after connection completion. TLS-first and WSS INFO is already
+encrypted and follows the same authentication gate.
+
+Once an endpoint successfully negotiates TLS, later retries keep requiring it.
+Configured mixed `nats://`/`tls://` or `ws://`/`wss://` pools retain each entry's
+policy: an explicitly configured plaintext fallback can still receive option
+credentials in plaintext. For encryption across the whole pool, configure all
+endpoints securely or supply `TLSConfig`. WebSocket and TCP endpoints cannot
+be mixed. For certificates requiring a particular DNS name on discovered IP
+addresses, set `TLSConfig(hostname=...)` explicitly.
+
+Passwords, tokens, seeds, callback providers and credential-bearing URLs are
+omitted from configuration representations. Lifecycle events and instrumentation
+receive scheme/host/port labels without userinfo, paths or queries. The public
+`connected_url` property and configuration URL fields preserve the original
+value for compatibility; treat them as potentially sensitive.
+
 NATS supports several credential schemes. natsio exposes each one two ways: as a
 flat `connect` keyword for the common case, and as an `Authenticator` object for
 custom or callback-driven flows. TLS is configured with a standard-library

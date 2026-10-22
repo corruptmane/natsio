@@ -4,7 +4,7 @@ build-backend = "uv_build"
 
 [project]
 name = "natsio-natscontext"
-version = "0.1.0"
+version = "0.1.1"
 description = "Load `nats` CLI context files (ADR-21) into natsio connect options"
 readme = "README.md"
 license = "Apache-2.0"
@@ -19,7 +19,7 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Typing :: Typed",
 ]
-dependencies = ["natsio"]
+dependencies = ["natsio>=1.0.1"]
 
 [tool.uv.sources]
 natsio = { workspace = true }

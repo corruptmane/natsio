@@ -49,7 +49,7 @@ class Base64ValueCodec:
     def decode(self, value: bytes) -> bytes:
         padded = value + b"=" * (-len(value) % 4)
         try:
-            return base64.urlsafe_b64decode(padded)
+            return base64.b64decode(padded, altchars=b"-_", validate=True)
         except (binascii.Error, ValueError) as exc:
             raise ValueDecodeError(f"invalid base64 value: {exc}") from exc
 

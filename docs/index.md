@@ -46,8 +46,8 @@ asyncio.run(main())
 
 ## Performance
 
-natsio leads nats-py on **11 of 13** benchmark scenarios (core throughput,
-request/reply, and JetStream publish/consume), and targets nats.go parity.
+The benchmark harness compares natsio, nats-py and nats-core across core
+messaging and JetStream workloads. Results vary by scenario and environment.
 See the [Benchmarks](benchmarks.md) page for the harness, methodology, and the
 two scenarios where it does not lead.
 

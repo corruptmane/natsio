@@ -57,7 +57,7 @@ helper that returns a modified copy.
 | `max_control_line` | `4096` | Max protocol control-line length. |
 | `pending_msgs_limit` | `65_536` | Default per-subscription pending message limit. |
 | `pending_bytes_limit` | `64 MiB` | Default per-subscription pending byte limit. |
-| `max_pending_size` | `2 MiB` | Write-buffer high-water mark on the connected send path. |
+| `max_pending_size` | `2 MiB` | Positive encoded-frame admission limit on the connected publish path. |
 | `request_timeout` | `5.0` | Default deadline for `request` / `request_many`. |
 
 The pending limits set the *defaults* for new subscriptions; override them per
@@ -189,6 +189,25 @@ nc.connected_url   # the server currently attached to, or None
 nc.server_info     # the raw INFO dict from the server
 nc.max_payload     # server's max payload in bytes
 ```
+
+## Connected write admission
+
+`max_pending_size` must be a positive integer. Each connected publish is
+admitted only if its **complete encoded PUB/HPUB frame** fits: subject, reply
+inbox, headers, protocol framing and payload all count. An individually
+oversized frame raises `ConfigError` immediately, even if the server accepts
+its payload size. Increase the limit to accommodate the application's largest
+encoded frame. This does not change the independent server `max_payload` check.
+
+When an otherwise admissible frame waits for space, `flush_timeout` bounds the
+whole admission wait, including repeated wake-ups and competing publishers.
+Timeout raises `natsio.TimeoutError`; cancellation propagates and closing or
+losing the session wakes waiters. Internal control frames bypass this admission
+limit, and disconnected buffering retains its separate `reconnect_buf_size`
+policy (`0` selects the default, `-1` disables it). The connected limit has no
+unlimited `0`/`-1` mode. Subscription limits still treat non-positive values as
+unlimited. Timeout values must be finite and positive; reconnect jitter may be
+zero but must be finite and non-negative.
 
 ## ClientStatistics
 

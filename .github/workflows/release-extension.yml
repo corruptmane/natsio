@@ -1,54 +1,28 @@
-# Publishes an extension distribution to PyPI via trusted publishing (OIDC),
-# triggered by a tag of the form `<name>/vX.Y.Z` (e.g. `otel/v0.1.0`, which
-# builds and publishes `natsio-otel`). The core `natsio` release is a separate
-# workflow keyed on `v*` tags.
-#
-# One-time PyPI setup PER EXTENSION: add a trusted publisher to each PyPI
-# project (natsio-otel, natsio-kvcodec, natsio-counters, natsio-natscontext,
-# natsio-testing, natsio-schedules, natsio-jetstream-batch, natsio-sysclient,
-# natsio-pcgroups) pointing at this repository, workflow
-# `release-extension.yml`, environment `pypi`. Unclaimed names use a *pending*
-# publisher. The tag → distribution mapping is mechanical (`<name>/vX.Y.Z` →
-# `natsio-<name>`), so a new extension needs no change here — only the PyPI
-# trusted-publisher entry.
-
+# Trusted publishing: only artifacts from validation of the exact tag reach PyPI.
 name: Release extension
 
 on:
   push:
     tags: ["*/v*"]
 
+permissions:
+  contents: read
+
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    outputs:
-      package: ${{ steps.parse.outputs.package }}
-    steps:
-      - uses: actions/checkout@v4
-      - id: parse
-        # tag = <name>/vX.Y.Z  ->  package natsio-<name>
-        run: |
-          name="${GITHUB_REF_NAME%/v*}"
-          echo "package=natsio-${name}" >> "$GITHUB_OUTPUT"
-          echo "Building natsio-${name} from tag ${GITHUB_REF_NAME}"
-      - uses: astral-sh/setup-uv@v6
-      - run: uv build --package "${{ steps.parse.outputs.package }}"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: dist
-          path: dist/
+  validate:
+    uses: ./.github/workflows/validate-release.yml
 
   publish:
-    needs: build
+    needs: validate
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
       id-token: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          name: dist
+          name: release-dist
           path: dist/
-      - uses: pypa/gh-action-pypi-publish@release/v1
+      - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
         with:
           attestations: true

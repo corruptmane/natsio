@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.13"
 
 [manifest]
@@ -561,16 +561,16 @@ wheels = [
 
 [[package]]
 name = "nats-py"
-version = "2.15.0"
+version = "2.16.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/02/f0/fc5e93f2b0dd14a202590ad9d30eda1955ea872039b5204357348d0f4b1e/nats_py-2.15.0.tar.gz", hash = "sha256:6622c547d9a7d2313d9c147d46c386188f4ec2c7b5c9f9a0438a4d1b55f54a93", size = 75995, upload-time = "2026-06-05T07:34:03.904Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/2c/c8/739b72c9201081e48000884d476231873ac82f7247c43b33823eaf3c0bfb/nats_py-2.16.0.tar.gz", hash = "sha256:1d137ed7afc9b59033b3199324c6237df2016a5091935871344a787eba6b72fc", size = 79731, upload-time = "2026-09-16T07:47:21.843Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/db/a8/b55606c7c621fb813c8ec78baf201d2c78bf6051091ec0c7ada572999e95/nats_py-2.15.0-py3-none-any.whl", hash = "sha256:9f8d36aa52a9926a88b8f1d70cf1fdce0ad387941479b500ee9ab3e51073cefd", size = 90334, upload-time = "2026-06-05T07:34:02.81Z" },
+    { url = "https://files.pythonhosted.org/packages/48/a3/16cec37172144d3362d7551bb823a098b2b2903281fc095dfe4480b8c2fd/nats_py-2.16.0-py3-none-any.whl", hash = "sha256:aeb1ff123966c05833d26c7df7e1d54c1c6d32b612428b21677a2e921f1fecae", size = 93578, upload-time = "2026-09-16T07:47:20.799Z" },
 ]
 
 [[package]]
 name = "natsio"
-version = "1.0.0"
+version = "1.0.1"
 source = { editable = "natsio" }
 
 [package.optional-dependencies]
@@ -602,14 +602,14 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "nats-core", specifier = ">=0.2.0" },
-    { name = "nats-py", specifier = ">=2.15.0" },
+    { name = "nats-py", specifier = ">=2.16.0" },
     { name = "natsio", editable = "natsio" },
     { name = "natsio-testing", editable = "extensions/natsio-testing" },
 ]
 
 [[package]]
 name = "natsio-counters"
-version = "0.1.1"
+version = "0.1.2"
 source = { editable = "extensions/natsio-counters" }
 dependencies = [
     { name = "natsio" },
@@ -620,7 +620,7 @@ requires-dist = [{ name = "natsio", editable = "natsio" }]
 
 [[package]]
 name = "natsio-jetstream-batch"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "extensions/natsio-jetstream-batch" }
 dependencies = [
     { name = "natsio" },
@@ -631,7 +631,7 @@ requires-dist = [{ name = "natsio", editable = "natsio" }]
 
 [[package]]
 name = "natsio-kvcodec"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "extensions/natsio-kvcodec" }
 dependencies = [
     { name = "natsio" },
@@ -642,7 +642,7 @@ requires-dist = [{ name = "natsio", editable = "natsio" }]
 
 [[package]]
 name = "natsio-natscontext"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "extensions/natsio-natscontext" }
 dependencies = [
     { name = "natsio" },
@@ -653,7 +653,7 @@ requires-dist = [{ name = "natsio", editable = "natsio" }]
 
 [[package]]
 name = "natsio-otel"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "extensions/natsio-otel" }
 dependencies = [
     { name = "natsio" },
@@ -668,7 +668,7 @@ requires-dist = [
 
 [[package]]
 name = "natsio-pcgroups"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "extensions/natsio-pcgroups" }
 dependencies = [
     { name = "natsio" },
@@ -679,7 +679,7 @@ requires-dist = [{ name = "natsio", editable = "natsio" }]
 
 [[package]]
 name = "natsio-schedules"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "extensions/natsio-schedules" }
 dependencies = [
     { name = "natsio" },
@@ -690,7 +690,7 @@ requires-dist = [{ name = "natsio", editable = "natsio" }]
 
 [[package]]
 name = "natsio-sysclient"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "extensions/natsio-sysclient" }
 dependencies = [
     { name = "natsio" },
@@ -701,7 +701,7 @@ requires-dist = [{ name = "natsio", editable = "natsio" }]
 
 [[package]]
 name = "natsio-testing"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "extensions/natsio-testing" }
 dependencies = [
     { name = "natsio" },
@@ -1051,11 +1051,11 @@ wheels = [
 
 [[package]]
 name = "urllib3"
-version = "2.7.0"
+version = "2.8.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/53/0c/06f8b233b8fd13b9e5ee11424ef85419ba0d8ba0b3138bf360be2ff56953/urllib3-2.7.0.tar.gz", hash = "sha256:231e0ec3b63ceb14667c67be60f2f2c40a518cb38b03af60abc813da26505f4c", size = 433602, upload-time = "2026-05-07T16:13:18.596Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/e3/05/b17359e1cefb4f909b5e40b1b90a496d987258916dbbf88e842c729f510e/urllib3-2.8.0.tar.gz", hash = "sha256:63bf2ead4c879426ebf22ef2a781eeb4aa3b4ae798a0435506f8687fd5bb9b63", size = 458972, upload-time = "2026-09-15T19:29:36.253Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/7f/3e/5db95bcf282c52709639744ca2a8b149baccf648e39c8cc87553df9eae0c/urllib3-2.7.0-py3-none-any.whl", hash = "sha256:9fb4c81ebbb1ce9531cce37674bbc6f1360472bc18ca9a553ede278ef7276897", size = 131087, upload-time = "2026-05-07T16:13:17.151Z" },
+    { url = "https://files.pythonhosted.org/packages/92/9d/c4e665119135114480843e7ab388fa94d8480650450e6f8e26b70d323a4c/urllib3-2.8.0-py3-none-any.whl", hash = "sha256:0cf3cae568d36aa9576b28dfb35f11328f1cb974ca7647d9475ebb86c75ac6e3", size = 135717, upload-time = "2026-09-15T19:29:34.577Z" },
 ]
 
 [[package]]
